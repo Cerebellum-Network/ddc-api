@@ -6,6 +6,6 @@ pub mod signature;
 
 pub mod json;
 pub mod proto {
-	include!(concat!(env!("OUT_DIR"), "/activity.rs"));
-	include!(concat!(env!("OUT_DIR"), "/inspection.rs"));
+    include!(concat!(env!("OUT_DIR"), "/activity.rs"));
+    include!(concat!(env!("OUT_DIR"), "/inspection.rs"));
 }
