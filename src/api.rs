@@ -7,7 +7,7 @@ use ddc_primitives::{
     VERIFY_AGGREGATOR_RESPONSE_SIGNATURE,
 };
 use proto::{endpoint_itm_table::Variant as ItmTableVariant, ItmTable};
-use scale_info::prelude::vec;
+use sp_std::vec;
 use scale_info::{
     prelude::{format, string::String},
     TypeInfo,
