@@ -12,6 +12,7 @@ use scale_info::{
     TypeInfo,
 };
 use sp_runtime::offchain::{http, Duration};
+use sp_std::vec;
 use sp_std::{collections::btree_map::BTreeMap, prelude::*};
 
 use crate::{client::DdcClient, json, proto};
