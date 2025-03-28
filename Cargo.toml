@@ -1,0 +1,53 @@
+[package]
+name = "ddc-api"
+version = "7.3.0"
+authors = ["Cerebellum-Network"]
+edition = "2021"
+homepage = "https://cere.network/"
+license = "GPL-3.0-or-later WITH Classpath-exception-2.0"
+repository = "https://github.com/Cerebellum-Network/ddc-api"
+
+[dependencies]
+blake2 = { version = "0.10.6", default-features = false }
+codec = { package = "parity-scale-codec", version = "3.6.12", default-features = false, features = ["derive", "max-encoded-len"] }
+frame-support = { version = "38.0.0", default-features = false, features = ["tuples-96"] }
+frame-system = { version = "38.0.0", default-features = false }
+hex = { version = "0.4.3", default-features = false, features = ["alloc"] }
+log = { version = "0.4.22", default-features = false }
+polkadot-ckb-merkle-mountain-range = { version = "0.7.0", default-features = false }
+prost = { version = "0.13", default-features = false, features = ["prost-derive"] }
+scale-info = { version = "2.11.3", default-features = false, features = ["derive"] }
+serde = { version = "1.0.210", default-features = false, features = ["derive"] }
+serde_json = { version = "1.0.1", default-features = false }
+serde_with = { version = "3", default-features = false, features = ["base64", "macros"] }
+sp-application-crypto = { version = "38.0.0", default-features = false }
+sp-core = { version = "34.0.0", default-features = false, features = ["serde"] }
+sp-io = { version = "38.0.0", default-features = false }
+sp-runtime = { version = "39.0.1", default-features = false }
+sp-std = { version = "14.0.0", default-features = false }
+
+# Cere dependencies
+ddc-primitives = { git = "https://github.com/Cerebellum-Network/ddc-primitives.git", branch = "dev", default-features = false }
+
+[build-dependencies]
+prost-build = "0.13.3"
+
+[features]
+default = ["std"]
+std = [
+  "hex/std",
+  "blake2/std",
+  "polkadot-ckb-merkle-mountain-range/std",
+  "codec/std",
+  "scale-info/std",
+  "sp-core/std",
+  "sp-std/std",
+  "sp-runtime/std",
+  "sp-application-crypto/std",
+  "ddc-primitives/std",
+]
+runtime-benchmarks = [
+  "frame-support/runtime-benchmarks",
+  "frame-system/runtime-benchmarks",
+  "sp-runtime/runtime-benchmarks",
+]
