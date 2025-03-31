@@ -6,13 +6,13 @@ use ddc_primitives::{
     BucketId, ClusterId, EHDId, EhdEra, NodeParams, NodePubKey, PHDId, StorageNodeParams, TcaEra,
     VERIFY_AGGREGATOR_RESPONSE_SIGNATURE,
 };
-use proto::{endpoint_itm_table::Variant as ItmTableVariant, ItmTable};
-use sp_std::vec;
+use proto::{inspection::endpoint_itm_table::Variant as ItmTableVariant, inspection::ItmTable};
 use scale_info::{
     prelude::{format, string::String},
     TypeInfo,
 };
 use sp_runtime::offchain::{http, Duration};
+use sp_std::vec;
 use sp_std::{collections::btree_map::BTreeMap, prelude::*};
 
 use crate::{client::DdcClient, json, proto};
@@ -136,7 +136,7 @@ pub fn fetch_bucket_challenge_response<
     node_key: NodePubKey,
     bucket_id: BucketId,
     tree_node_ids: Vec<u64>,
-) -> Result<proto::ChallengeResponse, ApiError> {
+) -> Result<proto::activity::ChallengeResponse, ApiError> {
     let collectors = get_collectors_nodes::<AccountId, BlockNum, CM, NM>(cluster_id)?;
 
     for (key, collector_params) in collectors {
@@ -185,7 +185,7 @@ pub fn fetch_node_challenge_response<
     collector_key: NodePubKey,
     node_key: NodePubKey,
     tree_node_ids: Vec<u64>,
-) -> Result<proto::ChallengeResponse, ApiError> {
+) -> Result<proto::activity::ChallengeResponse, ApiError> {
     let collectors = get_collectors_nodes::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
     for (key, collector_params) in collectors {
@@ -563,7 +563,7 @@ pub fn get_inspection_state<
 >(
     cluster_id: &ClusterId,
     era: EhdEra,
-) -> Result<proto::EndpointItmGetPathsState, http::Error> {
+) -> Result<proto::inspection::EndpointItmGetPathsState, http::Error> {
     let (_, sync_node) = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
     let host = str::from_utf8(&sync_node.host).map_err(|_| http::Error::Unknown)?;
@@ -586,7 +586,7 @@ pub fn submit_inspection_report<
 >(
     cluster_id: &ClusterId,
     report_json_str: String, // todo(yahortsaryk): add .proto definition for `InspEraReport` type
-) -> Result<proto::EndpointItmPostPath, http::Error> {
+) -> Result<proto::inspection::EndpointItmPostPath, http::Error> {
     let (_, sync_node) = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
     let host = str::from_utf8(&sync_node.host).map_err(|_| http::Error::Unknown)?;
@@ -612,7 +612,7 @@ pub fn submit_assignments_table<
     table_json_str: String, /* todo(yahortsaryk): add .proto definition for
                              * `InspAssignmentsTable` type */
     inspector_hex: String,
-) -> Result<proto::EndpointItmSubmit, http::Error> {
+) -> Result<proto::inspection::EndpointItmSubmit, http::Error> {
     let (_, sync_node) = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
     let host = str::from_utf8(&sync_node.host).map_err(|_| http::Error::Unknown)?;
@@ -647,7 +647,7 @@ pub fn get_assignments_table<
         VERIFY_AGGREGATOR_RESPONSE_SIGNATURE,
     );
 
-    let table_response: proto::EndpointItmTable = client
+    let table_response: proto::inspection::EndpointItmTable = client
         .get_assignments_table(era)
         .map_err(|_| http::Error::Unknown)?;
 
@@ -676,7 +676,7 @@ pub fn post_itm_lease<
     cluster_id: &ClusterId,
     era: EhdEra,
     inspector_hex: String,
-) -> Result<proto::EndpointItmLease, http::Error> {
+) -> Result<proto::inspection::EndpointItmLease, http::Error> {
     let (_, sync_node) = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
     let host = str::from_utf8(&sync_node.host).map_err(|_| http::Error::Unknown)?;

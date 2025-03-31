@@ -15,7 +15,7 @@ pub trait Verify {
     fn verify(&self) -> Self::VerificationResult;
 }
 
-impl Verify for proto::ActivityAcknowledgment {
+impl Verify for proto::activity::ActivityAcknowledgment {
     type VerificationResult = bool;
 
     fn verify(&self) -> bool {
@@ -23,7 +23,7 @@ impl Verify for proto::ActivityAcknowledgment {
     }
 }
 
-impl Verify for proto::ActivityRecord {
+impl Verify for proto::activity::ActivityRecord {
     type VerificationResult = bool;
 
     fn verify(&self) -> bool {
@@ -47,7 +47,7 @@ impl Verify for proto::ActivityRecord {
     }
 }
 
-impl Verify for proto::ActivityRequest {
+impl Verify for proto::activity::ActivityRequest {
     type VerificationResult = bool;
 
     fn verify(&self) -> bool {
@@ -81,7 +81,7 @@ impl Verify for proto::ActivityRequest {
     }
 }
 
-impl Verify for proto::ActivityFulfillment {
+impl Verify for proto::activity::ActivityFulfillment {
     type VerificationResult = bool;
 
     fn verify(&self) -> bool {
@@ -101,7 +101,7 @@ impl Verify for proto::ActivityFulfillment {
     }
 }
 
-impl Verify for proto::challenge_response::proof::Record {
+impl Verify for proto::activity::challenge_response::proof::Record {
     type VerificationResult = bool;
 
     fn verify(&self) -> bool {
@@ -118,7 +118,7 @@ pub struct LeavesChallengeResult {
     pub unverified_leaves: Vec<u64>,
 }
 
-impl Verify for proto::ChallengeResponse {
+impl Verify for proto::activity::ChallengeResponse {
     type VerificationResult = LeavesChallengeResult;
 
     fn verify(&self) -> LeavesChallengeResult {
@@ -126,8 +126,9 @@ impl Verify for proto::ChallengeResponse {
 
         for proof in self.proofs.iter() {
             for leaf in proof.leaves.iter() {
-                if let Some(proto::challenge_response::proof::leaf::LeafVariant::Record(record)) =
-                    &leaf.leaf_variant
+                if let Some(
+                    proto::activity::challenge_response::proof::leaf::LeafVariant::Record(record),
+                ) = &leaf.leaf_variant
                 {
                     if !record.verify() {
                         unverified_leaves.push(proof.merkle_tree_node_id.into());
@@ -168,7 +169,7 @@ impl<T: Serialize> Verify for json::SignedJsonResponse<T> {
 }
 
 trait Signed {
-    fn get_signature(&self) -> Option<&proto::Signature>;
+    fn get_signature(&self) -> Option<&proto::signature::Signature>;
     fn reset_signature(&mut self);
 }
 
@@ -176,7 +177,7 @@ trait Signed {
 macro_rules! impl_signed {
 	(for $($t:ty),+) => {
 		$(impl Signed for $t {
-			fn get_signature(&self) -> Option<&proto::Signature> {
+			fn get_signature(&self) -> Option<&proto::signature::Signature> {
 				return self.signature.as_ref()
 			}
 
@@ -187,7 +188,7 @@ macro_rules! impl_signed {
 	}
 }
 
-impl_signed!(for proto::ActivityAcknowledgment, proto::ActivityRecord, proto::ActivityRequest);
+impl_signed!(for proto::activity::ActivityAcknowledgment, proto::activity::ActivityRecord, proto::activity::ActivityRequest);
 
 fn verify_signature(mut signed: impl Clone + Message + Signed) -> bool {
     let signature = match signed.get_signature() {
@@ -195,7 +196,7 @@ fn verify_signature(mut signed: impl Clone + Message + Signed) -> bool {
         None => return false,
     };
 
-    let algorithm: proto::signature::Algorithm = match signature.algorithm.try_into() {
+    let algorithm: proto::signature::signature::Algorithm = match signature.algorithm.try_into() {
         Ok(algo) => algo,
         Err(e) => {
             return {
@@ -205,7 +206,7 @@ fn verify_signature(mut signed: impl Clone + Message + Signed) -> bool {
         }
     };
     match algorithm {
-        proto::signature::Algorithm::Ed25519 => {
+        proto::signature::signature::Algorithm::Ed25519 => {
             let sig = match SignatureEd25519::try_from(signature.value.as_slice()) {
                 Ok(s) => s,
                 Err(e) => {
@@ -229,7 +230,7 @@ fn verify_signature(mut signed: impl Clone + Message + Signed) -> bool {
 
             is_verified
         }
-        proto::signature::Algorithm::Sr25519 => {
+        proto::signature::signature::Algorithm::Sr25519 => {
             let sig = match SignatureSr25519::try_from(signature.value.as_slice()) {
                 Ok(s) => s,
                 Err(e) => {
@@ -269,7 +270,7 @@ mod tests {
             #[prost(string, tag = "1")]
             pub foo: ::prost::alloc::string::String,
             #[prost(message, optional, tag = "2")]
-            pub signature: ::core::option::Option<proto::Signature>,
+            pub signature: ::core::option::Option<proto::signature::Signature>,
         }
         impl_signed!(for SignedProtoMsg);
 
@@ -289,8 +290,8 @@ mod tests {
         let mut invalid_signature_msg_signature_vec = invalid_signature_msg_signature.0.to_vec();
         invalid_signature_msg_signature_vec[0] =
             invalid_signature_msg_signature_vec[0].wrapping_add(1);
-        invalid_signature_msg.signature = Some(proto::Signature {
-            algorithm: proto::signature::Algorithm::Ed25519 as i32,
+        invalid_signature_msg.signature = Some(proto::signature::Signature {
+            algorithm: proto::signature::signature::Algorithm::Ed25519 as i32,
             value: invalid_signature_msg_signature_vec,
             signer: invalid_signature_msg_signer.public().0.to_vec(),
         });
@@ -303,8 +304,8 @@ mod tests {
         let valid_signature_msg_signer = sp_core::ed25519::Pair::generate().0;
         let valid_signature_msg_signature =
             valid_signature_msg_signer.sign(valid_signature_msg.encode_to_vec().as_slice());
-        valid_signature_msg.signature = Some(proto::Signature {
-            algorithm: proto::signature::Algorithm::Ed25519 as i32,
+        valid_signature_msg.signature = Some(proto::signature::Signature {
+            algorithm: proto::signature::signature::Algorithm::Ed25519 as i32,
             value: valid_signature_msg_signature.0.to_vec(),
             signer: valid_signature_msg_signer.public().0.to_vec(),
         });
@@ -315,8 +316,9 @@ mod tests {
     fn verify_challenge_response_works() {
         let challenge_response_serialized =
             include_bytes!("./test_data/challenge_response.pb").as_slice();
-        let challenge_response = proto::ChallengeResponse::decode(challenge_response_serialized)
-            .expect("protobuf fixture decoding failed, fix the test data");
+        let challenge_response =
+            proto::activity::ChallengeResponse::decode(challenge_response_serialized)
+                .expect("protobuf fixture decoding failed, fix the test data");
 
         let result = challenge_response.verify();
         assert!(result.is_verified);

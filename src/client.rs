@@ -9,7 +9,7 @@ use sp_runtime::offchain::{http, Duration};
 use sp_std::vec;
 
 use super::*;
-use crate::{json, signature::Verify};
+use crate::{json, verification::Verify};
 
 pub struct DdcClient<'a> {
     pub base_url: &'a str,
@@ -122,7 +122,7 @@ impl<'a> DdcClient<'a> {
         bucket_id: BucketId,
         node_id: &str,
         merkle_tree_node_id: Vec<u64>,
-    ) -> Result<proto::ChallengeResponse, http::Error> {
+    ) -> Result<proto::activity::ChallengeResponse, http::Error> {
         let url = format!(
             "{}/activity/buckets/{}/challenge?eraId={}&nodeId={}&merkleTreeNodeId={}",
             self.base_url,
@@ -133,8 +133,8 @@ impl<'a> DdcClient<'a> {
         );
         let response = self.get(&url, Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
-        let proto_response =
-            proto::ChallengeResponse::decode(body.as_slice()).map_err(|_| http::Error::Unknown)?;
+        let proto_response = proto::activity::ChallengeResponse::decode(body.as_slice())
+            .map_err(|_| http::Error::Unknown)?;
 
         Ok(proto_response)
     }
@@ -144,7 +144,7 @@ impl<'a> DdcClient<'a> {
         era_id: TcaEra,
         node_id: &str,
         merkle_tree_node_id: Vec<u64>,
-    ) -> Result<proto::ChallengeResponse, http::Error> {
+    ) -> Result<proto::activity::ChallengeResponse, http::Error> {
         let url = format!(
             "{}/activity/nodes/{}/challenge?eraId={}&merkleTreeNodeId={}",
             self.base_url,
@@ -154,8 +154,8 @@ impl<'a> DdcClient<'a> {
         );
         let response = self.get(&url, Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
-        let proto_response =
-            proto::ChallengeResponse::decode(body.as_slice()).map_err(|_| http::Error::Unknown)?;
+        let proto_response = proto::activity::ChallengeResponse::decode(body.as_slice())
+            .map_err(|_| http::Error::Unknown)?;
 
         Ok(proto_response)
     }
@@ -257,15 +257,15 @@ impl<'a> DdcClient<'a> {
     pub fn get_inspection_state(
         &self,
         era: EhdEra,
-    ) -> Result<proto::EndpointItmGetPathsState, http::Error> {
+    ) -> Result<proto::inspection::EndpointItmGetPathsState, http::Error> {
         let url = format!("{}/itm/state?eraId={}", self.base_url, era);
         let response = self.get(&url, Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
-        let proto_response =
-            proto::EndpointItmGetPathsState::decode(body.as_slice()).map_err(|e| {
-                log::info!("Decode ITM Path Report protobuf error: {:?}", e);
-                http::Error::Unknown
-            })?;
+        let proto_response = proto::inspection::EndpointItmGetPathsState::decode(body.as_slice())
+            .map_err(|e| {
+            log::info!("Decode ITM Path Report protobuf error: {:?}", e);
+            http::Error::Unknown
+        })?;
 
         Ok(proto_response)
     }
@@ -274,14 +274,14 @@ impl<'a> DdcClient<'a> {
         &self,
         report_json_str: String, /* todo(yahortsaryk): add .proto definition for `InspEraReport`
                                   * type */
-    ) -> Result<proto::EndpointItmPostPath, http::Error> {
+    ) -> Result<proto::inspection::EndpointItmPostPath, http::Error> {
         let url = format!("{}/itm/path", self.base_url);
         let body = report_json_str;
 
         let response = self.post(&url, body.into(), Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
 
-        let proto_response = proto::EndpointItmPostPath::decode(body.as_slice())
+        let proto_response = proto::inspection::EndpointItmPostPath::decode(body.as_slice())
             .map_err(|_| http::Error::Unknown)?;
         Ok(proto_response)
     }
@@ -311,7 +311,7 @@ impl<'a> DdcClient<'a> {
         table_json_str: String, /* todo(yahortsaryk): add .proto definition for
                                  * `InspAssignmentsTable` type */
         inspector_hex: String,
-    ) -> Result<proto::EndpointItmSubmit, http::Error> {
+    ) -> Result<proto::inspection::EndpointItmSubmit, http::Error> {
         let url = format!(
             "{}/itm/submit?eraId={}&inspectorKey={}",
             self.base_url, era, inspector_hex
@@ -321,21 +321,21 @@ impl<'a> DdcClient<'a> {
         let response = self.post(&url, body.into(), Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
 
-        let proto_response =
-            proto::EndpointItmSubmit::decode(body.as_slice()).map_err(|_| http::Error::Unknown)?;
+        let proto_response = proto::inspection::EndpointItmSubmit::decode(body.as_slice())
+            .map_err(|_| http::Error::Unknown)?;
         Ok(proto_response)
     }
 
     pub fn get_assignments_table(
         &self,
         era: EhdEra,
-    ) -> Result<proto::EndpointItmTable, http::Error> {
+    ) -> Result<proto::inspection::EndpointItmTable, http::Error> {
         let url = format!("{}/itm/table?eraId={}", self.base_url, era);
         let response = self.get(&url, Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
 
-        let proto_response =
-            proto::EndpointItmTable::decode(body.as_slice()).map_err(|_| http::Error::Unknown)?;
+        let proto_response = proto::inspection::EndpointItmTable::decode(body.as_slice())
+            .map_err(|_| http::Error::Unknown)?;
         Ok(proto_response)
     }
 
@@ -343,7 +343,7 @@ impl<'a> DdcClient<'a> {
         &self,
         era: EhdEra,
         inspector_hex: String,
-    ) -> Result<proto::EndpointItmLease, http::Error> {
+    ) -> Result<proto::inspection::EndpointItmLease, http::Error> {
         let url = format!(
             "{}/itm/lease?eraId={}&inspectorKey={}",
             self.base_url, era, inspector_hex
@@ -355,8 +355,8 @@ impl<'a> DdcClient<'a> {
         let response = self.post(&url, body.into(), Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
 
-        let proto_response =
-            proto::EndpointItmLease::decode(body.as_slice()).map_err(|_| http::Error::Unknown)?;
+        let proto_response = proto::inspection::EndpointItmLease::decode(body.as_slice())
+            .map_err(|_| http::Error::Unknown)?;
 
         Ok(proto_response)
     }
