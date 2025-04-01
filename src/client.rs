@@ -19,7 +19,7 @@ pub struct DdcClient<'a> {
     verify_sig: bool,
 }
 
-macro_rules! fetch_and_parse {
+macro_rules! fetch_and_parse_json {
     (
         // Self reference (the aggregator client)
         $self:expr,
@@ -146,7 +146,7 @@ impl<'a> DdcClient<'a> {
         }
 
         // Now let the macro do the rest
-        fetch_and_parse!(
+        fetch_and_parse_json!(
             self,
             url,
             Vec<json::BucketAggregateResponse>,
@@ -169,7 +169,7 @@ impl<'a> DdcClient<'a> {
             url = format!("{}&prevToken={}", url, prev_token);
         }
 
-        fetch_and_parse!(
+        fetch_and_parse_json!(
             self,
             url,
             Vec<json::NodeAggregateResponse>,
@@ -239,7 +239,7 @@ impl<'a> DdcClient<'a> {
 
     pub fn eras(&self) -> Result<Vec<json::AggregationEraResponse>, http::Error> {
         let mut url = format!("{}/activity/eras", self.base_url);
-        fetch_and_parse!(
+        fetch_and_parse_json!(
             self,
             url,
             Vec<json::AggregationEraResponse>,
@@ -249,7 +249,7 @@ impl<'a> DdcClient<'a> {
 
     pub fn payment_eras(&self) -> Result<Vec<json::EHDEra>, http::Error> {
         let mut url = format!("{}/activity/payment-eras", self.base_url);
-        fetch_and_parse!(self, url, Vec<json::EHDEra>, Vec<json::EHDEra>)
+        fetch_and_parse_json!(self, url, Vec<json::EHDEra>, Vec<json::EHDEra>)
     }
 
     pub fn traverse_era_historical_document(
@@ -265,7 +265,7 @@ impl<'a> DdcClient<'a> {
             tree_node_id,
             tree_levels_count
         );
-        fetch_and_parse!(self, url, Vec<json::EHDTreeNode>, Vec<json::EHDTreeNode>)
+        fetch_and_parse_json!(self, url, Vec<json::EHDTreeNode>, Vec<json::EHDTreeNode>)
     }
 
     pub fn traverse_partial_historical_document(
@@ -281,7 +281,7 @@ impl<'a> DdcClient<'a> {
             tree_node_id,
             tree_levels_count
         );
-        fetch_and_parse!(self, url, Vec<json::PHDTreeNode>, Vec<json::PHDTreeNode>)
+        fetch_and_parse_json!(self, url, Vec<json::PHDTreeNode>, Vec<json::PHDTreeNode>)
     }
 
     pub fn traverse_bucket_sub_aggregate(
@@ -296,7 +296,7 @@ impl<'a> DdcClient<'a> {
             "{}/activity/buckets/{}/traverse?eraId={}&nodeId={}&merkleTreeNodeId={}&levels={}",
             self.base_url, bucket_id, era_id, node_id, merkle_tree_node_id, levels,
         );
-        fetch_and_parse!(
+        fetch_and_parse_json!(
             self,
             url,
             json::MerkleTreeNodeResponse,
@@ -315,7 +315,7 @@ impl<'a> DdcClient<'a> {
             "{}/activity/nodes/{}/traverse?eraId={}&merkleTreeNodeId={}&levels={}",
             self.base_url, node_id, era_id, merkle_tree_node_id, levels,
         );
-        fetch_and_parse!(
+        fetch_and_parse_json!(
             self,
             url,
             json::MerkleTreeNodeResponse,
@@ -369,12 +369,12 @@ impl<'a> DdcClient<'a> {
     ) -> Result<BTreeMap<String, BTreeMap<String, json::InspPathException>>, http::Error> {
         let mut url = format!("{}/itm/exception?eraId={}", self.base_url, era);
 
-        fetch_and_parse!(self, url, BTreeMap<String, BTreeMap<String, json::InspPathException>>, BTreeMap<String, BTreeMap<String, json::InspPathException>>)
+        fetch_and_parse_json!(self, url, BTreeMap<String, BTreeMap<String, json::InspPathException>>, BTreeMap<String, BTreeMap<String, json::InspPathException>>)
     }
 
     pub fn check_grouping_collector(&self) -> Result<json::IsGCollectorResponse, http::Error> {
         let mut url = format!("{}/activity/is-grouping-collector", self.base_url);
-        fetch_and_parse!(
+        fetch_and_parse_json!(
             self,
             url,
             json::IsGCollectorResponse,

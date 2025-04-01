@@ -187,7 +187,7 @@ pub fn fetch_bucket_challenge_response<
         Ok(res) => Ok(res),
         Err(_) => {
             log::warn!(
-                "Collector from cluster {:?} is unavailable or responded unexpectedly. Key: {:?}, Host: {:?}",
+                "Collector from cluster {:?} is unavailable while challenging bucket sub-aggregate or responded unexpectedly. Key: {:?}, Host: {:?}",
                 cluster_id,
                 collector_key,
                 String::from_utf8_lossy(&collector_params.host)
@@ -234,7 +234,7 @@ pub fn fetch_node_challenge_response<
         Ok(res) => Ok(res),
         Err(_) => {
             log::warn!(
-                "Collector from cluster {:?} is unavailable or responded unexpectedly. Key: {:?}, Host: {:?}",
+                "Collector from cluster {:?} is unavailable while challenging node aggregate or responded unexpectedly. Key: {:?}, Host: {:?}",
                 cluster_id,
                 collector_key,
                 String::from_utf8_lossy(&collector_params.host)
