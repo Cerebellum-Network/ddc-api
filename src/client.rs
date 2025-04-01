@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 #![allow(clippy::from_over_into)]
 
+use api::{ApiResponse, SignedBy};
 use ddc_primitives::{BucketId, EHDId, EhdEra, PHDId, TcaEra};
 use prost::Message;
 use scale_info::prelude::{collections::BTreeMap, format, string::String, vec::Vec};
@@ -46,7 +47,11 @@ macro_rules! fetch_and_parse {
                 serde_json::from_slice(&body).map_err(|_| http::Error::Unknown)?;
 
             if !json_response.verify() {
-                log::debug!("Bad signature, req: {:?}, resp: {:?}", $url, json_response);
+                log::debug!(
+                    "Bad .json signature, req: {:?}, resp: {:?}",
+                    $url,
+                    json_response
+                );
                 return Err(http::Error::Unknown);
             }
 
@@ -55,6 +60,62 @@ macro_rules! fetch_and_parse {
             let json_response: $unsigned_ty =
                 serde_json::from_slice(&body).map_err(|_| http::Error::Unknown)?;
             Ok(json_response)
+        }
+    }};
+}
+
+macro_rules! fetch_and_parse_proto {
+    (
+        // Self reference (the aggregator client)
+        $self:expr,
+        // URL string variable (mutable)
+        $url:expr,
+        // The type of the JSON response if not signed
+        $unsigned_ty:ty,
+        // The type of the JSON response if signed
+        $signed_ty:ty
+    ) => {{
+        if $self.verify_sig {
+            if $url.contains('?') {
+                $url = format!("{}&sign=true", $url);
+            } else {
+                $url = format!("{}?sign=true", $url);
+            }
+        }
+
+        let response = $self.get(&$url, Accept::Protobuf)?;
+        let body = response.body().collect::<Vec<u8>>();
+
+        if $self.verify_sig {
+            let proto_signed_response = proto::signature::SignedResponse::decode(body.as_slice())
+                .map_err(|_| http::Error::Unknown)?;
+
+            if !proto_signed_response.verify() {
+                log::debug!(
+                    "Bad .proto signature, req: {:?}, resp: {:?}",
+                    $url,
+                    proto_signed_response
+                );
+                return Err(http::Error::Unknown);
+            }
+
+            let proto_response: $signed_ty =
+                <$signed_ty>::decode(proto_signed_response.payload.as_slice())
+                    .map_err(|_| http::Error::Unknown)?;
+            let signed_by = proto_signed_response
+                .signature
+                .map(|v| SignedBy {
+                    signer: v.signer,
+                    signature: v.value,
+                })
+                .ok_or(http::Error::Unknown)?;
+
+            Ok((proto_response, Some(signed_by)))
+        } else {
+            let proto_response: $unsigned_ty =
+                <$unsigned_ty>::decode(body.as_slice()).map_err(|_| http::Error::Unknown)?;
+
+            Ok((proto_response, None))
         }
     }};
 }
@@ -122,8 +183,8 @@ impl<'a> DdcClient<'a> {
         bucket_id: BucketId,
         node_id: &str,
         merkle_tree_node_id: Vec<u64>,
-    ) -> Result<proto::activity::ChallengeResponse, http::Error> {
-        let url = format!(
+    ) -> Result<ApiResponse<proto::activity::ChallengeResponse>, http::Error> {
+        let mut url = format!(
             "{}/activity/buckets/{}/challenge?eraId={}&nodeId={}&merkleTreeNodeId={}",
             self.base_url,
             bucket_id,
@@ -131,12 +192,20 @@ impl<'a> DdcClient<'a> {
             node_id,
             Self::merkle_tree_node_id_param(merkle_tree_node_id.as_slice()),
         );
-        let response = self.get(&url, Accept::Protobuf)?;
-        let body = response.body().collect::<Vec<u8>>();
-        let proto_response = proto::activity::ChallengeResponse::decode(body.as_slice())
-            .map_err(|_| http::Error::Unknown)?;
 
-        Ok(proto_response)
+        let (response, signed_by) = fetch_and_parse_proto!(
+            self,
+            url,
+            proto::activity::ChallengeResponse,
+            proto::activity::ChallengeResponse
+        )?;
+
+        let api_response = ApiResponse {
+            response,
+            signed_by,
+        };
+
+        Ok(api_response)
     }
 
     pub fn challenge_node_aggregate(
@@ -144,20 +213,28 @@ impl<'a> DdcClient<'a> {
         era_id: TcaEra,
         node_id: &str,
         merkle_tree_node_id: Vec<u64>,
-    ) -> Result<proto::activity::ChallengeResponse, http::Error> {
-        let url = format!(
+    ) -> Result<ApiResponse<proto::activity::ChallengeResponse>, http::Error> {
+        let mut url = format!(
             "{}/activity/nodes/{}/challenge?eraId={}&merkleTreeNodeId={}",
             self.base_url,
             node_id,
             era_id,
             Self::merkle_tree_node_id_param(merkle_tree_node_id.as_slice()),
         );
-        let response = self.get(&url, Accept::Protobuf)?;
-        let body = response.body().collect::<Vec<u8>>();
-        let proto_response = proto::activity::ChallengeResponse::decode(body.as_slice())
-            .map_err(|_| http::Error::Unknown)?;
 
-        Ok(proto_response)
+        let (response, signed_by) = fetch_and_parse_proto!(
+            self,
+            url,
+            proto::activity::ChallengeResponse,
+            proto::activity::ChallengeResponse
+        )?;
+
+        let api_response = ApiResponse {
+            response,
+            signed_by,
+        };
+
+        Ok(api_response)
     }
 
     pub fn eras(&self) -> Result<Vec<json::AggregationEraResponse>, http::Error> {
