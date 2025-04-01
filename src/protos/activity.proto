@@ -2,6 +2,8 @@
 // https://github.com/Cerebellum-Network/ddc-storage-node/tree/4a3d710.
 syntax = "proto3";
 
+import "protos/signature.proto";
+
 package activity;
 
 message ChallengeResponse {
@@ -55,7 +57,7 @@ message ActivityRecord {
 	ActivityFulfillment upstream = 2;
 	repeated ActivityFulfillment downstream = 3;
 	uint64 timestamp = 4;
-	Signature signature = 5;
+	signature.Signature signature = 5;
 	optional AuthToken authToken = 6; // set to authorize record in case if owner delegated access to bucket
 }
 
@@ -85,7 +87,7 @@ message ActivityRequest {
 	uint64 size = 8; // size of content stored or delivered
 
 	uint64 timestamp = 9;
-	Signature signature = 10;
+	signature.Signature signature = 10;
 }
 
 // we will get this on the server side streaming
@@ -94,7 +96,7 @@ message ActivityAcknowledgment {
 	string requestId = 1;
 	uint64 bytesStoredOrDelivered = 2;
 	uint64 timestamp = 3;
-	Signature signature = 4;
+	signature.Signature signature = 4;
 }
 
 message ActivityResponse {
@@ -119,7 +121,7 @@ message ActivityFulfillment {
 }
 
 message AuthToken {
-  Signature signature = 1; // signature signer is an issuer. issuer of first token should have an access on pallet level and subsequent tokens can skip 'issuer' and take 'subject' from previous token to verify signature
+  signature.Signature signature = 1; // signature signer is an issuer. issuer of first token should have an access on pallet level and subsequent tokens can skip 'issuer' and take 'subject' from previous token to verify signature
   Payload payload = 2;
 }
 
@@ -140,15 +142,3 @@ enum Operation {
   GET = 2;
   DELETE = 3;
 }
-
-message Signature {
-  Algorithm algorithm = 1;
-  bytes signer = 2;
-  bytes value = 3;
-
-  enum Algorithm {
-    ED_25519 = 0;
-    SR_25519 = 1;
-  }
-}
-

@@ -4,8 +4,8 @@ use core::str;
 
 use codec::{Decode, Encode};
 use ddc_primitives::{
-    AccountId32Hex, AggregateKey, AggregatorInfo, BucketId, BucketUsage, EHDId, NodePubKey,
-    NodeUsage, PHDId, TcaEra,
+    AccountId32Hex, AggregatorInfo, BucketId, BucketUsage, EHDId, NodePubKey, NodeUsage, PHDId,
+    TcaEra,
 };
 use scale_info::prelude::string::String;
 use serde::{Deserialize, Serialize};

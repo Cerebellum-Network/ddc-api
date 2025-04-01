@@ -6,16 +6,21 @@ use ddc_primitives::{
     BucketId, ClusterId, EHDId, EhdEra, NodeParams, NodePubKey, PHDId, StorageNodeParams, TcaEra,
     VERIFY_AGGREGATOR_RESPONSE_SIGNATURE,
 };
-use proto::{endpoint_itm_table::Variant as ItmTableVariant, ItmTable};
-use sp_std::vec;
+use proto::{inspection::endpoint_itm_table::Variant as ItmTableVariant, inspection::ItmTable};
 use scale_info::{
     prelude::{format, string::String},
     TypeInfo,
 };
+use serde::{Deserialize, Serialize};
 use sp_runtime::offchain::{http, Duration};
+use sp_std::vec;
 use sp_std::{collections::btree_map::BTreeMap, prelude::*};
 
-use crate::{client::DdcClient, json, proto};
+use crate::{
+    client::DdcClient,
+    json,
+    proto::{self},
+};
 
 pub const RESPONSE_TIMEOUT: u64 = 20000;
 pub const MAX_RETRIES_COUNT: u32 = 3;
@@ -38,6 +43,22 @@ pub enum ApiError {
     Unexpected,
     FailedToFetchPathsExceptions,
     FailedToFetchSyncNode { cluster_id: ClusterId },
+}
+
+#[derive(
+    Debug, Clone, Encode, Decode, Deserialize, Serialize, PartialOrd, Ord, TypeInfo, Eq, PartialEq,
+)]
+pub struct ApiResponse<R> {
+    pub response: R,
+    pub signed_by: Option<SignedBy>,
+}
+
+#[derive(
+    Debug, Clone, Encode, Decode, Deserialize, Serialize, PartialOrd, Ord, TypeInfo, Eq, PartialEq,
+)]
+pub struct SignedBy {
+    pub signer: Vec<u8>,
+    pub signature: Vec<u8>,
 }
 
 /// Fetch grouping collectors nodes of a cluster.
@@ -136,42 +157,44 @@ pub fn fetch_bucket_challenge_response<
     node_key: NodePubKey,
     bucket_id: BucketId,
     tree_node_ids: Vec<u64>,
-) -> Result<proto::ChallengeResponse, ApiError> {
+    verify_sig: bool,
+) -> Result<ApiResponse<proto::activity::ChallengeResponse>, ApiError> {
     let collectors = get_collectors_nodes::<AccountId, BlockNum, CM, NM>(cluster_id)?;
+    let Some((_, collector_params)) = collectors
+        .into_iter()
+        .find(|(key, _)| *key == collector_key)
+    else {
+        return Err(ApiError::FailedToFetchBucketChallenge);
+    };
 
-    for (key, collector_params) in collectors {
-        if key != collector_key {
-            continue;
-        };
+    let host = str::from_utf8(&collector_params.host)
+        .map_err(|_| ApiError::FailedToFetchBucketChallenge)?;
 
-        if let Ok(host) = str::from_utf8(&collector_params.host) {
-            let base_url = format!("http://{}:{}", host, collector_params.http_port);
-            let client = DdcClient::new(
-                &base_url,
-                Duration::from_millis(RESPONSE_TIMEOUT),
-                MAX_RETRIES_COUNT,
-                false, // no response signature verification for now
+    let base_url = format!("http://{}:{}", host, collector_params.http_port);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+        verify_sig,
+    );
+
+    match client.challenge_bucket_sub_aggregate(
+        tcaa_id,
+        bucket_id,
+        &Into::<String>::into(node_key.clone()),
+        tree_node_ids,
+    ) {
+        Ok(res) => Ok(res),
+        Err(_) => {
+            log::warn!(
+                "Collector from cluster {:?} is unavailable while challenging bucket sub-aggregate or responded unexpectedly. Key: {:?}, Host: {:?}",
+                cluster_id,
+                collector_key,
+                String::from_utf8_lossy(&collector_params.host)
             );
-
-            if let Ok(node_challenge_res) = client.challenge_bucket_sub_aggregate(
-                tcaa_id,
-                bucket_id,
-                Into::<String>::into(node_key.clone()).as_str(),
-                tree_node_ids.clone(),
-            ) {
-                return Ok(node_challenge_res);
-            } else {
-                log::warn!(
-                    "Collector from cluster {:?} is unavailable while challenging bucket sub-aggregate or responded with unexpected body. Key: {:?} Host: {:?}",
-                    cluster_id,
-                    collector_key,
-                    String::from_utf8(collector_params.host)
-                );
-            }
+            Err(ApiError::FailedToFetchBucketChallenge)
         }
     }
-
-    Err(ApiError::FailedToFetchBucketChallenge)
 }
 
 pub fn fetch_node_challenge_response<
@@ -185,41 +208,40 @@ pub fn fetch_node_challenge_response<
     collector_key: NodePubKey,
     node_key: NodePubKey,
     tree_node_ids: Vec<u64>,
-) -> Result<proto::ChallengeResponse, ApiError> {
+    verify_sig: bool,
+) -> Result<ApiResponse<proto::activity::ChallengeResponse>, ApiError> {
     let collectors = get_collectors_nodes::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
-    for (key, collector_params) in collectors {
-        if key != collector_key {
-            continue;
-        };
+    let Some((_, collector_params)) = collectors
+        .into_iter()
+        .find(|(key, _)| *key == collector_key)
+    else {
+        return Err(ApiError::FailedToFetchNodeChallenge);
+    };
 
-        if let Ok(host) = str::from_utf8(&collector_params.host) {
-            let base_url = format!("http://{}:{}", host, collector_params.http_port);
-            let client = DdcClient::new(
-                &base_url,
-                Duration::from_millis(RESPONSE_TIMEOUT),
-                MAX_RETRIES_COUNT,
-                false, // no response signature verification for now
+    let host =
+        str::from_utf8(&collector_params.host).map_err(|_| ApiError::FailedToFetchNodeChallenge)?;
+
+    let base_url = format!("http://{}:{}", host, collector_params.http_port);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+        verify_sig,
+    );
+
+    match client.challenge_node_aggregate(tcaa_id, &Into::<String>::into(node_key), tree_node_ids) {
+        Ok(res) => Ok(res),
+        Err(_) => {
+            log::warn!(
+                "Collector from cluster {:?} is unavailable while challenging node aggregate or responded unexpectedly. Key: {:?}, Host: {:?}",
+                cluster_id,
+                collector_key,
+                String::from_utf8_lossy(&collector_params.host)
             );
-
-            if let Ok(node_challenge_res) = client.challenge_node_aggregate(
-                tcaa_id,
-                Into::<String>::into(node_key.clone()).as_str(),
-                tree_node_ids.clone(),
-            ) {
-                return Ok(node_challenge_res);
-            } else {
-                log::warn!(
-							"Collector from cluster {:?} is unavailable while challenging node aggregate or responded with unexpected body. Key: {:?} Host: {:?}",
-							cluster_id,
-							collector_key,
-							String::from_utf8(collector_params.host)
-						);
-            }
+            Err(ApiError::FailedToFetchNodeChallenge)
         }
     }
-
-    Err(ApiError::FailedToFetchNodeChallenge)
 }
 
 /// Fetch customer usage.
@@ -563,7 +585,7 @@ pub fn get_inspection_state<
 >(
     cluster_id: &ClusterId,
     era: EhdEra,
-) -> Result<proto::EndpointItmGetPathsState, http::Error> {
+) -> Result<proto::inspection::EndpointItmGetPathsState, http::Error> {
     let (_, sync_node) = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
     let host = str::from_utf8(&sync_node.host).map_err(|_| http::Error::Unknown)?;
@@ -586,7 +608,7 @@ pub fn submit_inspection_report<
 >(
     cluster_id: &ClusterId,
     report_json_str: String, // todo(yahortsaryk): add .proto definition for `InspEraReport` type
-) -> Result<proto::EndpointItmPostPath, http::Error> {
+) -> Result<proto::inspection::EndpointItmPostPath, http::Error> {
     let (_, sync_node) = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
     let host = str::from_utf8(&sync_node.host).map_err(|_| http::Error::Unknown)?;
@@ -612,7 +634,7 @@ pub fn submit_assignments_table<
     table_json_str: String, /* todo(yahortsaryk): add .proto definition for
                              * `InspAssignmentsTable` type */
     inspector_hex: String,
-) -> Result<proto::EndpointItmSubmit, http::Error> {
+) -> Result<proto::inspection::EndpointItmSubmit, http::Error> {
     let (_, sync_node) = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
     let host = str::from_utf8(&sync_node.host).map_err(|_| http::Error::Unknown)?;
@@ -647,7 +669,7 @@ pub fn get_assignments_table<
         VERIFY_AGGREGATOR_RESPONSE_SIGNATURE,
     );
 
-    let table_response: proto::EndpointItmTable = client
+    let table_response: proto::inspection::EndpointItmTable = client
         .get_assignments_table(era)
         .map_err(|_| http::Error::Unknown)?;
 
@@ -676,7 +698,7 @@ pub fn post_itm_lease<
     cluster_id: &ClusterId,
     era: EhdEra,
     inspector_hex: String,
-) -> Result<proto::EndpointItmLease, http::Error> {
+) -> Result<proto::inspection::EndpointItmLease, http::Error> {
     let (_, sync_node) = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
     let host = str::from_utf8(&sync_node.host).map_err(|_| http::Error::Unknown)?;

@@ -2,10 +2,19 @@
 
 pub mod api;
 pub mod client;
-pub mod signature;
+pub mod verification;
 
 pub mod json;
 pub mod proto {
-    include!(concat!(env!("OUT_DIR"), "/activity.rs"));
-    include!(concat!(env!("OUT_DIR"), "/inspection.rs"));
+    pub mod signature {
+        include!(concat!(env!("OUT_DIR"), "/signature.rs"));
+    }
+
+    pub mod activity {
+        include!(concat!(env!("OUT_DIR"), "/activity.rs"));
+    }
+
+    pub mod inspection {
+        include!(concat!(env!("OUT_DIR"), "/inspection.rs"));
+    }
 }
