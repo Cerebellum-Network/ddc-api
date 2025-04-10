@@ -4,8 +4,8 @@ use core::str;
 
 use codec::{Decode, Encode};
 use ddc_primitives::{
-    AccountId32Hex, AggregatorInfo, BucketId, BucketUsage, EHDId, NodePubKey, NodeUsage, PHDId,
-    TcaEra,
+    AccountId32Hex, AggregatorInfo, BucketId, BucketUsage, EHDId, EhdEra, NodePubKey, NodeUsage,
+    PHDId, TcaEra,
 };
 use scale_info::prelude::string::String;
 use serde::{Deserialize, Serialize};
@@ -456,7 +456,26 @@ pub struct IsGCollectorResponse {
     pub is_g_collector: bool,
 }
 
-// todo(yahortsaryk): remove after adding .proto for `InspPathException` type
+pub type PathId = String;
+
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode, PartialOrd, Ord, Eq, PartialEq)]
+pub struct InspSummary {
+    pub era: EhdEra,
+    pub verified_paths: BTreeMap<PathId, VerifiedPath>,
+    pub unverified_paths: BTreeMap<PathId, UnverifiedPath>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode, PartialOrd, Ord, Eq, PartialEq)]
+pub struct VerifiedPath {
+    pub result_hash: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode, PartialOrd, Ord, Eq, PartialEq)]
+pub struct UnverifiedPath {
+    pub result_hash: String,
+    pub exception: InspPathException,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode, PartialOrd, Ord, Eq, PartialEq)]
 pub enum InspPathException {
     NodeAR { bad_leaves_ids: Vec<u64> },
