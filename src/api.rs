@@ -3,7 +3,7 @@ use core::str;
 use codec::{Decode, Encode};
 use ddc_primitives::{
     traits::{ClusterManager, NodeManager},
-    BucketId, ClusterId, EHDId, EhdEra, NodeParams, NodePubKey, PHDId, StorageNodeParams, TcaEra,
+    BucketId, ClusterId, EhdEra, NodeParams, NodePubKey, StorageNodeParams, TcaEra,
     VERIFY_AGGREGATOR_RESPONSE_SIGNATURE,
 };
 use proto::{inspection::endpoint_itm_table::Variant as ItmTableVariant, inspection::ItmTable};
@@ -33,6 +33,7 @@ pub const NODES_AGGREGATES_FETCH_BATCH_SIZE: usize = 10;
 pub enum ApiError {
     NodeRetrievalError,
     FailedToFetchCollectors { cluster_id: ClusterId },
+    FailedToFetchCollectorNode { cluster_id: ClusterId },
     FailedToFetchBucketChallenge,
     FailedToFetchNodeChallenge,
     FailedToFetchBucketAggregate,
@@ -40,9 +41,11 @@ pub enum ApiError {
     FailedToFetchTraversedPHD,
     FailedToFetchPaymentEra,
     FailedToFetchGCollectors { cluster_id: ClusterId },
+    FailedToFetchGCollectorNode { cluster_id: ClusterId },
     Unexpected,
     FailedToFetchPathsExceptions,
     FailedToFetchSyncNode { cluster_id: ClusterId },
+    FailedToFetchInspSummary { cluster_id: ClusterId },
 }
 
 #[derive(
@@ -84,7 +87,7 @@ pub fn get_g_collectors_nodes<
     Ok(g_collectors)
 }
 
-pub fn get_sync_node<
+pub fn get_g_collector_node<
     AccountId,
     BlockNumber,
     CM: ClusterManager<AccountId, BlockNumber>,
@@ -101,6 +104,18 @@ pub fn get_sync_node<
     };
 
     Ok(g_collector.clone())
+}
+
+pub fn get_sync_node<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
+    cluster_id: &ClusterId,
+) -> Result<(NodePubKey, StorageNodeParams), http::Error> {
+    // todo(yahortsaryk): replace G-Collector with Sync node once it is supported at DDC
+    get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id)
 }
 
 /// Fetch customer usage.
@@ -323,45 +338,47 @@ pub fn fetch_traversed_era_historical_document<
     NM: NodeManager<AccountId>,
 >(
     cluster_id: &ClusterId,
-    ehd_id: EHDId,
+    era: EhdEra,
     tree_node_id: u32,
     tree_levels_count: u32,
 ) -> Result<Vec<json::EHDTreeNode>, ApiError> {
-    let collectors = get_collectors_nodes::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
-
-    for (collector_key, collector_params) in collectors {
-        if collector_key != ehd_id.1 {
-            continue;
-        };
-
-        if let Ok(host) = str::from_utf8(&collector_params.host) {
-            let base_url = format!("http://{}:{}", host, collector_params.http_port);
-            let client = DdcClient::new(
-                &base_url,
-                Duration::from_millis(RESPONSE_TIMEOUT),
-                MAX_RETRIES_COUNT,
-                false, // no response signature verification for now
-            );
-
-            if let Ok(traversed_ehd) = client.traverse_era_historical_document(
-                ehd_id.clone(),
-                tree_node_id,
-                tree_levels_count,
-            ) {
-                // proceed with the first available EHD record for the prototype
-                return Ok(traversed_ehd);
-            } else {
-                log::warn!(
-							"⚠️  Collector from cluster {:?} is unavailable while fetching EHD record or responded with unexpected body. Key: {:?} Host: {:?}",
-							cluster_id,
-							collector_key,
-							String::from_utf8(collector_params.host)
-						);
+    let (g_collector_key, g_collector_params) =
+        get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|_| {
+            ApiError::FailedToFetchGCollectorNode {
+                cluster_id: *cluster_id,
             }
+        })?;
+    let host = str::from_utf8(&g_collector_params.host).map_err(|_| {
+        ApiError::FailedToFetchGCollectorNode {
+            cluster_id: *cluster_id,
         }
-    }
+    })?;
 
-    Err(ApiError::FailedToFetchTraversedEHD)
+    let base_url = format!("http://{}:{}", host, g_collector_params.http_port);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+        false, // no response signature verification for now
+    );
+
+    let traversed_ehd = client.traverse_era_historical_document(
+        *cluster_id,
+        era,
+        g_collector_key.clone(),
+        tree_node_id,
+        tree_levels_count,
+    ).map_err(|_| {
+        log::error!(
+            "⚠️  G-Collector from cluster {:?} is unavailable while fetching EHD record or responded with unexpected body. Key: {:?} Host: {:?}",
+            cluster_id,
+            g_collector_key,
+            String::from_utf8(g_collector_params.host)
+        );
+        ApiError::FailedToFetchTraversedEHD
+    })?;
+    // proceed with the first available EHD record for the prototype
+    Ok(traversed_ehd)
 }
 
 /// Traverse PHD record.
@@ -381,45 +398,48 @@ pub fn fetch_traversed_partial_historical_document<
     NM: NodeManager<AccountId>,
 >(
     cluster_id: &ClusterId,
-    phd_id: PHDId,
+    era: EhdEra,
+    collector: NodePubKey,
     tree_node_id: u32,
     tree_levels_count: u32,
 ) -> Result<Vec<json::PHDTreeNode>, ApiError> {
     let collectors = get_collectors_nodes::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
-
-    for (collector_key, collector_params) in collectors {
-        if collector_key != phd_id.0 {
-            continue;
-        };
-
-        if let Ok(host) = str::from_utf8(&collector_params.host) {
-            let base_url = format!("http://{}:{}", host, collector_params.http_port);
-            let client = DdcClient::new(
-                &base_url,
-                Duration::from_millis(RESPONSE_TIMEOUT),
-                MAX_RETRIES_COUNT,
-                false, // no response signature verification for now
-            );
-
-            if let Ok(traversed_phd) = client.traverse_partial_historical_document(
-                phd_id.clone(),
-                tree_node_id,
-                tree_levels_count,
-            ) {
-                // proceed with the first available EHD record for the prototype
-                return Ok(traversed_phd);
-            } else {
-                log::warn!(
-							"⚠️  Collector from cluster {:?} is unavailable while fetching PHD record or responded with unexpected body. Key: {:?} Host: {:?}",
-							cluster_id,
-							collector_key,
-							String::from_utf8(collector_params.host)
-						);
-            }
+    let (collector_key, collector_params) = collectors
+        .into_iter()
+        .find(|(key, _)| *key == collector)
+        .ok_or(ApiError::FailedToFetchCollectorNode {
+            cluster_id: *cluster_id,
+        })?;
+    let host = str::from_utf8(&collector_params.host).map_err(|_| {
+        ApiError::FailedToFetchCollectorNode {
+            cluster_id: *cluster_id,
         }
-    }
+    })?;
 
-    Err(ApiError::FailedToFetchTraversedPHD)
+    let base_url = format!("http://{}:{}", host, collector_params.http_port);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+        false, // no response signature verification for now
+    );
+
+    let traversed_phd = client.traverse_partial_historical_document(
+        era,
+        collector_key.clone(),
+        tree_node_id,
+        tree_levels_count,
+    ).map_err(|_| {
+        log::error!(
+            "⚠️  Collector from cluster {:?} is unavailable while fetching PHD record or responded with unexpected body. Key: {:?} Host: {:?}",
+            cluster_id,
+            collector_key,
+            String::from_utf8(collector_params.host)
+        );
+        ApiError::FailedToFetchTraversedPHD
+    })?;
+
+    Ok(traversed_phd)
 }
 
 /// Fetch EHD merkle root node.
@@ -434,10 +454,10 @@ pub fn get_ehd_root<
     NM: NodeManager<AccountId>,
 >(
     cluster_id: &ClusterId,
-    ehd_id: EHDId,
+    era: EhdEra,
 ) -> Result<json::EHDTreeNode, ApiError> {
     fetch_traversed_era_historical_document::<AccountId, BlockNumber, CM, NM>(
-        cluster_id, ehd_id, 1, 1,
+        cluster_id, era, 1, 1,
     )?
     .first()
     .ok_or(ApiError::FailedToFetchTraversedEHD)
@@ -456,10 +476,11 @@ pub fn get_phd_root<
     NM: NodeManager<AccountId>,
 >(
     cluster_id: &ClusterId,
-    phd_id: PHDId,
+    era: EhdEra,
+    collector: NodePubKey,
 ) -> Result<json::PHDTreeNode, ApiError> {
     fetch_traversed_partial_historical_document::<AccountId, BlockNumber, CM, NM>(
-        cluster_id, phd_id, 1, 1,
+        cluster_id, era, collector, 1, 1,
     )?
     .first()
     .ok_or(ApiError::FailedToFetchTraversedPHD)
@@ -711,4 +732,36 @@ pub fn post_itm_lease<
     );
 
     client.post_itm_lease(era, inspector_hex)
+}
+
+pub fn get_inspection_summary<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
+    cluster_id: &ClusterId,
+    era: EhdEra,
+) -> Result<json::InspSummary, ApiError> {
+    let (_, sync_node) =
+        get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|_| {
+            ApiError::FailedToFetchSyncNode {
+                cluster_id: *cluster_id,
+            }
+        })?;
+
+    let host = str::from_utf8(&sync_node.host).map_err(|_| ApiError::Unexpected)?;
+    let base_url = format!("http://{}:{}", host, sync_node.http_port);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+        VERIFY_AGGREGATOR_RESPONSE_SIGNATURE, // no response signature verification for now
+    );
+
+    client
+        .get_inspection_summary(era)
+        .map_err(|_| ApiError::FailedToFetchInspSummary {
+            cluster_id: *cluster_id,
+        })
 }

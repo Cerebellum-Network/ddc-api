@@ -2,7 +2,7 @@
 #![allow(clippy::from_over_into)]
 
 use api::{ApiResponse, SignedBy};
-use ddc_primitives::{BucketId, EHDId, EhdEra, PHDId, TcaEra};
+use ddc_primitives::{BucketId, ClusterId, EHDId, EhdEra, NodePubKey, PHDId, TcaEra};
 use prost::Message;
 use scale_info::prelude::{collections::BTreeMap, format, string::String, vec::Vec};
 use sp_io::offchain::timestamp;
@@ -254,10 +254,13 @@ impl<'a> DdcClient<'a> {
 
     pub fn traverse_era_historical_document(
         &self,
-        ehd_id: EHDId,
+        cluster_id: ClusterId,
+        era: EhdEra,
+        g_collector: NodePubKey,
         tree_node_id: u32,
         tree_levels_count: u32,
     ) -> Result<Vec<json::EHDTreeNode>, http::Error> {
+        let ehd_id = EHDId(cluster_id, g_collector, era);
         let mut url = format!(
             "{}/activity/ehds/{}/traverse?merkleTreeNodeId={}&levels={}",
             self.base_url,
@@ -270,10 +273,12 @@ impl<'a> DdcClient<'a> {
 
     pub fn traverse_partial_historical_document(
         &self,
-        phd_id: PHDId,
+        era: EhdEra,
+        collector: NodePubKey,
         tree_node_id: u32,
         tree_levels_count: u32,
     ) -> Result<Vec<json::PHDTreeNode>, http::Error> {
+        let phd_id = PHDId(collector, era);
         let mut url = format!(
             "{}/activity/phds/{}/traverse?merkleTreeNodeId={}&levels={}",
             self.base_url,
@@ -370,6 +375,12 @@ impl<'a> DdcClient<'a> {
         let mut url = format!("{}/itm/exception?eraId={}", self.base_url, era);
 
         fetch_and_parse_json!(self, url, BTreeMap<String, BTreeMap<String, json::InspPathException>>, BTreeMap<String, BTreeMap<String, json::InspPathException>>)
+    }
+
+    pub fn get_inspection_summary(&self, era: EhdEra) -> Result<json::InspSummary, http::Error> {
+        let mut url = format!("{}/itm/summary?eraId={}", self.base_url, era);
+
+        fetch_and_parse_json!(self, url, json::InspSummary, json::InspSummary)
     }
 
     pub fn check_grouping_collector(&self) -> Result<json::IsGCollectorResponse, http::Error> {
