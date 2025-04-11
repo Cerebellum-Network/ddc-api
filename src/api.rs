@@ -13,7 +13,6 @@ use scale_info::{
 };
 use serde::{Deserialize, Serialize};
 use sp_runtime::offchain::{http, Duration};
-use sp_std::vec;
 use sp_std::{collections::btree_map::BTreeMap, prelude::*};
 
 use crate::{
@@ -39,13 +38,15 @@ pub enum ApiError {
     FailedToFetchBucketAggregate,
     FailedToFetchTraversedEHD,
     FailedToFetchTraversedPHD,
-    FailedToFetchPaymentEra,
+    FailedToFetchEra,
     FailedToFetchGCollectors { cluster_id: ClusterId },
     FailedToFetchGCollectorNode { cluster_id: ClusterId },
     Unexpected,
     FailedToFetchPathsExceptions,
     FailedToFetchSyncNode { cluster_id: ClusterId },
     FailedToFetchInspSummary { cluster_id: ClusterId },
+    FailedToFetchInspectedEras { cluster_id: ClusterId },
+    FailedToFetchProcessedEras { cluster_id: ClusterId },
 }
 
 #[derive(
@@ -87,6 +88,10 @@ pub fn get_g_collectors_nodes<
     Ok(g_collectors)
 }
 
+/// Fetch G-Collector node.
+///
+/// Parameters:
+/// - `cluster_id`: Cluster id of a cluster.
 pub fn get_g_collector_node<
     AccountId,
     BlockNumber,
@@ -446,7 +451,7 @@ pub fn fetch_traversed_partial_historical_document<
 ///
 /// Parameters:
 /// - `cluster_id`: Cluster Id
-/// - `phd_id`: EHD id
+/// - `era`: EHD era
 pub fn get_ehd_root<
     AccountId,
     BlockNumber,
@@ -468,7 +473,8 @@ pub fn get_ehd_root<
 ///
 /// Parameters:
 /// - `cluster_id`: Cluster Id
-/// - `phd_id`: PHD id
+/// - `era`: EHD era
+/// - `collector`: Collector node key
 pub fn get_phd_root<
     AccountId,
     BlockNumber,
@@ -490,9 +496,33 @@ pub fn get_phd_root<
 /// Fetch processed EHD eras.
 ///
 /// Parameters:
-/// - `node_params`: DAC node parameters
+/// - `cluster_id`: Cluster Id
 #[allow(dead_code)]
-pub fn fetch_processed_ehd_eras(
+pub fn fetch_processed_eras_for_cluster<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
+    cluster_id: &ClusterId,
+) -> Result<Vec<json::EHDEra>, ApiError> {
+    let (_, node_params) =
+        get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|_| {
+            ApiError::FailedToFetchSyncNode {
+                cluster_id: *cluster_id,
+            }
+        })?;
+
+    fetch_processed_eras(&node_params).map_err(|_| ApiError::FailedToFetchProcessedEras {
+        cluster_id: *cluster_id,
+    })
+}
+
+/// Fetch processed payment era era
+///
+/// Parameters:
+/// - `node_params`: Sync node parameters
+pub fn fetch_processed_eras(
     node_params: &StorageNodeParams,
 ) -> Result<Vec<json::EHDEra>, http::Error> {
     let host = str::from_utf8(&node_params.host).map_err(|_| http::Error::Unknown)?;
@@ -505,67 +535,103 @@ pub fn fetch_processed_ehd_eras(
     );
 
     let response = client.payment_eras()?;
-
     Ok(response
         .into_iter()
         .filter(|e| e.status == "EHD_PROCESSED")
         .collect::<Vec<_>>())
 }
 
-/// Fetch processed payment era for across all nodes.
+/// Fetch inspected EHD eras.
 ///
 /// Parameters:
-/// - `cluster_id`: Cluster Id
-/// - `g_collector_key`: G-collector node key to fetch the payment eras from
 /// - `node_params`: DAC node parameters
-pub fn fetch_processed_eras(
+#[allow(dead_code)]
+pub fn fetch_inspected_eras_for_cluster<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
     cluster_id: &ClusterId,
-    g_collectors: &[(NodePubKey, StorageNodeParams)],
-) -> Result<Vec<Vec<json::EHDEra>>, ApiError> {
-    let mut processed_eras_by_nodes: Vec<Vec<json::EHDEra>> = Vec::new();
-
-    for (collector_key, node_params) in g_collectors {
-        let processed_payment_eras = fetch_processed_ehd_eras(node_params);
-        if processed_payment_eras.is_err() {
-            log::warn!(
-						"Aggregator from cluster {:?} is unavailable while fetching processed eras. Key: {:?} Host: {:?}",
-						cluster_id,
-						collector_key,
-						String::from_utf8(node_params.host.clone())
-					);
-            // Skip unavailable aggregators and continue with available ones
-            continue;
-        } else {
-            let eras = processed_payment_eras.map_err(|_| ApiError::FailedToFetchPaymentEra)?;
-            if !eras.is_empty() {
-                processed_eras_by_nodes.push(eras.into_iter().collect::<Vec<_>>());
+) -> Result<Vec<json::EHDEra>, ApiError> {
+    let (_, node_params) =
+        get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|_| {
+            ApiError::FailedToFetchSyncNode {
+                cluster_id: *cluster_id,
             }
-        }
-    }
+        })?;
 
-    Ok(processed_eras_by_nodes)
+    fetch_inspected_eras(&node_params).map_err(|_| ApiError::FailedToFetchInspectedEras {
+        cluster_id: *cluster_id,
+    })
 }
 
-/// Fetch processed payment era by its id.
+
+/// Fetch processed payment era era
 ///
 /// Parameters:
-/// - `cluster_id`: Cluster Id
-/// - `era`: EHD era id to process
-/// - `node_params`: DAC node parameters
-pub fn fetch_processed_era(
+/// - `node_params`: Sync node parameters
+pub fn fetch_inspected_era<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
     cluster_id: &ClusterId,
     era: EhdEra,
-    g_collector: &(NodePubKey, StorageNodeParams),
 ) -> Result<json::EHDEra, ApiError> {
-    let ehd_eras = fetch_processed_eras(cluster_id, vec![g_collector.clone()].as_slice())?;
-
-    let era = ehd_eras
+    let ehd_eras = fetch_inspected_eras_for_cluster::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+    ehd_eras
         .iter()
-        .flat_map(|eras| eras.iter())
         .find(|ehd| ehd.id == era)
-        .ok_or(ApiError::FailedToFetchPaymentEra)?;
+        .ok_or(ApiError::FailedToFetchEra)
+        .cloned()
+}
 
-    Ok(era.clone())
+/// Fetch processed payment era era
+///
+/// Parameters:
+/// - `node_params`: Sync node parameters
+pub fn fetch_processed_era<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
+    cluster_id: &ClusterId,
+    era: EhdEra,
+) -> Result<json::EHDEra, ApiError> {
+    let ehd_eras = fetch_processed_eras_for_cluster::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+    ehd_eras
+        .iter()
+        .find(|ehd| ehd.id == era)
+        .ok_or(ApiError::FailedToFetchEra)
+        .cloned()
+}
+
+
+/// Fetch inspected EHD eras.
+///
+/// Parameters:
+/// - `node_params`: Sync node parameters
+#[allow(dead_code)]
+pub fn fetch_inspected_eras(
+    node_params: &StorageNodeParams,
+) -> Result<Vec<json::EHDEra>, http::Error> {
+    let host = str::from_utf8(&node_params.host).map_err(|_| http::Error::Unknown)?;
+    let base_url = format!("http://{}:{}", host, node_params.http_port);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+        VERIFY_AGGREGATOR_RESPONSE_SIGNATURE,
+    );
+
+    let response = client.payment_eras()?;
+    Ok(response
+        .into_iter()
+        .filter(|e| e.status == "EHD_INSPECTED")
+        .collect::<Vec<_>>())
 }
 
 pub fn fetch_inspection_exceptions<
