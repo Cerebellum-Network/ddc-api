@@ -38,6 +38,8 @@ pub enum ApiError {
     FailedToFetchBucketAggregate,
     FailedToFetchTraversedEHD,
     FailedToFetchTraversedPHD,
+    FailedToFetchTraversedNodeAggregate,
+    FailedToFetchTraversedBucketSubAggregate,
     FailedToFetchEra,
     FailedToFetchGCollectors { cluster_id: ClusterId },
     FailedToFetchGCollectorNode { cluster_id: ClusterId },
@@ -163,6 +165,36 @@ pub fn get_collectors_nodes<
     }
 
     Ok(collectors)
+}
+
+/// Fetch collectors nodes of a cluster.
+/// Parameters:
+/// - `cluster_id`: Cluster id of a cluster.
+/// - `collector_key`: Collector node key
+pub fn get_collector_node<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
+    cluster_id: &ClusterId,
+    collector_key: NodePubKey,
+) -> Result<(NodePubKey, StorageNodeParams), ApiError> {
+    let mut collectors = Vec::new();
+    let nodes = CM::get_nodes(cluster_id).map_err(|_| ApiError::NodeRetrievalError)?;
+    for node_pub_key in nodes {
+        if let Ok(NodeParams::StorageParams(storage_params)) = NM::get_node_params(&node_pub_key) {
+            collectors.push((node_pub_key, storage_params));
+        }
+    }
+    let (collector_key, collector_params) = collectors
+        .into_iter()
+        .find(|(key, _)| *key == collector_key)
+        .ok_or(ApiError::FailedToFetchCollectorNode {
+            cluster_id: *cluster_id,
+        })?;
+
+    Ok((collector_key, collector_params))
 }
 
 pub fn fetch_bucket_challenge_response<
@@ -330,10 +362,7 @@ pub fn fetch_bucket_aggregates<
 ///
 /// Parameters:
 /// - `cluster_id`: cluster id of a cluster
-/// - `ehd_id`: EHDId is a concatenated representation of:
-///     1) A 32-byte node public key in hex
-///     2) Starting TCA id
-///     3) Ending TCA id
+/// - `era`: EHD era
 /// - `tree_node_id` - merkle tree node identifier
 /// - `tree_levels_count` - merkle tree levels to request
 pub fn fetch_traversed_era_historical_document<
@@ -390,10 +419,8 @@ pub fn fetch_traversed_era_historical_document<
 ///
 /// Parameters:
 /// - `cluster_id`: cluster id of a cluster
-/// - `phd_id`: PHDId is a concatenated representation of:
-///     1) A 32-byte node public key in hex
-///     2) Starting TCAA id
-///     3) Ending TCAA id
+/// - `era`: EHD era
+/// - `collector`: Collector node key
 /// - `tree_node_id` - merkle tree node identifier
 /// - `tree_levels_count` - merkle tree levels to request
 pub fn fetch_traversed_partial_historical_document<
@@ -446,6 +473,105 @@ pub fn fetch_traversed_partial_historical_document<
 
     Ok(traversed_phd)
 }
+
+
+pub fn fetch_traversed_node_aggregate<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
+    cluster_id: &ClusterId,
+    tca_id: TcaEra,
+    collector_key: NodePubKey,
+    node_key: NodePubKey,
+    tree_node_id: u64,
+    tree_levels_count: u16,
+    verify_sig: bool,
+) -> Result<Vec<json::MerkleTreeNodeResponse>, ApiError> {
+    let (collector_key, collector_params) = get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
+    let host = str::from_utf8(&collector_params.host).map_err(|_| {
+        ApiError::FailedToFetchCollectorNode {
+            cluster_id: *cluster_id,
+        }
+    })?;
+
+    let base_url = format!("http://{}:{}", host, collector_params.http_port);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+        verify_sig, // no response signature verification for now
+    );
+
+    let traversed_node_aggregate = client.traverse_node_aggregate(
+        tca_id,
+        node_key.clone(),
+        tree_node_id,
+        tree_levels_count,
+    ).map_err(|_| {
+        log::error!(
+            "⚠️  Collector from cluster {:?} is unavailable while fetching PHD record or responded with unexpected body. Key: {:?} Host: {:?}",
+            cluster_id,
+            collector_key,
+            String::from_utf8(collector_params.host)
+        );
+        ApiError::FailedToFetchTraversedNodeAggregate
+    })?;
+
+    Ok(traversed_node_aggregate)
+}
+
+
+pub fn fetch_traversed_bucket_sub_aggregate<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
+    cluster_id: &ClusterId,
+    tca_id: TcaEra,
+    collector_key: NodePubKey,
+    bucket_id: BucketId,
+    node_key: NodePubKey,
+    tree_node_id: u64,
+    tree_levels_count: u16,
+    verify_sig: bool,
+) -> Result<Vec<json::MerkleTreeNodeResponse>, ApiError> {
+    let (collector_key, collector_params) = get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
+    let host = str::from_utf8(&collector_params.host).map_err(|_| {
+        ApiError::FailedToFetchCollectorNode {
+            cluster_id: *cluster_id,
+        }
+    })?;
+
+    let base_url = format!("http://{}:{}", host, collector_params.http_port);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+        verify_sig, // no response signature verification for now
+    );
+
+    let traversed_bucket_sub_aggregate = client.traverse_bucket_sub_aggregate(
+        tca_id,
+        bucket_id,
+        node_key.clone(),
+        tree_node_id,
+        tree_levels_count,
+    ).map_err(|_| {
+        log::error!(
+            "⚠️  Collector from cluster {:?} is unavailable while fetching PHD record or responded with unexpected body. Key: {:?} Host: {:?}",
+            cluster_id,
+            collector_key,
+            String::from_utf8(collector_params.host)
+        );
+        ApiError::FailedToFetchTraversedBucketSubAggregate
+    })?;
+
+    Ok(traversed_bucket_sub_aggregate)
+}
+
 
 /// Fetch EHD merkle root node.
 ///
