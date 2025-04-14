@@ -13,12 +13,14 @@ use serde_with::{base64::Base64, serde_as, TryFromInto};
 use sp_std::{collections::btree_map::BTreeMap, prelude::*};
 
 /// Node aggregate response from aggregator.
+#[serde_as]
 #[derive(
-    Debug, Serialize, Deserialize, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
+    Debug, Serialize, Deserialize, Clone, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
 )]
 pub struct NodeAggregateResponse {
-    /// Node id.
-    pub node_id: String,
+    #[serde(rename = "node_id")]
+    #[serde_as(as = "TryFromInto<String>")]
+    pub node_key: NodePubKey,
     /// Total amount of stored bytes.
     pub stored_bytes: i64,
     /// Total amount of transferred bytes.
@@ -47,7 +49,7 @@ pub struct AggregationEraResponse {
 
 /// Bucket aggregate response from aggregator.
 #[derive(
-    Debug, Serialize, Deserialize, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
+    Debug, Serialize, Deserialize, Clone, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
 )]
 pub struct BucketAggregateResponse {
     /// Bucket id
@@ -65,13 +67,15 @@ pub struct BucketAggregateResponse {
 }
 
 /// Sub aggregates of a bucket.
+#[serde_as]
 #[derive(
-    Debug, Serialize, Deserialize, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
+    Debug, Serialize, Deserialize, Clone, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
 )]
 #[allow(non_snake_case)]
 pub struct BucketSubAggregateResponse {
-    /// Node id.
-    pub NodeID: String,
+    #[serde(rename = "NodeID")]
+    #[serde_as(as = "TryFromInto<String>")]
+    pub node_key: NodePubKey,
     /// Total amount of stored bytes.
     pub stored_bytes: i64,
     /// Total amount of transferred bytes.
@@ -83,12 +87,15 @@ pub struct BucketSubAggregateResponse {
 }
 
 /// Bucket activity per a DDC node.
+#[serde_as]
 #[derive(Debug, Serialize, Deserialize, Clone, Ord, PartialOrd, PartialEq, Eq, Encode, Decode)]
 pub struct BucketSubAggregate {
     /// Bucket id
     pub bucket_id: BucketId,
     /// Node id.
-    pub node_id: String,
+    #[serde(rename = "node_id")]
+    #[serde_as(as = "TryFromInto<String>")]
+    pub node_key: NodePubKey,
     /// Total amount of stored bytes.
     pub stored_bytes: i64,
     /// Total amount of transferred bytes.
@@ -101,10 +108,13 @@ pub struct BucketSubAggregate {
     pub aggregator: AggregatorInfo,
 }
 
+#[serde_as]
 #[derive(Debug, Serialize, Deserialize, Clone, Ord, PartialOrd, PartialEq, Eq, Encode, Decode)]
 pub struct NodeAggregate {
     /// Node id.
-    pub node_id: String,
+    #[serde(rename = "node_id")]
+    #[serde_as(as = "TryFromInto<String>")]
+    pub node_key: NodePubKey,
     /// Total amount of stored bytes.
     pub stored_bytes: i64,
     /// Total amount of transferred bytes.
@@ -210,12 +220,14 @@ pub struct Signature {
     pub value: String,
 }
 
+#[serde_as]
 #[derive(
     Debug, Serialize, Deserialize, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
 )]
 pub struct MerkleTreeNodeResponse {
-    pub merkle_tree_node_id: u32,
-    pub hash: String,
+    pub merkle_tree_node_id: u64,
+    #[serde_as(as = "Base64")]
+    pub hash: Vec<u8>,
     pub stored_bytes: i64,
     pub transferred_bytes: u64,
     pub number_of_puts: u64,
@@ -483,11 +495,13 @@ pub enum InspPathException {
         tca_id: TcaEra,
         bad_leaves_ids: Vec<u64>,
         collector_key: NodePubKey,
+        unverified_usage: NodeUsage,
     },
     BucketAR {
         bucket_id: BucketId,
         tca_id: TcaEra,
         bad_leaves_pos: Vec<u64>,
         collector_key: NodePubKey,
+        unverified_usage: BucketUsage,
     },
 }
