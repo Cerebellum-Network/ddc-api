@@ -566,7 +566,6 @@ pub fn fetch_inspected_eras_for_cluster<
     })
 }
 
-
 /// Fetch processed payment era era
 ///
 /// Parameters:
@@ -608,7 +607,6 @@ pub fn fetch_processed_era<
         .ok_or(ApiError::FailedToFetchEra)
         .cloned()
 }
-
 
 /// Fetch inspected EHD eras.
 ///
