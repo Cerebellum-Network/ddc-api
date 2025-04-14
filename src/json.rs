@@ -478,6 +478,16 @@ pub struct UnverifiedPath {
 
 #[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode, PartialOrd, Ord, Eq, PartialEq)]
 pub enum InspPathException {
-    NodeAR { bad_leaves_ids: Vec<u64> },
-    BucketAR { bad_leaves_pos: Vec<u64> },
+    NodeAR {
+        node_key: NodePubKey,
+        tca_id: TcaEra,
+        bad_leaves_ids: Vec<u64>,
+        collector_key: NodePubKey,
+    },
+    BucketAR {
+        bucket_id: BucketId,
+        tca_id: TcaEra,
+        bad_leaves_pos: Vec<u64>,
+        collector_key: NodePubKey,
+    },
 }
