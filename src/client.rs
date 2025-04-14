@@ -298,7 +298,11 @@ impl<'a> DdcClient<'a> {
     ) -> Result<Vec<json::MerkleTreeNodeResponse>, http::Error> {
         let mut url = format!(
             "{}/activity/nodes/{}/traverse?eraId={}&merkleTreeNodeId={}&levels={}",
-            self.base_url, <NodePubKey as Into<String>>::into(node_key), tca_id, merkle_tree_node_id, levels,
+            self.base_url,
+            <NodePubKey as Into<String>>::into(node_key),
+            tca_id,
+            merkle_tree_node_id,
+            levels,
         );
         fetch_and_parse_json!(
             self,
@@ -318,7 +322,12 @@ impl<'a> DdcClient<'a> {
     ) -> Result<Vec<json::MerkleTreeNodeResponse>, http::Error> {
         let mut url = format!(
             "{}/activity/buckets/{}/traverse?eraId={}&nodeId={}&merkleTreeNodeId={}&levels={}",
-            self.base_url, bucket_id, tca_id, <NodePubKey as Into<String>>::into(node_key), merkle_tree_node_id, levels,
+            self.base_url,
+            bucket_id,
+            tca_id,
+            <NodePubKey as Into<String>>::into(node_key),
+            merkle_tree_node_id,
+            levels,
         );
         fetch_and_parse_json!(
             self,
