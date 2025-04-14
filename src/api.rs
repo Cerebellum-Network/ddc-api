@@ -474,7 +474,6 @@ pub fn fetch_traversed_partial_historical_document<
     Ok(traversed_phd)
 }
 
-
 pub fn fetch_traversed_node_aggregate<
     AccountId,
     BlockNumber,
@@ -489,7 +488,8 @@ pub fn fetch_traversed_node_aggregate<
     tree_levels_count: u16,
     verify_sig: bool,
 ) -> Result<Vec<json::MerkleTreeNodeResponse>, ApiError> {
-    let (collector_key, collector_params) = get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
+    let (collector_key, collector_params) =
+        get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
     let host = str::from_utf8(&collector_params.host).map_err(|_| {
         ApiError::FailedToFetchCollectorNode {
             cluster_id: *cluster_id,
@@ -511,7 +511,7 @@ pub fn fetch_traversed_node_aggregate<
         tree_levels_count,
     ).map_err(|_| {
         log::error!(
-            "⚠️  Collector from cluster {:?} is unavailable while fetching PHD record or responded with unexpected body. Key: {:?} Host: {:?}",
+            "⚠️  Collector from cluster {:?} is unavailable while fetching Node aggregate or responded with unexpected body. Key: {:?} Host: {:?}",
             cluster_id,
             collector_key,
             String::from_utf8(collector_params.host)
@@ -521,7 +521,6 @@ pub fn fetch_traversed_node_aggregate<
 
     Ok(traversed_node_aggregate)
 }
-
 
 pub fn fetch_traversed_bucket_sub_aggregate<
     AccountId,
@@ -538,7 +537,8 @@ pub fn fetch_traversed_bucket_sub_aggregate<
     tree_levels_count: u16,
     verify_sig: bool,
 ) -> Result<Vec<json::MerkleTreeNodeResponse>, ApiError> {
-    let (collector_key, collector_params) = get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
+    let (collector_key, collector_params) =
+        get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
     let host = str::from_utf8(&collector_params.host).map_err(|_| {
         ApiError::FailedToFetchCollectorNode {
             cluster_id: *cluster_id,
@@ -561,7 +561,7 @@ pub fn fetch_traversed_bucket_sub_aggregate<
         tree_levels_count,
     ).map_err(|_| {
         log::error!(
-            "⚠️  Collector from cluster {:?} is unavailable while fetching PHD record or responded with unexpected body. Key: {:?} Host: {:?}",
+            "⚠️  Collector from cluster {:?} is unavailable while fetching Bucket aggregate or responded with unexpected body. Key: {:?} Host: {:?}",
             cluster_id,
             collector_key,
             String::from_utf8(collector_params.host)
@@ -571,7 +571,6 @@ pub fn fetch_traversed_bucket_sub_aggregate<
 
     Ok(traversed_bucket_sub_aggregate)
 }
-
 
 /// Fetch EHD merkle root node.
 ///

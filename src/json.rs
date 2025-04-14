@@ -14,9 +14,7 @@ use sp_std::{collections::btree_map::BTreeMap, prelude::*};
 
 /// Node aggregate response from aggregator.
 #[serde_as]
-#[derive(
-    Debug, Serialize, Deserialize, Clone, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
-)]
+#[derive(Debug, Serialize, Deserialize, Clone, Ord, PartialOrd, PartialEq, Eq, Encode, Decode)]
 pub struct NodeAggregateResponse {
     #[serde(rename = "node_id")]
     #[serde_as(as = "TryFromInto<String>")]
@@ -48,9 +46,7 @@ pub struct AggregationEraResponse {
 }
 
 /// Bucket aggregate response from aggregator.
-#[derive(
-    Debug, Serialize, Deserialize, Clone, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
-)]
+#[derive(Debug, Serialize, Deserialize, Clone, Ord, PartialOrd, PartialEq, Eq, Encode, Decode)]
 pub struct BucketAggregateResponse {
     /// Bucket id
     pub bucket_id: BucketId,
@@ -68,9 +64,7 @@ pub struct BucketAggregateResponse {
 
 /// Sub aggregates of a bucket.
 #[serde_as]
-#[derive(
-    Debug, Serialize, Deserialize, Clone, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
-)]
+#[derive(Debug, Serialize, Deserialize, Clone, Ord, PartialOrd, PartialEq, Eq, Encode, Decode)]
 #[allow(non_snake_case)]
 pub struct BucketSubAggregateResponse {
     #[serde(rename = "NodeID")]
