@@ -133,7 +133,7 @@ pub struct ChallengeAggregateResponse {
     Debug, Serialize, Deserialize, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
 )]
 pub struct Proof {
-    pub merkle_tree_node_id: u32,
+    pub merkle_tree_node_id: u64,
     pub usage: Usage,
     pub path: Vec<String>, // note(yahortsaryk): we cannot deserialize if as `serde_as = "Base64"` due to the way how DDC node signs the request
     pub leafs: Vec<Leaf>,
@@ -218,7 +218,7 @@ pub struct Signature {
     Debug, Serialize, Deserialize, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
 )]
 pub struct MerkleTreeNodeResponse {
-    pub merkle_tree_node_id: u32,
+    pub merkle_tree_node_id: u64,
     #[serde_as(as = "Base64")]
     pub hash: Vec<u8>,
     pub transferred_bytes: u64,
@@ -277,7 +277,7 @@ pub struct EHDTreeNode {
     pub g_collector: NodePubKey,
 
     #[serde(rename = "merkleTreeNodeId")]
-    pub tree_node_id: u32,
+    pub tree_node_id: u64,
 
     #[serde(rename = "merkleTreeNodeHash")]
     #[serde_as(as = "Base64")]
@@ -367,7 +367,7 @@ pub struct PHDTreeNode {
     pub collector: NodePubKey,
 
     #[serde(rename = "merkleTreeNodeId")]
-    pub tree_node_id: u32,
+    pub tree_node_id: u64,
 
     #[serde(rename = "merkleTreeNodeHash")]
     #[serde_as(as = "Base64")]
