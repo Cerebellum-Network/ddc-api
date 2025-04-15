@@ -155,9 +155,7 @@ pub fn get_collectors_nodes<
     cluster_id: &ClusterId,
 ) -> Result<Vec<(NodePubKey, StorageNodeParams)>, ApiError> {
     let mut collectors = Vec::new();
-
     let nodes = CM::get_nodes(cluster_id).map_err(|_| ApiError::NodeRetrievalError)?;
-
     for node_pub_key in nodes {
         if let Ok(NodeParams::StorageParams(storage_params)) = NM::get_node_params(&node_pub_key) {
             collectors.push((node_pub_key, storage_params));
@@ -199,8 +197,8 @@ pub fn get_collector_node<
 
 pub fn fetch_bucket_challenge_response<
     AccountId,
-    BlockNum,
-    CM: ClusterManager<AccountId, BlockNum>,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
     NM: NodeManager<AccountId>,
 >(
     cluster_id: &ClusterId,
@@ -211,14 +209,8 @@ pub fn fetch_bucket_challenge_response<
     tree_node_ids: Vec<u64>,
     verify_sig: bool,
 ) -> Result<ApiResponse<proto::activity::ChallengeResponse>, ApiError> {
-    let collectors = get_collectors_nodes::<AccountId, BlockNum, CM, NM>(cluster_id)?;
-    let Some((_, collector_params)) = collectors
-        .into_iter()
-        .find(|(key, _)| *key == collector_key)
-    else {
-        return Err(ApiError::FailedToFetchBucketChallenge);
-    };
-
+    let (collector_key, collector_params) =
+        get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
     let host = str::from_utf8(&collector_params.host)
         .map_err(|_| ApiError::FailedToFetchBucketChallenge)?;
 
@@ -262,15 +254,8 @@ pub fn fetch_node_challenge_response<
     tree_node_ids: Vec<u64>,
     verify_sig: bool,
 ) -> Result<ApiResponse<proto::activity::ChallengeResponse>, ApiError> {
-    let collectors = get_collectors_nodes::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
-
-    let Some((_, collector_params)) = collectors
-        .into_iter()
-        .find(|(key, _)| *key == collector_key)
-    else {
-        return Err(ApiError::FailedToFetchNodeChallenge);
-    };
-
+    let (collector_key, collector_params) =
+        get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
     let host =
         str::from_utf8(&collector_params.host).map_err(|_| ApiError::FailedToFetchNodeChallenge)?;
 
@@ -312,50 +297,43 @@ pub fn fetch_bucket_aggregates<
     tcaa_id: TcaEra,
     collector_key: NodePubKey,
 ) -> Result<Vec<json::BucketAggregateResponse>, ApiError> {
-    let collectors = get_collectors_nodes::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+    let (_, collector_params) =
+        get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
+    let host = str::from_utf8(&collector_params.host)
+        .map_err(|_| ApiError::FailedToFetchBucketAggregate)?;
 
-    for (key, collector_params) in collectors {
-        if key != collector_key {
-            continue;
-        };
+    let base_url = format!("http://{}:{}", host, collector_params.http_port);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+        VERIFY_AGGREGATOR_RESPONSE_SIGNATURE,
+    );
 
-        if let Ok(host) = str::from_utf8(&collector_params.host) {
-            let base_url = format!("http://{}:{}", host, collector_params.http_port);
-            let client = DdcClient::new(
-                &base_url,
-                Duration::from_millis(RESPONSE_TIMEOUT),
-                MAX_RETRIES_COUNT,
-                VERIFY_AGGREGATOR_RESPONSE_SIGNATURE,
-            );
+    let mut buckets_aggregates = Vec::new();
+    let mut prev_token = None;
 
-            let mut buckets_aggregates = Vec::new();
-            let mut prev_token = None;
+    loop {
+        let response = client
+            .buckets_aggregates(
+                tcaa_id,
+                Some(BUCKETS_AGGREGATES_FETCH_BATCH_SIZE as u32),
+                prev_token,
+            )
+            .map_err(|_| ApiError::FailedToFetchBucketAggregate)?;
 
-            loop {
-                let response = client
-                    .buckets_aggregates(
-                        tcaa_id,
-                        Some(BUCKETS_AGGREGATES_FETCH_BATCH_SIZE as u32),
-                        prev_token,
-                    )
-                    .map_err(|_| ApiError::FailedToFetchBucketAggregate)?;
+        let response_len = response.len();
 
-                let response_len = response.len();
+        prev_token = response.last().map(|a| a.bucket_id);
 
-                prev_token = response.last().map(|a| a.bucket_id);
+        buckets_aggregates.extend(response);
 
-                buckets_aggregates.extend(response);
-
-                if response_len < BUCKETS_AGGREGATES_FETCH_BATCH_SIZE {
-                    break;
-                }
-            }
-
-            return Ok(buckets_aggregates);
+        if response_len < BUCKETS_AGGREGATES_FETCH_BATCH_SIZE {
+            break;
         }
     }
 
-    Err(ApiError::FailedToFetchBucketAggregate)
+    return Ok(buckets_aggregates);
 }
 
 /// Traverse EHD record.
@@ -382,11 +360,8 @@ pub fn fetch_traversed_era_historical_document<
                 cluster_id: *cluster_id,
             }
         })?;
-    let host = str::from_utf8(&g_collector_params.host).map_err(|_| {
-        ApiError::FailedToFetchGCollectorNode {
-            cluster_id: *cluster_id,
-        }
-    })?;
+    let host = str::from_utf8(&g_collector_params.host)
+        .map_err(|_| ApiError::FailedToFetchTraversedEHD)?;
 
     let base_url = format!("http://{}:{}", host, g_collector_params.http_port);
     let client = DdcClient::new(
@@ -431,22 +406,14 @@ pub fn fetch_traversed_partial_historical_document<
 >(
     cluster_id: &ClusterId,
     era: EhdEra,
-    collector: NodePubKey,
+    collector_key: NodePubKey,
     tree_node_id: u32,
     tree_levels_count: u32,
 ) -> Result<Vec<json::PHDTreeNode>, ApiError> {
-    let collectors = get_collectors_nodes::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
-    let (collector_key, collector_params) = collectors
-        .into_iter()
-        .find(|(key, _)| *key == collector)
-        .ok_or(ApiError::FailedToFetchCollectorNode {
-            cluster_id: *cluster_id,
-        })?;
-    let host = str::from_utf8(&collector_params.host).map_err(|_| {
-        ApiError::FailedToFetchCollectorNode {
-            cluster_id: *cluster_id,
-        }
-    })?;
+    let (collector_key, collector_params) =
+        get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
+    let host =
+        str::from_utf8(&collector_params.host).map_err(|_| ApiError::FailedToFetchTraversedPHD)?;
 
     let base_url = format!("http://{}:{}", host, collector_params.http_port);
     let client = DdcClient::new(
@@ -487,21 +454,18 @@ pub fn fetch_traversed_node_aggregate<
     tree_node_id: u64,
     tree_levels_count: u16,
     verify_sig: bool,
-) -> Result<Vec<json::MerkleTreeNodeResponse>, ApiError> {
+) -> Result<ApiResponse<Vec<json::MerkleTreeNodeResponse>>, ApiError> {
     let (collector_key, collector_params) =
         get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
-    let host = str::from_utf8(&collector_params.host).map_err(|_| {
-        ApiError::FailedToFetchCollectorNode {
-            cluster_id: *cluster_id,
-        }
-    })?;
+    let host = str::from_utf8(&collector_params.host)
+        .map_err(|_| ApiError::FailedToFetchTraversedNodeAggregate)?;
 
     let base_url = format!("http://{}:{}", host, collector_params.http_port);
     let client = DdcClient::new(
         &base_url,
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
-        verify_sig, // no response signature verification for now
+        verify_sig,
     );
 
     let traversed_node_aggregate = client.traverse_node_aggregate(
@@ -536,14 +500,11 @@ pub fn fetch_traversed_bucket_sub_aggregate<
     tree_node_id: u64,
     tree_levels_count: u16,
     verify_sig: bool,
-) -> Result<Vec<json::MerkleTreeNodeResponse>, ApiError> {
+) -> Result<ApiResponse<Vec<json::MerkleTreeNodeResponse>>, ApiError> {
     let (collector_key, collector_params) =
         get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
-    let host = str::from_utf8(&collector_params.host).map_err(|_| {
-        ApiError::FailedToFetchCollectorNode {
-            cluster_id: *cluster_id,
-        }
-    })?;
+    let host = str::from_utf8(&collector_params.host)
+        .map_err(|_| ApiError::FailedToFetchTraversedBucketSubAggregate)?;
 
     let base_url = format!("http://{}:{}", host, collector_params.http_port);
     let client = DdcClient::new(
@@ -766,15 +727,13 @@ pub fn fetch_inspection_exceptions<
     cluster_id: &ClusterId,
     era: EhdEra,
 ) -> Result<BTreeMap<String, BTreeMap<String, json::InspPathException>>, ApiError> {
-    let (_, sync_node) =
-        get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|_| {
-            ApiError::FailedToFetchSyncNode {
-                cluster_id: *cluster_id,
-            }
+    let (_, sync_node_params) = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)
+        .map_err(|_| ApiError::FailedToFetchSyncNode {
+            cluster_id: *cluster_id,
         })?;
 
-    let host = str::from_utf8(&sync_node.host).map_err(|_| ApiError::Unexpected)?;
-    let base_url = format!("http://{}:{}", host, sync_node.http_port);
+    let host = str::from_utf8(&sync_node_params.host).map_err(|_| ApiError::Unexpected)?;
+    let base_url = format!("http://{}:{}", host, sync_node_params.http_port);
     let client = DdcClient::new(
         &base_url,
         Duration::from_millis(RESPONSE_TIMEOUT),
@@ -796,10 +755,10 @@ pub fn get_inspection_state<
     cluster_id: &ClusterId,
     era: EhdEra,
 ) -> Result<proto::inspection::EndpointItmGetPathsState, http::Error> {
-    let (_, sync_node) = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+    let (_, sync_node_params) = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
-    let host = str::from_utf8(&sync_node.host).map_err(|_| http::Error::Unknown)?;
-    let base_url = format!("http://{}:{}", host, sync_node.http_port);
+    let host = str::from_utf8(&sync_node_params.host).map_err(|_| http::Error::Unknown)?;
+    let base_url = format!("http://{}:{}", host, sync_node_params.http_port);
     let client = DdcClient::new(
         &base_url,
         Duration::from_millis(RESPONSE_TIMEOUT),
@@ -819,10 +778,10 @@ pub fn submit_inspection_report<
     cluster_id: &ClusterId,
     report_json_str: String, // todo(yahortsaryk): add .proto definition for `InspEraReport` type
 ) -> Result<proto::inspection::EndpointItmPostPath, http::Error> {
-    let (_, sync_node) = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+    let (_, sync_node_params) = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
-    let host = str::from_utf8(&sync_node.host).map_err(|_| http::Error::Unknown)?;
-    let base_url = format!("http://{}:{}", host, sync_node.http_port);
+    let host = str::from_utf8(&sync_node_params.host).map_err(|_| http::Error::Unknown)?;
+    let base_url = format!("http://{}:{}", host, sync_node_params.http_port);
     let client = DdcClient::new(
         &base_url,
         Duration::from_millis(RESPONSE_TIMEOUT),
@@ -845,10 +804,10 @@ pub fn submit_assignments_table<
                              * `InspAssignmentsTable` type */
     inspector_hex: String,
 ) -> Result<proto::inspection::EndpointItmSubmit, http::Error> {
-    let (_, sync_node) = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+    let (_, sync_node_params) = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
-    let host = str::from_utf8(&sync_node.host).map_err(|_| http::Error::Unknown)?;
-    let base_url = format!("http://{}:{}", host, sync_node.http_port);
+    let host = str::from_utf8(&sync_node_params.host).map_err(|_| http::Error::Unknown)?;
+    let base_url = format!("http://{}:{}", host, sync_node_params.http_port);
     let client = DdcClient::new(
         &base_url,
         Duration::from_millis(RESPONSE_TIMEOUT),
@@ -868,10 +827,10 @@ pub fn get_assignments_table<
     cluster_id: &ClusterId,
     era: EhdEra,
 ) -> Result<String, http::Error> {
-    let (_, sync_node) = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+    let (_, sync_node_params) = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
-    let host = str::from_utf8(&sync_node.host).map_err(|_| http::Error::Unknown)?;
-    let base_url = format!("http://{}:{}", host, sync_node.http_port);
+    let host = str::from_utf8(&sync_node_params.host).map_err(|_| http::Error::Unknown)?;
+    let base_url = format!("http://{}:{}", host, sync_node_params.http_port);
     let client = DdcClient::new(
         &base_url,
         Duration::from_millis(RESPONSE_TIMEOUT),
@@ -909,10 +868,10 @@ pub fn post_itm_lease<
     era: EhdEra,
     inspector_hex: String,
 ) -> Result<proto::inspection::EndpointItmLease, http::Error> {
-    let (_, sync_node) = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+    let (_, sync_node_params) = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
-    let host = str::from_utf8(&sync_node.host).map_err(|_| http::Error::Unknown)?;
-    let base_url = format!("http://{}:{}", host, sync_node.http_port);
+    let host = str::from_utf8(&sync_node_params.host).map_err(|_| http::Error::Unknown)?;
+    let base_url = format!("http://{}:{}", host, sync_node_params.http_port);
     let client = DdcClient::new(
         &base_url,
         Duration::from_millis(RESPONSE_TIMEOUT),
@@ -932,15 +891,13 @@ pub fn get_inspection_summary<
     cluster_id: &ClusterId,
     era: EhdEra,
 ) -> Result<json::InspSummary, ApiError> {
-    let (_, sync_node) =
-        get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|_| {
-            ApiError::FailedToFetchSyncNode {
-                cluster_id: *cluster_id,
-            }
+    let (_, sync_node_params) = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)
+        .map_err(|_| ApiError::FailedToFetchSyncNode {
+            cluster_id: *cluster_id,
         })?;
 
-    let host = str::from_utf8(&sync_node.host).map_err(|_| ApiError::Unexpected)?;
-    let base_url = format!("http://{}:{}", host, sync_node.http_port);
+    let host = str::from_utf8(&sync_node_params.host).map_err(|_| ApiError::Unexpected)?;
+    let base_url = format!("http://{}:{}", host, sync_node_params.http_port);
     let client = DdcClient::new(
         &base_url,
         Duration::from_millis(RESPONSE_TIMEOUT),
