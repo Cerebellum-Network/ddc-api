@@ -135,8 +135,7 @@ pub struct ChallengeAggregateResponse {
 pub struct Proof {
     pub merkle_tree_node_id: u64,
     pub usage: Usage,
-    pub path: Vec<String>, // note(yahortsaryk): we cannot deserialize if as `serde_as = "Base64"` due to the way how DDC node signs the request
-    pub leafs: Vec<Leaf>,
+    pub path: Vec<String>,
 }
 
 #[derive(
