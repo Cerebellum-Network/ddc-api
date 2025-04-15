@@ -10,7 +10,7 @@ message ChallengeResponse {
   repeated Proof proofs = 1;
 
   message Proof {
-    uint32 merkleTreeNodeId = 1;
+    uint64 merkleTreeNodeId = 1;
     Aggregate usage = 2;
     repeated bytes path = 3;
 
