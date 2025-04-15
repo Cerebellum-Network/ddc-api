@@ -13,12 +13,12 @@ use serde_with::{base64::Base64, serde_as, TryFromInto};
 use sp_std::{collections::btree_map::BTreeMap, prelude::*};
 
 /// Node aggregate response from aggregator.
-#[derive(
-    Debug, Serialize, Deserialize, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
-)]
+#[serde_as]
+#[derive(Debug, Serialize, Deserialize, Clone, Ord, PartialOrd, PartialEq, Eq, Encode, Decode)]
 pub struct NodeAggregateResponse {
-    /// Node id.
-    pub node_id: String,
+    #[serde(rename = "node_id")]
+    #[serde_as(as = "TryFromInto<String>")]
+    pub node_key: NodePubKey,
     /// Total amount of stored bytes.
     pub stored_bytes: i64,
     /// Total amount of transferred bytes.
@@ -46,9 +46,7 @@ pub struct AggregationEraResponse {
 }
 
 /// Bucket aggregate response from aggregator.
-#[derive(
-    Debug, Serialize, Deserialize, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
-)]
+#[derive(Debug, Serialize, Deserialize, Clone, Ord, PartialOrd, PartialEq, Eq, Encode, Decode)]
 pub struct BucketAggregateResponse {
     /// Bucket id
     pub bucket_id: BucketId,
@@ -65,13 +63,13 @@ pub struct BucketAggregateResponse {
 }
 
 /// Sub aggregates of a bucket.
-#[derive(
-    Debug, Serialize, Deserialize, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
-)]
+#[serde_as]
+#[derive(Debug, Serialize, Deserialize, Clone, Ord, PartialOrd, PartialEq, Eq, Encode, Decode)]
 #[allow(non_snake_case)]
 pub struct BucketSubAggregateResponse {
-    /// Node id.
-    pub NodeID: String,
+    #[serde(rename = "NodeID")]
+    #[serde_as(as = "TryFromInto<String>")]
+    pub node_key: NodePubKey,
     /// Total amount of stored bytes.
     pub stored_bytes: i64,
     /// Total amount of transferred bytes.
@@ -83,12 +81,15 @@ pub struct BucketSubAggregateResponse {
 }
 
 /// Bucket activity per a DDC node.
+#[serde_as]
 #[derive(Debug, Serialize, Deserialize, Clone, Ord, PartialOrd, PartialEq, Eq, Encode, Decode)]
 pub struct BucketSubAggregate {
     /// Bucket id
     pub bucket_id: BucketId,
     /// Node id.
-    pub node_id: String,
+    #[serde(rename = "node_id")]
+    #[serde_as(as = "TryFromInto<String>")]
+    pub node_key: NodePubKey,
     /// Total amount of stored bytes.
     pub stored_bytes: i64,
     /// Total amount of transferred bytes.
@@ -101,10 +102,13 @@ pub struct BucketSubAggregate {
     pub aggregator: AggregatorInfo,
 }
 
+#[serde_as]
 #[derive(Debug, Serialize, Deserialize, Clone, Ord, PartialOrd, PartialEq, Eq, Encode, Decode)]
 pub struct NodeAggregate {
     /// Node id.
-    pub node_id: String,
+    #[serde(rename = "node_id")]
+    #[serde_as(as = "TryFromInto<String>")]
+    pub node_key: NodePubKey,
     /// Total amount of stored bytes.
     pub stored_bytes: i64,
     /// Total amount of transferred bytes.
@@ -122,7 +126,6 @@ pub struct NodeAggregate {
     Debug, Serialize, Deserialize, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
 )]
 pub struct ChallengeAggregateResponse {
-    /// proofs
     pub proofs: Vec<Proof>, //todo! add optional fields
 }
 
@@ -130,10 +133,9 @@ pub struct ChallengeAggregateResponse {
     Debug, Serialize, Deserialize, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
 )]
 pub struct Proof {
-    pub merkle_tree_node_id: u32,
+    pub merkle_tree_node_id: u64,
     pub usage: Usage,
-    pub path: Vec<String>, //todo! add base64 deserialization
-    pub leafs: Vec<Leaf>,
+    pub path: Vec<String>,
 }
 
 #[derive(
@@ -210,14 +212,16 @@ pub struct Signature {
     pub value: String,
 }
 
+#[serde_as]
 #[derive(
     Debug, Serialize, Deserialize, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
 )]
 pub struct MerkleTreeNodeResponse {
-    pub merkle_tree_node_id: u32,
-    pub hash: String,
-    pub stored_bytes: i64,
+    pub merkle_tree_node_id: u64,
+    #[serde_as(as = "Base64")]
+    pub hash: Vec<u8>,
     pub transferred_bytes: u64,
+    pub stored_bytes: i64,
     pub number_of_puts: u64,
     pub number_of_gets: u64,
 }
@@ -272,7 +276,7 @@ pub struct EHDTreeNode {
     pub g_collector: NodePubKey,
 
     #[serde(rename = "merkleTreeNodeId")]
-    pub tree_node_id: u32,
+    pub tree_node_id: u64,
 
     #[serde(rename = "merkleTreeNodeHash")]
     #[serde_as(as = "Base64")]
@@ -362,7 +366,7 @@ pub struct PHDTreeNode {
     pub collector: NodePubKey,
 
     #[serde(rename = "merkleTreeNodeId")]
-    pub tree_node_id: u32,
+    pub tree_node_id: u64,
 
     #[serde(rename = "merkleTreeNodeHash")]
     #[serde_as(as = "Base64")]
@@ -478,6 +482,20 @@ pub struct UnverifiedPath {
 
 #[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode, PartialOrd, Ord, Eq, PartialEq)]
 pub enum InspPathException {
-    NodeAR { bad_leaves_ids: Vec<u64> },
-    BucketAR { bad_leaves_pos: Vec<u64> },
+    NodeAR {
+        node_key: NodePubKey,
+        tca_id: TcaEra,
+        bad_leaves_ids: Vec<u64>,
+        unverified_usage: NodeUsage,
+        collector_key: NodePubKey,
+        collector_sig: Vec<u8>,
+    },
+    BucketAR {
+        bucket_id: BucketId,
+        tca_id: TcaEra,
+        bad_leaves_pos: Vec<u64>,
+        unverified_usage: BucketUsage,
+        collector_key: NodePubKey,
+        collector_sig: Vec<u8>,
+    },
 }
