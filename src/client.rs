@@ -39,27 +39,39 @@ macro_rules! fetch_and_parse_json {
         }
 
         let response = $self.get(&$url, Accept::Any)?;
-
         let body = response.body().collect::<Vec<u8>>();
 
         if $self.verify_sig {
-            let json_response: json::SignedJsonResponse<$signed_ty> =
+            log::info!("Verifying signature in JSON by url: {:?}", $url);
+
+            let json_signed_response: json::SignedJsonResponse<$signed_ty> =
                 serde_json::from_slice(&body).map_err(|_| http::Error::Unknown)?;
 
-            if !json_response.verify() {
+            log::info!("json_signed_response {:?}", json_signed_response);
+
+            if !json_signed_response.verify() {
+                log::info!("UNVERIFIED");
+
                 log::debug!(
                     "Bad .json signature, req: {:?}, resp: {:?}",
                     $url,
-                    json_response
+                    json_signed_response
                 );
                 return Err(http::Error::Unknown);
             }
 
-            Ok(json_response.payload)
+            let json_response = json_signed_response.payload;
+            let signed_by = SignedBy {
+                signer: json_signed_response.signer,
+                signature: json_signed_response.signature,
+            };
+
+            Ok((json_response, Some(signed_by)))
         } else {
             let json_response: $unsigned_ty =
                 serde_json::from_slice(&body).map_err(|_| http::Error::Unknown)?;
-            Ok(json_response)
+
+            Ok((json_response, None))
         }
     }};
 }
@@ -145,13 +157,14 @@ impl<'a> DdcClient<'a> {
             url = format!("{}&prevToken={}", url, prev_token);
         }
 
-        // Now let the macro do the rest
-        fetch_and_parse_json!(
+        let (response, _) = fetch_and_parse_json!(
             self,
             url,
             Vec<json::BucketAggregateResponse>,
             Vec<json::BucketAggregateResponse>
-        )
+        )?;
+
+        Ok(response)
     }
 
     pub fn nodes_aggregates(
@@ -169,12 +182,14 @@ impl<'a> DdcClient<'a> {
             url = format!("{}&prevToken={}", url, prev_token);
         }
 
-        fetch_and_parse_json!(
+        let (response, _) = fetch_and_parse_json!(
             self,
             url,
             Vec<json::NodeAggregateResponse>,
             Vec<json::NodeAggregateResponse>
-        )
+        )?;
+
+        Ok(response)
     }
 
     pub fn challenge_bucket_sub_aggregate(
@@ -239,17 +254,21 @@ impl<'a> DdcClient<'a> {
 
     pub fn eras(&self) -> Result<Vec<json::AggregationEraResponse>, http::Error> {
         let mut url = format!("{}/activity/eras", self.base_url);
-        fetch_and_parse_json!(
+        let (response, _) = fetch_and_parse_json!(
             self,
             url,
             Vec<json::AggregationEraResponse>,
             Vec<json::AggregationEraResponse>
-        )
+        )?;
+
+        Ok(response)
     }
 
     pub fn payment_eras(&self) -> Result<Vec<json::EHDEra>, http::Error> {
         let mut url = format!("{}/activity/payment-eras", self.base_url);
-        fetch_and_parse_json!(self, url, Vec<json::EHDEra>, Vec<json::EHDEra>)
+        let (response, _) = fetch_and_parse_json!(self, url, Vec<json::EHDEra>, Vec<json::EHDEra>)?;
+
+        Ok(response)
     }
 
     pub fn traverse_era_historical_document(
@@ -268,7 +287,11 @@ impl<'a> DdcClient<'a> {
             tree_node_id,
             tree_levels_count
         );
-        fetch_and_parse_json!(self, url, Vec<json::EHDTreeNode>, Vec<json::EHDTreeNode>)
+
+        let (response, _) =
+            fetch_and_parse_json!(self, url, Vec<json::EHDTreeNode>, Vec<json::EHDTreeNode>)?;
+
+        Ok(response)
     }
 
     pub fn traverse_partial_historical_document(
@@ -286,7 +309,11 @@ impl<'a> DdcClient<'a> {
             tree_node_id,
             tree_levels_count
         );
-        fetch_and_parse_json!(self, url, Vec<json::PHDTreeNode>, Vec<json::PHDTreeNode>)
+
+        let (response, _) =
+            fetch_and_parse_json!(self, url, Vec<json::PHDTreeNode>, Vec<json::PHDTreeNode>)?;
+
+        Ok(response)
     }
 
     pub fn traverse_node_aggregate(
@@ -295,7 +322,7 @@ impl<'a> DdcClient<'a> {
         node_key: NodePubKey,
         merkle_tree_node_id: u64,
         levels: u16,
-    ) -> Result<Vec<json::MerkleTreeNodeResponse>, http::Error> {
+    ) -> Result<ApiResponse<Vec<json::MerkleTreeNodeResponse>>, http::Error> {
         let mut url = format!(
             "{}/activity/nodes/{}/traverse?eraId={}&merkleTreeNodeId={}&levels={}",
             self.base_url,
@@ -304,12 +331,20 @@ impl<'a> DdcClient<'a> {
             merkle_tree_node_id,
             levels,
         );
-        fetch_and_parse_json!(
+
+        let (response, signed_by) = fetch_and_parse_json!(
             self,
             url,
             Vec<json::MerkleTreeNodeResponse>,
             Vec<json::MerkleTreeNodeResponse>
-        )
+        )?;
+
+        let api_response = ApiResponse {
+            response,
+            signed_by,
+        };
+
+        Ok(api_response)
     }
 
     pub fn traverse_bucket_sub_aggregate(
@@ -319,7 +354,7 @@ impl<'a> DdcClient<'a> {
         node_key: NodePubKey,
         merkle_tree_node_id: u64,
         levels: u16,
-    ) -> Result<Vec<json::MerkleTreeNodeResponse>, http::Error> {
+    ) -> Result<ApiResponse<Vec<json::MerkleTreeNodeResponse>>, http::Error> {
         let mut url = format!(
             "{}/activity/buckets/{}/traverse?eraId={}&nodeId={}&merkleTreeNodeId={}&levels={}",
             self.base_url,
@@ -329,12 +364,20 @@ impl<'a> DdcClient<'a> {
             merkle_tree_node_id,
             levels,
         );
-        fetch_and_parse_json!(
+
+        let (response, signed_by) = fetch_and_parse_json!(
             self,
             url,
             Vec<json::MerkleTreeNodeResponse>,
             Vec<json::MerkleTreeNodeResponse>
-        )
+        )?;
+
+        let api_response = ApiResponse {
+            response,
+            signed_by,
+        };
+
+        Ok(api_response)
     }
 
     fn merkle_tree_node_id_param(merkle_tree_node_id: &[u64]) -> String {
@@ -363,8 +406,7 @@ impl<'a> DdcClient<'a> {
 
     pub fn submit_inspection_report(
         &self,
-        report_json_str: String, /* todo(yahortsaryk): add .proto definition for `InspEraReport`
-                                  * type */
+        report_json_str: String,
     ) -> Result<proto::inspection::EndpointItmPostPath, http::Error> {
         let url = format!("{}/itm/path", self.base_url);
         let body = report_json_str;
@@ -382,24 +424,33 @@ impl<'a> DdcClient<'a> {
         era: EhdEra,
     ) -> Result<BTreeMap<String, BTreeMap<String, json::InspPathException>>, http::Error> {
         let mut url = format!("{}/itm/exception?eraId={}", self.base_url, era);
+        let (response, _) = fetch_and_parse_json!(
+            self,
+            url,
+            BTreeMap<String, BTreeMap<String, json::InspPathException>>,
+            BTreeMap<String, BTreeMap<String, json::InspPathException>>
+        )?;
 
-        fetch_and_parse_json!(self, url, BTreeMap<String, BTreeMap<String, json::InspPathException>>, BTreeMap<String, BTreeMap<String, json::InspPathException>>)
+        Ok(response)
     }
 
     pub fn get_inspection_summary(&self, era: EhdEra) -> Result<json::InspSummary, http::Error> {
         let mut url = format!("{}/itm/summary?eraId={}", self.base_url, era);
+        let (response, _) = fetch_and_parse_json!(self, url, json::InspSummary, json::InspSummary)?;
 
-        fetch_and_parse_json!(self, url, json::InspSummary, json::InspSummary)
+        Ok(response)
     }
 
     pub fn check_grouping_collector(&self) -> Result<json::IsGCollectorResponse, http::Error> {
         let mut url = format!("{}/activity/is-grouping-collector", self.base_url);
-        fetch_and_parse_json!(
+        let (response, _) = fetch_and_parse_json!(
             self,
             url,
             json::IsGCollectorResponse,
             json::IsGCollectorResponse
-        )
+        )?;
+
+        Ok(response)
     }
 
     pub fn submit_assignments_table(
