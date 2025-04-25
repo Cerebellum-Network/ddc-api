@@ -482,20 +482,38 @@ pub struct UnverifiedPath {
 
 #[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode, PartialOrd, Ord, Eq, PartialEq)]
 pub enum InspPathException {
-    NodeAR {
+    NodeARsSigUnverified {
         node_key: NodePubKey,
         tca_id: TcaEra,
         bad_leaves_ids: Vec<u64>,
         unverified_usage: NodeUsage,
-        collector_key: NodePubKey,
-        collector_sig: Vec<u8>,
+        unverified_usage_collector: NodePubKey,
+        unverified_usage_signature: Vec<u8>,
     },
-    BucketAR {
+    BucketARsSigUnverified {
         bucket_id: BucketId,
+        node_key: NodePubKey,
         tca_id: TcaEra,
-        bad_leaves_pos: Vec<u64>,
+        bad_leaves_ids: Vec<u64>,
         unverified_usage: BucketUsage,
-        collector_key: NodePubKey,
-        collector_sig: Vec<u8>,
+        unverified_usage_collector: NodePubKey,
+        unverified_usage_signature: Vec<u8>,
+    },
+    NodeARsUnavailable {
+        node_key: NodePubKey,
+        tca_id: TcaEra,
+        leaves_ids: Vec<u64>,
+        unverified_usage: NodeUsage,
+        unverified_usage_collector: NodePubKey,
+        unverified_usage_signature: Vec<u8>,
+    },
+    BucketARsUnavailable {
+        bucket_id: BucketId,
+        node_key: NodePubKey,
+        tca_id: TcaEra,
+        leaves_ids: Vec<u64>,
+        unverified_usage: BucketUsage,
+        unverified_usage_collector: NodePubKey,
+        unverified_usage_signature: Vec<u8>,
     },
 }
