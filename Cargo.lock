@@ -635,7 +635,7 @@ dependencies = [
 [[package]]
 name = "ddc-primitives"
 version = "7.3.0"
-source = "git+https://github.com/Cerebellum-Network/ddc-primitives.git?branch=fix%2Fexpect-statements#32ad157b821e6303f0a1f710ea962268df4f4d22"
+source = "git+https://github.com/Cerebellum-Network/ddc-primitives.git?branch=dev#469e66ebb858ffcfc60e913588035a690f15e95b"
 dependencies = [
  "blake2",
  "frame-support",
