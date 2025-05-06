@@ -42,16 +42,10 @@ macro_rules! fetch_and_parse_json {
         let body = response.body().collect::<Vec<u8>>();
 
         if $self.verify_sig {
-            log::info!("Verifying signature in JSON by url: {:?}", $url);
-
             let json_signed_response: json::SignedJsonResponse<$signed_ty> =
                 serde_json::from_slice(&body).map_err(|_| http::Error::Unknown)?;
 
-            log::info!("json_signed_response {:?}", json_signed_response);
-
             if !json_signed_response.verify() {
-                log::info!("UNVERIFIED");
-
                 log::debug!(
                     "Bad .json signature, req: {:?}, resp: {:?}",
                     $url,
