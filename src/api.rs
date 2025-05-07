@@ -4,7 +4,6 @@ use codec::{Decode, Encode};
 use ddc_primitives::{
     traits::{ClusterManager, NodeManager},
     BucketId, ClusterId, EhdEra, NodeParams, NodePubKey, StorageNodeParams, TcaEra,
-    VERIFY_AGGREGATOR_RESPONSE_SIGNATURE,
 };
 use proto::{inspection::endpoint_itm_table::Variant as ItmTableVariant, inspection::ItmTable};
 use scale_info::{
@@ -136,7 +135,7 @@ pub fn check_grouping_collector(node_params: &StorageNodeParams) -> Result<bool,
         &base_url,
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
-        VERIFY_AGGREGATOR_RESPONSE_SIGNATURE,
+        false,
     );
 
     let response = client.check_grouping_collector()?;
@@ -307,21 +306,22 @@ pub fn fetch_bucket_aggregates<
         &base_url,
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
-        VERIFY_AGGREGATOR_RESPONSE_SIGNATURE,
+        true,
     );
 
     let mut buckets_aggregates = Vec::new();
     let mut prev_token = None;
 
     loop {
-        let response = client
+        let api_response= client
             .buckets_aggregates(
                 tcaa_id,
-                Some(BUCKETS_AGGREGATES_FETCH_BATCH_SIZE as u32),
                 prev_token,
+                Some(BUCKETS_AGGREGATES_FETCH_BATCH_SIZE as u32),
             )
             .map_err(|_| ApiError::FailedToFetchBucketAggregate)?;
 
+        let response = api_response.response;
         let response_len = response.len();
 
         prev_token = response.last().map(|a| a.bucket_id);
@@ -591,6 +591,8 @@ pub fn fetch_processed_eras_for_cluster<
     NM: NodeManager<AccountId>,
 >(
     cluster_id: &ClusterId,
+    prev: Option<EhdEra>,
+    limit: Option<u32>,
 ) -> Result<Vec<json::EHDEra>, ApiError> {
     let (_, node_params) =
         get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|_| {
@@ -599,7 +601,7 @@ pub fn fetch_processed_eras_for_cluster<
             }
         })?;
 
-    fetch_processed_eras(&node_params).map_err(|_| ApiError::FailedToFetchProcessedEras {
+    fetch_processed_eras(&node_params, prev, limit).map_err(|_| ApiError::FailedToFetchProcessedEras {
         cluster_id: *cluster_id,
     })
 }
@@ -610,6 +612,8 @@ pub fn fetch_processed_eras_for_cluster<
 /// - `node_params`: Sync node parameters
 pub fn fetch_processed_eras(
     node_params: &StorageNodeParams,
+    prev: Option<EhdEra>,
+    limit: Option<u32>,
 ) -> Result<Vec<json::EHDEra>, http::Error> {
     let host = str::from_utf8(&node_params.host).map_err(|_| http::Error::Unknown)?;
     let base_url = format!("http://{}:{}", host, node_params.http_port);
@@ -617,11 +621,11 @@ pub fn fetch_processed_eras(
         &base_url,
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
-        VERIFY_AGGREGATOR_RESPONSE_SIGNATURE,
+        true,
     );
 
-    let response = client.payment_eras()?;
-    Ok(response
+    let api_response = client.payment_eras(prev, limit)?;
+    Ok(api_response.response
         .into_iter()
         .filter(|e| e.status == "EHD_PROCESSED")
         .collect::<Vec<_>>())
@@ -639,6 +643,8 @@ pub fn fetch_inspected_eras_for_cluster<
     NM: NodeManager<AccountId>,
 >(
     cluster_id: &ClusterId,
+    prev: Option<EhdEra>,
+    limit: Option<u32>,
 ) -> Result<Vec<json::EHDEra>, ApiError> {
     let (_, node_params) =
         get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|_| {
@@ -647,7 +653,7 @@ pub fn fetch_inspected_eras_for_cluster<
             }
         })?;
 
-    fetch_inspected_eras(&node_params).map_err(|_| ApiError::FailedToFetchInspectedEras {
+    fetch_inspected_eras(&node_params, prev, limit).map_err(|_| ApiError::FailedToFetchInspectedEras {
         cluster_id: *cluster_id,
     })
 }
@@ -665,7 +671,7 @@ pub fn fetch_inspected_era<
     cluster_id: &ClusterId,
     era: EhdEra,
 ) -> Result<json::EHDEra, ApiError> {
-    let ehd_eras = fetch_inspected_eras_for_cluster::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+    let ehd_eras = fetch_inspected_eras_for_cluster::<AccountId, BlockNumber, CM, NM>(cluster_id, Some(era - 1), None)?;
     ehd_eras
         .iter()
         .find(|ehd| ehd.id == era)
@@ -685,8 +691,10 @@ pub fn fetch_processed_era<
 >(
     cluster_id: &ClusterId,
     era: EhdEra,
+    prev: Option<EhdEra>,
+    limit: Option<u32>,
 ) -> Result<json::EHDEra, ApiError> {
-    let ehd_eras = fetch_processed_eras_for_cluster::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+    let ehd_eras = fetch_processed_eras_for_cluster::<AccountId, BlockNumber, CM, NM>(cluster_id, prev, limit)?;
     ehd_eras
         .iter()
         .find(|ehd| ehd.id == era)
@@ -701,6 +709,8 @@ pub fn fetch_processed_era<
 #[allow(dead_code)]
 pub fn fetch_inspected_eras(
     node_params: &StorageNodeParams,
+    prev: Option<EhdEra>,
+    limit: Option<u32>,
 ) -> Result<Vec<json::EHDEra>, http::Error> {
     let host = str::from_utf8(&node_params.host).map_err(|_| http::Error::Unknown)?;
     let base_url = format!("http://{}:{}", host, node_params.http_port);
@@ -708,11 +718,11 @@ pub fn fetch_inspected_eras(
         &base_url,
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
-        VERIFY_AGGREGATOR_RESPONSE_SIGNATURE,
+        true,
     );
 
-    let response = client.payment_eras()?;
-    Ok(response
+    let api_response = client.payment_eras(prev, limit)?;
+    Ok(api_response.response
         .into_iter()
         .filter(|e| e.status == "EHD_INSPECTED")
         .collect::<Vec<_>>())
@@ -738,7 +748,7 @@ pub fn fetch_inspection_exceptions<
         &base_url,
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
-        VERIFY_AGGREGATOR_RESPONSE_SIGNATURE, // no response signature verification for now
+        false, // no response signature verification for now
     );
 
     client
@@ -763,7 +773,7 @@ pub fn get_inspection_state<
         &base_url,
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
-        VERIFY_AGGREGATOR_RESPONSE_SIGNATURE, // no response signature verification for now
+        false, // no response signature verification for now
     );
 
     client.get_inspection_state(era)
@@ -786,7 +796,7 @@ pub fn submit_inspection_report<
         &base_url,
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
-        VERIFY_AGGREGATOR_RESPONSE_SIGNATURE, // no response signature verification for now
+        false, // no response signature verification for now
     );
 
     client.submit_inspection_report(report_json_str)
@@ -812,7 +822,7 @@ pub fn submit_assignments_table<
         &base_url,
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
-        VERIFY_AGGREGATOR_RESPONSE_SIGNATURE, // no response signature verification for now
+        false, // no response signature verification for now
     );
 
     client.submit_assignments_table(era, table_json_str, inspector_hex)
@@ -835,7 +845,7 @@ pub fn get_assignments_table<
         &base_url,
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
-        VERIFY_AGGREGATOR_RESPONSE_SIGNATURE,
+        false,
     );
 
     let table_response: proto::inspection::EndpointItmTable = client
@@ -876,7 +886,7 @@ pub fn post_itm_lease<
         &base_url,
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
-        VERIFY_AGGREGATOR_RESPONSE_SIGNATURE, // no response signature verification for now
+        false, // no response signature verification for now
     );
 
     client.post_itm_lease(era, inspector_hex)
@@ -902,7 +912,7 @@ pub fn get_inspection_summary<
         &base_url,
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
-        VERIFY_AGGREGATOR_RESPONSE_SIGNATURE, // no response signature verification for now
+        false,
     );
 
     client
