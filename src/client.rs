@@ -139,26 +139,30 @@ impl<'a> DdcClient<'a> {
     pub fn buckets_aggregates(
         &self,
         era_id: TcaEra,
-        limit: Option<u32>,
         prev_token: Option<BucketId>,
-    ) -> Result<Vec<json::BucketAggregateResponse>, http::Error> {
+        limit: Option<u32>,
+    ) -> Result<ApiResponse<Vec<json::BucketAggregateResponse>>, http::Error> {
         let mut url = format!("{}/activity/buckets?eraId={}", self.base_url, era_id);
-
-        if let Some(limit) = limit {
-            url = format!("{}&limit={}", url, limit);
-        }
         if let Some(prev_token) = prev_token {
             url = format!("{}&prevToken={}", url, prev_token);
         }
+        if let Some(limit) = limit {
+            url = format!("{}&limit={}", url, limit);
+        }
 
-        let (response, _) = fetch_and_parse_json!(
+        let (response, signed_by) = fetch_and_parse_json!(
             self,
             url,
             Vec<json::BucketAggregateResponse>,
             Vec<json::BucketAggregateResponse>
         )?;
 
-        Ok(response)
+        let api_response = ApiResponse {
+            response,
+            signed_by,
+        };
+
+        Ok(api_response)
     }
 
     pub fn nodes_aggregates(
@@ -246,23 +250,55 @@ impl<'a> DdcClient<'a> {
         Ok(api_response)
     }
 
-    pub fn eras(&self) -> Result<Vec<json::AggregationEraResponse>, http::Error> {
+    pub fn eras(&self, prev: Option<EhdEra>, limit: Option<u32>) -> Result<ApiResponse<Vec<json::AggregationEraResponse>>, http::Error> {
         let mut url = format!("{}/activity/eras", self.base_url);
-        let (response, _) = fetch_and_parse_json!(
+        if let Some(prev) = prev {
+            url = format!("{}?prevToken={}", url, prev);
+        }
+        if let Some(limit) = limit {
+            if url.contains('?') {
+                url = format!("{}&limit={}", url, limit);
+            } else {
+                url = format!("{}?limit={}", url, limit);
+            }
+        }
+
+        let (response, signed_by) = fetch_and_parse_json!(
             self,
             url,
             Vec<json::AggregationEraResponse>,
             Vec<json::AggregationEraResponse>
         )?;
 
-        Ok(response)
+        let api_response = ApiResponse {
+            response,
+            signed_by,
+        };
+        
+        Ok(api_response)
     }
 
-    pub fn payment_eras(&self) -> Result<Vec<json::EHDEra>, http::Error> {
+    pub fn payment_eras(&self, prev: Option<EhdEra>, limit: Option<u32>) -> Result<ApiResponse<Vec<json::EHDEra>>, http::Error> {
         let mut url = format!("{}/activity/payment-eras", self.base_url);
-        let (response, _) = fetch_and_parse_json!(self, url, Vec<json::EHDEra>, Vec<json::EHDEra>)?;
+        if let Some(prev) = prev {
+            url = format!("{}?prevToken={}", url, prev);
+        }
+        if let Some(limit) = limit {
+            if url.contains('?') {
+                url = format!("{}&limit={}", url, limit);
+            } else {
+                url = format!("{}?limit={}", url, limit);
+            }
+        }
+        
+        let (response, signed_by) = fetch_and_parse_json!(self, url, Vec<json::EHDEra>, Vec<json::EHDEra>)?;
 
-        Ok(response)
+        let api_response = ApiResponse {
+            response,
+            signed_by,
+        };
+
+        Ok(api_response)
     }
 
     pub fn traverse_era_historical_document(
