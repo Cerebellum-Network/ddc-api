@@ -1,6 +1,6 @@
 [package]
 name = "ddc-api"
-version = "7.3.0"
+version = "7.3.2"
 authors = ["Cerebellum-Network"]
 edition = "2021"
 homepage = "https://cere.network/"

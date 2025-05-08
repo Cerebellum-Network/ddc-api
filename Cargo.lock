@@ -609,7 +609,7 @@ dependencies = [
 
 [[package]]
 name = "ddc-api"
-version = "7.3.0"
+version = "7.3.2"
 dependencies = [
  "blake2",
  "ddc-primitives",
