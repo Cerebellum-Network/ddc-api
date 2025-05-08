@@ -635,7 +635,7 @@ dependencies = [
 [[package]]
 name = "ddc-primitives"
 version = "7.3.2"
-source = "git+https://github.com/Cerebellum-Network/ddc-primitives.git?branch=dev#0dc729b187ccf9388bf7cd9169ba48710345747e"
+source = "git+https://github.com/Cerebellum-Network/ddc-primitives.git?branch=staging#78e783404d71a92229061331a791ccd2c969c2d9"
 dependencies = [
  "blake2",
  "frame-support",
