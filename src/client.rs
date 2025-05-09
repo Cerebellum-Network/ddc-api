@@ -43,11 +43,14 @@ macro_rules! fetch_and_parse_json {
 
         if $self.verify_sig {
             let json_signed_response: json::SignedJsonResponse<$signed_ty> =
-                serde_json::from_slice(&body).map_err(|_| http::Error::Unknown)?;
+                serde_json::from_slice(&body).map_err(|e| {
+                    log::error!("❌ Failed to parse signed .json: {:?}", e);
+                    http::Error::Unknown
+                })?;
 
             if !json_signed_response.verify() {
-                log::debug!(
-                    "Bad .json signature, req: {:?}, resp: {:?}",
+                log::error!(
+                    "❌ Bad .json signature, req: {:?}, resp: {:?}",
                     $url,
                     json_signed_response
                 );
@@ -63,7 +66,10 @@ macro_rules! fetch_and_parse_json {
             Ok((json_response, Some(signed_by)))
         } else {
             let json_response: $unsigned_ty =
-                serde_json::from_slice(&body).map_err(|_| http::Error::Unknown)?;
+                serde_json::from_slice(&body).map_err(|e| {
+                    log::error!("❌ Failed to parse unsigned .json: {:?}", e);
+                    http::Error::Unknown
+                })?;
 
             Ok((json_response, None))
         }
@@ -97,8 +103,8 @@ macro_rules! fetch_and_parse_proto {
                 .map_err(|_| http::Error::Unknown)?;
 
             if !proto_signed_response.verify() {
-                log::debug!(
-                    "Bad .proto signature, req: {:?}, resp: {:?}",
+                log::error!(
+                    "❌ Bad .proto signature, req: {:?}, resp: {:?}",
                     $url,
                     proto_signed_response
                 );
@@ -107,7 +113,10 @@ macro_rules! fetch_and_parse_proto {
 
             let proto_response: $signed_ty =
                 <$signed_ty>::decode(proto_signed_response.payload.as_slice())
-                    .map_err(|_| http::Error::Unknown)?;
+                    .map_err(|_| http::Error::Unknown).map_err(|e| {
+                    log::error!("❌ Failed to parse signed .proto: {:?}", e);
+                    http::Error::Unknown
+                })?;
             let signed_by = proto_signed_response
                 .signature
                 .map(|v| SignedBy {
@@ -119,7 +128,10 @@ macro_rules! fetch_and_parse_proto {
             Ok((proto_response, Some(signed_by)))
         } else {
             let proto_response: $unsigned_ty =
-                <$unsigned_ty>::decode(body.as_slice()).map_err(|_| http::Error::Unknown)?;
+                <$unsigned_ty>::decode(body.as_slice()).map_err(|_| http::Error::Unknown).map_err(|e| {
+                    log::error!("❌ Failed to parse unsigned .proto: {:?}", e);
+                    http::Error::Unknown
+                })?;
 
             Ok((proto_response, None))
         }
