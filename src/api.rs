@@ -306,7 +306,7 @@ pub fn fetch_bucket_aggregates<
         &base_url,
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
-        true,
+        false,
     );
 
     let mut buckets_aggregates = Vec::new();
@@ -621,7 +621,7 @@ pub fn fetch_processed_eras(
         &base_url,
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
-        true,
+        false,
     );
 
     let api_response = client.payment_eras(prev, limit)?;
@@ -718,7 +718,7 @@ pub fn fetch_inspected_eras(
         &base_url,
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
-        true,
+        false,
     );
 
     let api_response = client.payment_eras(prev, limit)?;
