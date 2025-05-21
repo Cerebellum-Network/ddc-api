@@ -640,7 +640,7 @@ dependencies = [
 [[package]]
 name = "ddc-primitives"
 version = "7.3.2"
-source = "git+https://github.com/Cerebellum-Network/ddc-primitives.git?branch=feat/ddc-customer-balance-per-cluster#617d8e3da2b15e18171d80e1f293811de96c70aa"
+source = "git+https://github.com/Cerebellum-Network/ddc-primitives.git?branch=feat/ddc-customer-balance-per-cluster#105a940a33482efa1e6417e2d640fc8fa782ab77"
 dependencies = [
  "blake2",
  "frame-support",
