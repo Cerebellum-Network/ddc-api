@@ -460,6 +460,14 @@ pub struct IsGCollectorResponse {
     pub is_g_collector: bool,
 }
 
+#[serde_as]
+#[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode)]
+pub struct GCollectorsResponse {
+    #[serde(rename = "keys")]
+    #[serde_as(as = "Vec<TryFromInto<String>>")]
+    pub nodes_keys: Vec<NodePubKey>,
+}
+
 pub type PathId = String;
 
 #[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode, PartialOrd, Ord, Eq, PartialEq)]
@@ -482,6 +490,11 @@ pub struct UnverifiedPath {
 
 #[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode, PartialOrd, Ord, Eq, PartialEq)]
 pub enum InspPathException {
+    MultipleExceptions {
+        /// Serialized exceptions of `InspPathException` type as SCALE encoded bytes. 
+        /// We do not use recursive type here as the inspection module depends on a different type. 
+        exceptions: Vec<Vec<u8>>,
+    },
     NodeARsSigUnverified {
         node_key: NodePubKey,
         tca_id: TcaEra,
@@ -515,5 +528,30 @@ pub enum InspPathException {
         unverified_usage: BucketUsage,
         unverified_usage_collector: NodePubKey,
         unverified_usage_signature: Vec<u8>,
+    },
+    NodeAggregateMalformed {
+        node_key: NodePubKey,
+        tca_id: TcaEra,
+        unverified_usage: NodeUsage,
+        unverified_usage_collector: NodePubKey,
+        unverified_usage_signature: Vec<u8>,
+    },
+    BucketAggregateMalformed {
+        bucket_id: BucketId,
+        tca_id: TcaEra,
+        unverified_usage: BucketUsage,
+        unverified_usage_collector: NodePubKey,
+        unverified_usage_signature: Vec<u8>,
+    },
+    NodeCumulativeUsageUnavailable {
+        node_key: NodePubKey,
+        tca_id: TcaEra,
+        accessible_unverified_usage: NodeUsage,
+    },
+    BucketCumulativeUsageUnavailable {
+        bucket_id: BucketId,
+        node_key: Option<NodePubKey>,
+        tca_id: TcaEra,
+        accessible_unverified_usage: BucketUsage,
     },
 }
