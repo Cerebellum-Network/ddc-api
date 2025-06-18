@@ -170,4 +170,5 @@ message PathInspReceipts {
 message PathInspReceipt {
   string hash = 1;
   uint32 counter = 2;
+  repeated string remaining_inspectors = 3;
 }
