@@ -165,10 +165,10 @@ message EndpointItmGetPathsState {
 message PathInspReceipts {
   string path_id = 1;
   repeated PathInspReceipt receipts = 2;
+  repeated string remaining_inspectors = 3;
 }
 
 message PathInspReceipt {
   string hash = 1;
   uint32 counter = 2;
-  repeated string remaining_inspectors = 3;
 }
