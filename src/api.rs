@@ -16,7 +16,7 @@ use sp_std::{collections::btree_map::BTreeMap, prelude::*};
 use crate::{
     client::DdcClient,
     json,
-    proto::{self},
+    proto,
 };
 
 #[macro_export]
@@ -1044,7 +1044,7 @@ pub fn submit_inspection_report<
     NM: NodeManager<AccountId>,
 >(
     cluster_id: &ClusterId,
-    report_json_str: String, // todo(yahortsaryk): add .proto definition for `InspEraReport` type
+    report: proto::inspection::ItmPathSubmission,
 ) -> Result<proto::inspection::EndpointItmPostPath, ApiError> {
     let (sync_node_key, sync_node_params) =
         get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
@@ -1064,7 +1064,7 @@ pub fn submit_inspection_report<
     );
 
     client
-        .submit_inspection_report(report_json_str)
+        .submit_inspection_report(report)
         .map_err(|_| ApiError::HttpClientError {
             cluster_id: *cluster_id,
             host: sync_node_params.host.clone(),

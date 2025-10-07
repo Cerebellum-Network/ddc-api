@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package inspection;
 
+import "google/protobuf/struct.proto";
+
 // GET  /itm/table  -- returns the table or era "not found" / "not yet processed" / "waiting" / "building".
 
 message ItmTable {
@@ -171,4 +173,20 @@ message PathInspReceipts {
 message PathInspReceipt {
   string hash = 1;
   uint32 counter = 2;
+}
+
+message ItmPathReceiptPayload {
+  string path_id = 1;
+  bool is_verified = 2;
+  google.protobuf.Struct exception = 3;
+  repeated string collectors_keys = 4;
+  repeated bytes collectors_sigs = 5;
+  string hash = 6;
+}
+
+message ItmPathSubmission {
+  uint32 era = 1;
+  string inspector = 2;
+  string signature = 3;
+  repeated ItmPathReceiptPayload path_receipts = 4;
 }

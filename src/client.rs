@@ -460,10 +460,10 @@ impl<'a> DdcClient<'a> {
 
     pub fn submit_inspection_report(
         &self,
-        report_json_str: String,
+        report: proto::inspection::ItmPathSubmission,
     ) -> Result<proto::inspection::EndpointItmPostPath, http::Error> {
         let url = format!("{}/itm/path", self.base_url);
-        let body = report_json_str;
+        let body = report.encode_to_vec();
 
         let response = self.post(&url, body.into(), Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
