@@ -857,7 +857,6 @@ dependencies = [
  "polkadot-ckb-merkle-mountain-range",
  "prost",
  "prost-build",
- "prost-types",
  "scale-info",
  "serde",
  "serde_json",
