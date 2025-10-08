@@ -126,6 +126,17 @@ message EndpointItmSubmit {
   }
 }
 
+// POST /itm/submit request payload
+message PathAssignment {
+  string path_id = 1;
+  repeated string inspector_keys = 2;
+}
+
+message ItmTableSubmission {
+  uint32 irf = 1;  // Inspection Redundancy Factor
+  repeated PathAssignment assignments = 2;
+}
+
 message PostPathSuccess {
   string inspector = 1;
   uint32 eid = 2;  // Era ID.

@@ -522,15 +522,14 @@ impl<'a> DdcClient<'a> {
     pub fn submit_assignments_table(
         &self,
         era: EhdEra,
-        table_json_str: String, /* todo(yahortsaryk): add .proto definition for
-                                 * `InspAssignmentsTable` type */
+        table: proto::inspection::ItmTableSubmission,
         inspector_hex: String,
     ) -> Result<proto::inspection::EndpointItmSubmit, http::Error> {
         let url = format!(
             "{}/itm/submit?eraId={}&inspectorKey={}",
             self.base_url, era, inspector_hex
         );
-        let body = table_json_str;
+        let body = table.encode_to_vec();
 
         let response = self.post(&url, body.into(), Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
@@ -563,10 +562,8 @@ impl<'a> DdcClient<'a> {
             self.base_url, era, inspector_hex
         );
 
-        let json = serde_json::json!({ "inspector_key": inspector_hex });
-        let body = serde_json::to_string(&json).expect("Assignments table to be encoded");
-
-        let response = self.post(&url, body.into(), Accept::Protobuf)?;
+        // No request body needed - all params in query string
+        let response = self.post(&url, Vec::new().into(), Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
 
         let proto_response = proto::inspection::EndpointItmLease::decode(body.as_slice())
