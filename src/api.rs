@@ -120,6 +120,9 @@ pub enum ApiError {
     FailedToFetchProcessedEras {
         cluster_id: ClusterId,
     },
+    FailedToFetchInspectionDryRunParams {
+        cluster_id: ClusterId,
+    },
 }
 
 #[derive(
@@ -216,8 +219,12 @@ pub fn get_sync_node<
 >(
     cluster_id: &ClusterId,
 ) -> Result<(NodePubKey, StorageNodeParams), ApiError> {
-    // todo(yahortsaryk): replace G-Collector with Sync node once it is supported at DDC
-    get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id)
+    if let Some(dry_run_params) = CM::get_inspection_dry_run_params(cluster_id) {
+        Ok((dry_run_params.sync_node_key, dry_run_params.sync_node_params))
+    } else {
+        // todo(yahortsaryk): replace G-Collector with Sync node once it is supported at DDC
+        get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id)
+    }
 }
 
 /// Fetch customer usage.
@@ -815,12 +822,14 @@ pub fn fetch_processed_eras_for_cluster<
     prev: Option<EhdEra>,
     limit: Option<u32>,
 ) -> Result<Vec<json::EHDEra>, ApiError> {
-    let (_node_key, node_params) = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)
-        .map_err(|_| ApiError::FailedToFetchSyncNodes {
+    // note(yahortsaryk): processed eras always have corresponding EHD stored at global collector side
+    let (_, g_collector_params) = get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|_| {
+        ApiError::FailedToFetchGCollectors {
             cluster_id: *cluster_id,
-        })?;
+        }
+    })?;
 
-    fetch_processed_eras(&node_params, prev, limit).map_err(|_| {
+    fetch_processed_eras(&g_collector_params, prev, limit).map_err(|_| {
         ApiError::FailedToFetchProcessedEras {
             cluster_id: *cluster_id,
         }
@@ -957,7 +966,7 @@ pub fn fetch_inspected_eras(
         false,
     );
 
-    let api_response = client.payment_eras(prev, limit)?;
+    let api_response = client.inspected_eras(prev, limit)?;
     Ok(api_response
         .response
         .into_iter()
