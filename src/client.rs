@@ -329,6 +329,7 @@ impl<'a> DdcClient<'a> {
         &self,
         prev: Option<EhdEra>,
         limit: Option<u32>,
+        dry_run: bool,
     ) -> Result<ApiResponse<Vec<json::EHDEra>>, http::Error> {
         let mut url = format!("{}/itm/inspected-eras", self.base_url);
         if let Some(prev) = prev {
@@ -339,6 +340,14 @@ impl<'a> DdcClient<'a> {
                 url = format!("{}&limit={}", url, limit);
             } else {
                 url = format!("{}?limit={}", url, limit);
+            }
+        }
+        
+        if dry_run {
+            if url.contains('?') {
+                url = format!("{}&dryRun=true", url);
+            } else {
+                url = format!("{}?dryRun=true", url);
             }
         }
 
@@ -473,8 +482,13 @@ impl<'a> DdcClient<'a> {
     pub fn get_inspection_state(
         &self,
         era: EhdEra,
+        dry_run: bool,
     ) -> Result<proto::inspection::EndpointItmGetPathsState, http::Error> {
-        let url = format!("{}/itm/state?eraId={}", self.base_url, era);
+        let mut url = format!("{}/itm/state?eraId={}", self.base_url, era);
+        
+        if dry_run {
+            url = format!("{}&dryRun=true", url);
+        }
         let response = self.get(&url, Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
         let proto_response = proto::inspection::EndpointItmGetPathsState::decode(body.as_slice())
@@ -489,8 +503,13 @@ impl<'a> DdcClient<'a> {
     pub fn submit_inspection_report(
         &self,
         report_json_str: String,
+        dry_run: bool,
     ) -> Result<proto::inspection::EndpointItmPostPath, http::Error> {
-        let url = format!("{}/itm/path", self.base_url);
+        let mut url = format!("{}/itm/path", self.base_url);
+        
+        if dry_run {
+            url = format!("{}?dryRun=true", url);
+        }
         let body = report_json_str;
 
         let response = self.post(&url, body.into(), Accept::Protobuf)?;
@@ -504,8 +523,13 @@ impl<'a> DdcClient<'a> {
     pub fn fetch_inspection_exceptions(
         &self,
         era: EhdEra,
+        dry_run: bool,
     ) -> Result<BTreeMap<String, BTreeMap<String, json::InspPathException>>, http::Error> {
         let mut url = format!("{}/itm/exception?eraId={}", self.base_url, era);
+        
+        if dry_run {
+            url = format!("{}&dryRun=true", url);
+        }
         let (response, _) = fetch_and_parse_json!(
             self,
             url,
@@ -516,8 +540,12 @@ impl<'a> DdcClient<'a> {
         Ok(response)
     }
 
-    pub fn get_inspection_summary(&self, era: EhdEra) -> Result<json::InspSummary, http::Error> {
+    pub fn get_inspection_summary(&self, era: EhdEra, dry_run: bool) -> Result<json::InspSummary, http::Error> {
         let mut url = format!("{}/itm/summary?eraId={}", self.base_url, era);
+        
+        if dry_run {
+            url = format!("{}&dryRun=true", url);
+        }
         let (response, _) = fetch_and_parse_json!(self, url, json::InspSummary, json::InspSummary)?;
 
         Ok(response)
@@ -553,11 +581,16 @@ impl<'a> DdcClient<'a> {
         table_json_str: String, /* todo(yahortsaryk): add .proto definition for
                                  * `InspAssignmentsTable` type */
         inspector_hex: String,
+        dry_run: bool,
     ) -> Result<proto::inspection::EndpointItmSubmit, http::Error> {
-        let url = format!(
+        let mut url = format!(
             "{}/itm/submit?eraId={}&inspectorKey={}",
             self.base_url, era, inspector_hex
         );
+        
+        if dry_run {
+            url = format!("{}&dryRun=true", url);
+        }
         let body = table_json_str;
 
         let response = self.post(&url, body.into(), Accept::Protobuf)?;
@@ -571,8 +604,13 @@ impl<'a> DdcClient<'a> {
     pub fn get_assignments_table(
         &self,
         era: EhdEra,
+        dry_run: bool,
     ) -> Result<proto::inspection::EndpointItmTable, http::Error> {
-        let url = format!("{}/itm/table?eraId={}", self.base_url, era);
+        let mut url = format!("{}/itm/table?eraId={}", self.base_url, era);
+        
+        if dry_run {
+            url = format!("{}&dryRun=true", url);
+        }
         let response = self.get(&url, Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
 
@@ -585,11 +623,16 @@ impl<'a> DdcClient<'a> {
         &self,
         era: EhdEra,
         inspector_hex: String,
+        dry_run: bool,
     ) -> Result<proto::inspection::EndpointItmLease, http::Error> {
-        let url = format!(
+        let mut url = format!(
             "{}/itm/lease?eraId={}&inspectorKey={}",
             self.base_url, era, inspector_hex
         );
+        
+        if dry_run {
+            url = format!("{}&dryRun=true", url);
+        }
 
         let json = serde_json::json!({ "inspector_key": inspector_hex });
         let body = serde_json::to_string(&json).expect("Assignments table to be encoded");
