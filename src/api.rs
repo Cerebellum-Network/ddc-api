@@ -225,7 +225,12 @@ pub fn get_sync_node<
 >(
     cluster_id: &ClusterId,
 ) -> Result<SyncNode, ApiError> {
-    if let Some(params) = CM::get_inspection_dry_run_params(cluster_id) {
+    
+    let dry_run_params = CM::get_inspection_dry_run_params(cluster_id).map_err(|_| ApiError::FailedToFetchInspectionDryRunParams {
+        cluster_id: *cluster_id,
+    })?;
+
+    if let Some(params) = dry_run_params {
         Ok(SyncNode {
             dry_run: params.enabled,
             key: params.sync_node_key,
