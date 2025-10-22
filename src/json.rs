@@ -491,8 +491,8 @@ pub struct UnverifiedPath {
 #[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode, PartialOrd, Ord, Eq, PartialEq)]
 pub enum InspPathException {
     MultipleExceptions {
-        /// Serialized exceptions of `InspPathException` type as SCALE encoded bytes. 
-        /// We do not use recursive type here as the inspection module depends on a different type. 
+        /// Serialized exceptions of `InspPathException` type as SCALE encoded bytes.
+        /// We do not use recursive type here as the inspection module depends on a different type.
         exceptions: Vec<Vec<u8>>,
     },
     NodeARsSigUnverified {

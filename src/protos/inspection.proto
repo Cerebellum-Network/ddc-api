@@ -126,6 +126,48 @@ message EndpointItmSubmit {
   }
 }
 
+// POST /itm/submit request payload
+
+// InspPath enum variants
+message InspPathNodeAR {
+  bytes node = 1;              // DataNodeKey (NodePubKey = AccountId32 = 32 bytes)
+  uint32 tca_id = 2;           // TcaEra (u32)
+  repeated uint64 leaves_ids = 3;  // Vec<u64>
+  repeated bytes collectors = 4;   // BTreeSet<CollectorNodeKey> (NodePubKey = AccountId32 = 32 bytes each)
+}
+
+message InspPathBucketAR {
+  uint64 bucket = 1;           // BucketId (u64)
+  uint32 tca_id = 2;           // TcaEra (u32)
+  repeated uint64 leaves_pos = 3;  // Vec<u64>
+  repeated bytes collectors = 4;   // BTreeSet<CollectorNodeKey> (NodePubKey = AccountId32 = 32 bytes each)
+}
+
+message InspPath {
+  oneof variant {
+    InspPathNodeAR node_ar = 1;
+    InspPathBucketAR bucket_ar = 2;
+  }
+}
+
+message PathAssignment {
+  bytes path_id = 1;           // InspPathId (H256 = 32 bytes)
+  repeated bytes inspector_keys = 2;  // Vec<AccountId> (each AccountId as AccountId32 = 32 bytes)
+}
+
+message PathEntry {
+  bytes path_id = 1;           // InspPathId (H256 = 32 bytes)
+  InspPath path = 2;           // InspPath data
+}
+
+message ItmTableSubmission {
+  bytes cluster_id = 1;        // ClusterId (H160 = 20 bytes)
+  uint32 era = 2;              // EhdEra (u32)
+  uint32 irf = 3;              // Inspection Redundancy Factor (u8 -> uint32)
+  repeated PathEntry paths = 4;           // BTreeMap<InspPathId, InspPath> as repeated entries
+  repeated PathAssignment assignments = 5;   // BTreeMap<InspPathId, Vec<AccountId>>
+}
+
 message PostPathSuccess {
   string inspector = 1;
   uint32 eid = 2;  // Era ID.
@@ -171,4 +213,20 @@ message PathInspReceipts {
 message PathInspReceipt {
   string hash = 1;
   uint32 counter = 2;
+}
+
+message ItmPathReceiptPayload {
+  string path_id = 1;
+  bool is_verified = 2;
+  string exception = 3;  // JSON-encoded exception data
+  repeated string collectors_keys = 4;
+  repeated bytes collectors_sigs = 5;
+  string hash = 6;
+}
+
+message ItmPathSubmission {
+  uint32 era = 1;
+  string inspector = 2;
+  string signature = 3;
+  repeated ItmPathReceiptPayload path_receipts = 4;
 }

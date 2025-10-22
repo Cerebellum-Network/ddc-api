@@ -13,11 +13,7 @@ use serde::{Deserialize, Serialize};
 use sp_runtime::offchain::{http, Duration};
 use sp_std::{collections::btree_map::BTreeMap, prelude::*};
 
-use crate::{
-    client::DdcClient,
-    json,
-    proto::{self},
-};
+use crate::{client::DdcClient, json, proto};
 
 #[macro_export]
 macro_rules! log {
@@ -162,7 +158,7 @@ pub fn get_g_collectors_nodes<
                 continue;
             }
         }
-        
+
         if g_collectors_keys.contains(&node_key) {
             g_collectors.push((node_key, node_params))
         }
@@ -275,10 +271,9 @@ pub fn get_grouping_collectors_keys(
             cluster_id: *cluster_id,
             host: node_params.host.clone(),
         })?;
-        
+
     Ok(response.nodes_keys)
 }
-
 
 /// Fetch collectors nodes of a cluster.
 /// Parameters:
@@ -1044,7 +1039,7 @@ pub fn submit_inspection_report<
     NM: NodeManager<AccountId>,
 >(
     cluster_id: &ClusterId,
-    report_json_str: String, // todo(yahortsaryk): add .proto definition for `InspEraReport` type
+    report: proto::inspection::ItmPathSubmission,
 ) -> Result<proto::inspection::EndpointItmPostPath, ApiError> {
     let (sync_node_key, sync_node_params) =
         get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
@@ -1064,7 +1059,7 @@ pub fn submit_inspection_report<
     );
 
     client
-        .submit_inspection_report(report_json_str)
+        .submit_inspection_report(report)
         .map_err(|_| ApiError::HttpClientError {
             cluster_id: *cluster_id,
             host: sync_node_params.host.clone(),
@@ -1079,8 +1074,7 @@ pub fn submit_assignments_table<
 >(
     cluster_id: &ClusterId,
     era: EhdEra,
-    table_json_str: String, /* todo(yahortsaryk): add .proto definition for
-                             * `InspAssignmentsTable` type */
+    table: proto::inspection::ItmTableSubmission,
     inspector_hex: String,
 ) -> Result<proto::inspection::EndpointItmSubmit, ApiError> {
     let (sync_node_key, sync_node_params) =
@@ -1101,7 +1095,7 @@ pub fn submit_assignments_table<
     );
 
     client
-        .submit_assignments_table(era, table_json_str, inspector_hex)
+        .submit_assignments_table(era, table, inspector_hex)
         .map_err(|_| ApiError::HttpClientError {
             cluster_id: *cluster_id,
             host: sync_node_params.host.clone(),
