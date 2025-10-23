@@ -475,7 +475,6 @@ pub struct InspSummary {
     pub era: EhdEra,
     pub verified_paths: BTreeMap<PathId, VerifiedPath>,
     pub unverified_paths: BTreeMap<PathId, UnverifiedPath>,
-    pub dry_run: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Encode, Decode, PartialOrd, Ord, Eq, PartialEq)]

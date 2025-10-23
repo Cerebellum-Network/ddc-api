@@ -842,18 +842,45 @@ pub fn fetch_processed_eras_for_cluster<
     prev: Option<EhdEra>,
     limit: Option<u32>,
 ) -> Result<Vec<json::EHDEra>, ApiError> {
-    // note(yahortsaryk): processed eras always have corresponding EHD stored at global collector side
-    let (_, g_collector_params) = get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|_| {
-        ApiError::FailedToFetchGCollectors {
-            cluster_id: *cluster_id,
-        }
-    })?;
 
-    fetch_processed_eras(&g_collector_params, prev, limit).map_err(|_| {
-        ApiError::FailedToFetchProcessedEras {
+    let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+
+    if sync_node.dry_run {
+        // note(yahortsaryk): to prevent interference between production DDC network and stage DDC network during dry-run, we fetch processed eras from pre-configured Sync Node.
+        let host =
+        str::from_utf8(&sync_node.params.host).map_err(|_| ApiError::NodeHostParseError {
             cluster_id: *cluster_id,
-        }
-    })
+            node_key: sync_node.key.clone(),
+            host: sync_node.params.host.clone(),
+        })?;
+        let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
+        let client = DdcClient::new(
+            &base_url,
+            Duration::from_millis(RESPONSE_TIMEOUT),
+            MAX_RETRIES_COUNT,
+            false, // no response signature verification for now
+        );
+
+        let api_response = client.processed_eras(prev, limit, sync_node.dry_run).map_err(|_| ApiError::FailedToFetchProcessedEras {
+            cluster_id: *cluster_id,
+        })?;
+
+        Ok(api_response.response)
+
+    } else {
+        // note(yahortsaryk): processed eras always have corresponding EHD stored at global collector side, not sync node side. Global Collectors and Sync Node can be different quorums of nodes.
+        let (_, g_collector_params) = get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|_| {
+            ApiError::FailedToFetchGCollectors {
+                cluster_id: *cluster_id,
+            }
+        })?;
+
+        fetch_processed_eras(&g_collector_params, prev, limit).map_err(|_| {
+            ApiError::FailedToFetchProcessedEras {
+                cluster_id: *cluster_id,
+            }
+        })
+    }
 }
 
 /// Fetch processed payment era era
@@ -874,7 +901,7 @@ pub fn fetch_processed_eras(
         false,
     );
 
-    let api_response = client.payment_eras(prev, limit)?;
+    let api_response = client.activity_eras(prev, limit)?;
     Ok(api_response
         .response
         .into_iter()
