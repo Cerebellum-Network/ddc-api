@@ -30,6 +30,7 @@ sp-std = { version = "14.0.0", default-features = false }
 # Cere dependencies
 ddc-primitives = { git = "https://github.com/Cerebellum-Network/ddc-primitives.git", branch = "dev", default-features = false }
 
+
 [build-dependencies]
 prost-build = "0.13.3"
 
