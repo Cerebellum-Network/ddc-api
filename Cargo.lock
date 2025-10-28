@@ -868,7 +868,7 @@ dependencies = [
 [[package]]
 name = "ddc-primitives"
 version = "7.3.2"
-source = "git+https://github.com/Cerebellum-Network/ddc-primitives.git?branch=staging#30716db14fd3a2e2e163389a187807dfd1e3a51c"
+source = "git+https://github.com/Cerebellum-Network/ddc-primitives.git?branch=staging-dry-run#13f2a4a15fbb5208675aab5ae7bd844c8419f012"
 dependencies = [
  "blake2",
  "frame-support",
@@ -4325,9 +4325,9 @@ dependencies = [
 
 [[package]]
 name = "unicode-ident"
-version = "1.0.20"
+version = "1.0.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "462eeb75aeb73aea900253ce739c8e18a67423fadf006037cd3ff27e82748a06"
+checksum = "f63a545481291138910575129486daeaf8ac54aee4387fe7906919f7830c7d9d"
 
 [[package]]
 name = "unicode-normalization"
