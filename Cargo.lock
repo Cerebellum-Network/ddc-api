@@ -868,7 +868,7 @@ dependencies = [
 [[package]]
 name = "ddc-primitives"
 version = "7.3.2"
-source = "git+https://github.com/Cerebellum-Network/ddc-primitives.git?branch=staging-dry-run#13f2a4a15fbb5208675aab5ae7bd844c8419f012"
+source = "git+https://github.com/Cerebellum-Network/ddc-primitives.git?branch=staging#807a4a9edc599ce456a7d896e94e1a0004aaea12"
 dependencies = [
  "blake2",
  "frame-support",
