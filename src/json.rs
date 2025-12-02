@@ -58,6 +58,8 @@ pub struct BucketAggregateResponse {
     pub number_of_puts: u64,
     /// Total number of gets.
     pub number_of_gets: u64,
+    /// Total number of compute.
+    pub number_of_compute: u64,
     /// Bucket sub aggregates.
     pub sub_aggregates: Vec<BucketSubAggregateResponse>,
 }
@@ -78,6 +80,8 @@ pub struct BucketSubAggregateResponse {
     pub number_of_puts: u64,
     /// Total number of gets.
     pub number_of_gets: u64,
+    /// Totoal number of compute
+    pub number_of_compute: u64,
 }
 
 /// Bucket activity per a DDC node.
@@ -398,6 +402,8 @@ pub struct PHDNodeTCA {
     pub number_of_puts: u64,
     #[serde(rename = "numberOfGets")]
     pub number_of_gets: u64,
+    #[serde(rename = "numberOfCompute")]
+    pub number_of_compute: u64,
 }
 
 impl Into<NodeUsage> for PHDNodeTCA {
@@ -407,6 +413,7 @@ impl Into<NodeUsage> for PHDNodeTCA {
             stored_bytes: self.stored_bytes,
             number_of_gets: self.number_of_gets,
             number_of_puts: self.number_of_puts,
+            number_of_compute: self.number_of_compute,
         }
     }
 }
@@ -429,6 +436,8 @@ pub struct PHDBucketTCA {
     pub number_of_puts: u64,
     #[serde(rename = "numberOfGets")]
     pub number_of_gets: u64,
+    #[serde(rename = "numberOfCompute")]
+    pub number_of_compute: u64,
 }
 
 impl Into<BucketUsage> for PHDBucketTCA {
@@ -438,6 +447,7 @@ impl Into<BucketUsage> for PHDBucketTCA {
             stored_bytes: self.stored_bytes,
             number_of_gets: self.number_of_gets,
             number_of_puts: self.number_of_puts,
+            number_of_compute: self.number_of_compute,
         }
     }
 }
