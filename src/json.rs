@@ -27,6 +27,12 @@ pub struct NodeAggregateResponse {
     pub number_of_puts: u64,
     /// Total number of gets.
     pub number_of_gets: u64,
+    /// Total number of compute.
+    pub cpu_units: u64,
+    /// Total number of GPU units.
+    pub gpu_units: u64,
+    /// Total number of RAM units.
+    pub ram_units: u64,
 }
 
 /// DDC aggregation era
@@ -58,8 +64,12 @@ pub struct BucketAggregateResponse {
     pub number_of_puts: u64,
     /// Total number of gets.
     pub number_of_gets: u64,
-    /// Total number of compute.
-    pub number_of_compute: u64,
+    /// Total number of CPU units.
+    pub cpu_units: u64,
+    /// Total number of GPU units.
+    pub gpu_units: u64,
+    /// Total number of RAM units.
+    pub ram_units: u64,
     /// Bucket sub aggregates.
     pub sub_aggregates: Vec<BucketSubAggregateResponse>,
 }
@@ -80,8 +90,12 @@ pub struct BucketSubAggregateResponse {
     pub number_of_puts: u64,
     /// Total number of gets.
     pub number_of_gets: u64,
-    /// Totoal number of compute
-    pub number_of_compute: u64,
+    /// Total number of CPU units.
+    pub cpu_units: u64,
+    /// Total number of GPU units.
+    pub gpu_units: u64,
+    /// Total number of RAM units.
+    pub ram_units: u64,
 }
 
 /// Bucket activity per a DDC node.
@@ -102,6 +116,12 @@ pub struct BucketSubAggregate {
     pub number_of_puts: u64,
     /// Total number of gets.
     pub number_of_gets: u64,
+    /// Total number of CPU units.
+    pub cpu_units: u64,
+    /// Total number of GPU units.
+    pub gpu_units: u64,
+    /// Total number of RAM units.
+    pub ram_units: u64,
     /// Aggregator data.
     pub aggregator: AggregatorInfo,
 }
@@ -121,6 +141,12 @@ pub struct NodeAggregate {
     pub number_of_puts: u64,
     /// Total number of gets.
     pub number_of_gets: u64,
+    /// Total number of CPU units.
+    pub cpu_units: u64,
+    /// Total number of GPU units.
+    pub gpu_units: u64,
+    /// Total number of RAM units.
+    pub ram_units: u64,
     /// Node data.
     pub aggregator: AggregatorInfo,
 }
@@ -154,12 +180,18 @@ pub struct Usage {
     pub number_of_puts: u64,
     /// Total number of gets.
     pub number_of_gets: u64,
+    /// Total number of CPU units.
+    pub cpu_units: u64,
+    /// Total number of GPU units.
+    pub gpu_units: u64,
+    /// Total number of RAM units.
+    pub ram_units: u64,
 }
 
 #[derive(
     Debug, Serialize, Deserialize, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
 )]
-pub struct Leaf {
+pub struct Leaf { //todo! do we have to add copute here?
     pub record: Record,
     pub transferred_bytes: u64,
     pub stored_bytes: i64,
@@ -228,6 +260,9 @@ pub struct MerkleTreeNodeResponse {
     pub stored_bytes: i64,
     pub number_of_puts: u64,
     pub number_of_gets: u64,
+    pub cpu_units: u64,
+    pub gpu_units: u64,
+    pub ram_units: u64,
 }
 
 /// Json response wrapped with a signature.
@@ -266,6 +301,12 @@ pub struct EHDUsage {
     pub number_of_puts: u64,
     #[serde(rename = "gets")]
     pub number_of_gets: u64,
+    #[serde(rename = "cpuUnits")]
+    pub cpu_units: u64,
+    #[serde(rename = "gpuUnits")]
+    pub gpu_units: u64,
+    #[serde(rename = "ramUnits")]
+    pub ram_units: u64,
 }
 
 #[serde_as]
@@ -299,6 +340,9 @@ impl EHDTreeNode {
     pub fn get_cluster_usage(&self) -> EHDUsage {
         self.providers.iter().fold(
             EHDUsage {
+                cpu_units: 0,
+                gpu_units: 0,
+                ram_units: 0,
                 stored_bytes: 0,
                 transferred_bytes: 0,
                 number_of_puts: 0,
@@ -309,6 +353,9 @@ impl EHDTreeNode {
                 acc.transferred_bytes += provider.provided_usage.transferred_bytes;
                 acc.number_of_puts += provider.provided_usage.number_of_puts;
                 acc.number_of_gets += provider.provided_usage.number_of_gets;
+                acc.cpu_units += provider.provided_usage.cpu_units;
+                acc.gpu_units += provider.provided_usage.gpu_units;
+                acc.ram_units += provider.provided_usage.ram_units;
                 acc
             },
         )
@@ -356,6 +403,12 @@ pub struct EHDProviderUsage {
     pub number_of_puts: u64,
     #[serde(rename = "gets")]
     pub number_of_gets: u64,
+    #[serde(rename = "cpuUnits")]
+    pub cpu_units: u64,
+    #[serde(rename = "gpuUnits")]
+    pub gpu_units: u64,
+    #[serde(rename = "ramUnits")]
+    pub ram_units: u64,
 }
 
 #[serde_as]
@@ -402,8 +455,12 @@ pub struct PHDNodeTCA {
     pub number_of_puts: u64,
     #[serde(rename = "numberOfGets")]
     pub number_of_gets: u64,
-    #[serde(rename = "numberOfCompute")]
-    pub number_of_compute: u64,
+    #[serde(rename = "cpuUnits")]
+    pub cpu_units: u64,
+    #[serde(rename = "gpuUnits")]
+    pub gpu_units: u64,
+    #[serde(rename = "ramUnits")]
+    pub ram_units: u64,
 }
 
 impl Into<NodeUsage> for PHDNodeTCA {
@@ -413,7 +470,9 @@ impl Into<NodeUsage> for PHDNodeTCA {
             stored_bytes: self.stored_bytes,
             number_of_gets: self.number_of_gets,
             number_of_puts: self.number_of_puts,
-            number_of_compute: self.number_of_compute,
+            cpu_units: self.cpu_units,
+            gpu_units: self.gpu_units,
+            ram_units: self.ram_units,
         }
     }
 }
@@ -436,8 +495,12 @@ pub struct PHDBucketTCA {
     pub number_of_puts: u64,
     #[serde(rename = "numberOfGets")]
     pub number_of_gets: u64,
-    #[serde(rename = "numberOfCompute")]
-    pub number_of_compute: u64,
+    #[serde(rename = "cpuUnits")]
+    pub cpu_units: u64,
+    #[serde(rename = "gpuUnits")]
+    pub gpu_units: u64,
+    #[serde(rename = "ramUnits")]
+    pub ram_units: u64,
 }
 
 impl Into<BucketUsage> for PHDBucketTCA {
@@ -447,7 +510,9 @@ impl Into<BucketUsage> for PHDBucketTCA {
             stored_bytes: self.stored_bytes,
             number_of_gets: self.number_of_gets,
             number_of_puts: self.number_of_puts,
-            number_of_compute: self.number_of_compute,
+            cpu_units: self.cpu_units,
+            gpu_units: self.gpu_units,
+            ram_units: self.ram_units,
         }
     }
 }
