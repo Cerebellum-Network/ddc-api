@@ -29,7 +29,9 @@ message ChallengeResponse {
       ActivityRecord record = 1;
       int64 stored = 2;
       uint64 delivered = 3;
-      //todo! do we have to extend this with compute units?
+      uint64 cpuUnits = 4;
+      uint64 gpuUnits = 5;
+      uint64 ramUnits = 6;
     }
 
     message RecordLink {
@@ -51,9 +53,10 @@ message Aggregate {
   uint64 delivered = 2;
   uint64 puts = 3;
   uint64 gets = 4;
-  uint64 cpuUnits = 5;
-  uint64 gpuUnits = 6;
-  uint64 ramUnits = 7;
+  uint64 computes = 5;
+  uint64 cpuUnits = 6;
+  uint64 gpuUnits = 7;
+  uint64 ramUnits = 8;
 }
 
 message ActivityRecord {
@@ -77,11 +80,11 @@ message ActivityRequest {
     REQUEST_TYPE_GPU_COMPUTE = 4;
 	}
 
-	enum ContentType {
+	enum ContentType { //TODO: do we havw to extend this? ask Sergey
 		CONTENT_TYPE_PIECE = 0;
 		CONTENT_TYPE_SEGMENT = 1;
 		CONTENT_TYPE_MERKLE_TREE = 2;
-		CONTENT_TYPE_METADATA = 3;
+    CONTENT_TYPE_METADATA = 3;
 	}
 
 	RequestType requestType = 3;
@@ -150,4 +153,6 @@ enum Operation {
   PUT = 1;
   GET = 2;
   DELETE = 3;
+  CPU_COMPUTE = 4;
+  GPU_COMPUTE = 5;
 }

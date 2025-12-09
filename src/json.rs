@@ -27,7 +27,9 @@ pub struct NodeAggregateResponse {
     pub number_of_puts: u64,
     /// Total number of gets.
     pub number_of_gets: u64,
-    /// Total number of compute.
+    /// Total number of computes.
+    pub number_of_computes: u64,
+    /// Total number of CPU units.
     pub cpu_units: u64,
     /// Total number of GPU units.
     pub gpu_units: u64,
@@ -64,6 +66,8 @@ pub struct BucketAggregateResponse {
     pub number_of_puts: u64,
     /// Total number of gets.
     pub number_of_gets: u64,
+    /// Total number of computes.
+    pub number_of_computes: u64,
     /// Total number of CPU units.
     pub cpu_units: u64,
     /// Total number of GPU units.
@@ -90,6 +94,8 @@ pub struct BucketSubAggregateResponse {
     pub number_of_puts: u64,
     /// Total number of gets.
     pub number_of_gets: u64,
+    /// Total number of computes.
+    pub number_of_computes: u64,
     /// Total number of CPU units.
     pub cpu_units: u64,
     /// Total number of GPU units.
@@ -116,6 +122,8 @@ pub struct BucketSubAggregate {
     pub number_of_puts: u64,
     /// Total number of gets.
     pub number_of_gets: u64,
+    /// Total number of computes.
+    pub number_of_computes: u64,
     /// Total number of CPU units.
     pub cpu_units: u64,
     /// Total number of GPU units.
@@ -141,6 +149,8 @@ pub struct NodeAggregate {
     pub number_of_puts: u64,
     /// Total number of gets.
     pub number_of_gets: u64,
+    /// Total number of computes.
+    pub number_of_computes: u64,
     /// Total number of CPU units.
     pub cpu_units: u64,
     /// Total number of GPU units.
@@ -180,6 +190,8 @@ pub struct Usage {
     pub number_of_puts: u64,
     /// Total number of gets.
     pub number_of_gets: u64,
+    /// Total number of computes.
+    pub number_of_computes: u64,
     /// Total number of CPU units.
     pub cpu_units: u64,
     /// Total number of GPU units.
@@ -195,6 +207,9 @@ pub struct Leaf { //todo! do we have to add copute here?
     pub record: Record,
     pub transferred_bytes: u64,
     pub stored_bytes: i64,
+    pub ram_units: u64,
+    pub cpu_units: u64,
+    pub gpu_units: u64,
     // todo! add links if there is no record
 }
 
@@ -260,6 +275,7 @@ pub struct MerkleTreeNodeResponse {
     pub stored_bytes: i64,
     pub number_of_puts: u64,
     pub number_of_gets: u64,
+    pub number_of_computes: u64,
     pub cpu_units: u64,
     pub gpu_units: u64,
     pub ram_units: u64,
@@ -301,6 +317,8 @@ pub struct EHDUsage {
     pub number_of_puts: u64,
     #[serde(rename = "gets")]
     pub number_of_gets: u64,
+    #[serde(rename = "computes")]
+    pub number_of_computes: u64,
     #[serde(rename = "cpuUnits")]
     pub cpu_units: u64,
     #[serde(rename = "gpuUnits")]
@@ -347,6 +365,7 @@ impl EHDTreeNode {
                 transferred_bytes: 0,
                 number_of_puts: 0,
                 number_of_gets: 0,
+                number_of_computes: 0,
             },
             |mut acc, provider| {
                 acc.stored_bytes += provider.provided_usage.stored_bytes;
@@ -356,6 +375,7 @@ impl EHDTreeNode {
                 acc.cpu_units += provider.provided_usage.cpu_units;
                 acc.gpu_units += provider.provided_usage.gpu_units;
                 acc.ram_units += provider.provided_usage.ram_units;
+                acc.number_of_computes += provider.provided_usage.number_of_computes;
                 acc
             },
         )
@@ -403,6 +423,8 @@ pub struct EHDProviderUsage {
     pub number_of_puts: u64,
     #[serde(rename = "gets")]
     pub number_of_gets: u64,
+    #[serde(rename = "computes")]
+    pub number_of_computes: u64,
     #[serde(rename = "cpuUnits")]
     pub cpu_units: u64,
     #[serde(rename = "gpuUnits")]
@@ -455,6 +477,8 @@ pub struct PHDNodeTCA {
     pub number_of_puts: u64,
     #[serde(rename = "numberOfGets")]
     pub number_of_gets: u64,
+    #[serde(rename = "numberOfComputes")]
+    pub number_of_computes: u64,
     #[serde(rename = "cpuUnits")]
     pub cpu_units: u64,
     #[serde(rename = "gpuUnits")]
@@ -470,6 +494,7 @@ impl Into<NodeUsage> for PHDNodeTCA {
             stored_bytes: self.stored_bytes,
             number_of_gets: self.number_of_gets,
             number_of_puts: self.number_of_puts,
+            number_of_computes: self.number_of_computes,
             cpu_units: self.cpu_units,
             gpu_units: self.gpu_units,
             ram_units: self.ram_units,
@@ -495,6 +520,8 @@ pub struct PHDBucketTCA {
     pub number_of_puts: u64,
     #[serde(rename = "numberOfGets")]
     pub number_of_gets: u64,
+    #[serde(rename = "numberOfComputes")]
+    pub number_of_computes: u64,
     #[serde(rename = "cpuUnits")]
     pub cpu_units: u64,
     #[serde(rename = "gpuUnits")]
@@ -510,6 +537,7 @@ impl Into<BucketUsage> for PHDBucketTCA {
             stored_bytes: self.stored_bytes,
             number_of_gets: self.number_of_gets,
             number_of_puts: self.number_of_puts,
+            number_of_computes: self.number_of_computes,
             cpu_units: self.cpu_units,
             gpu_units: self.gpu_units,
             ram_units: self.ram_units,
