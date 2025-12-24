@@ -424,6 +424,29 @@ impl<'a> DdcClient<'a> {
             proto::activity_tree::EhdTreeTraversalResponse
         )?;
 
+        // [PROTO_DEBUG] Log parsed EHD response
+        log!(info, "[PROTO_DEBUG] ddc-api client EHD nodesCount={}", response.nodes.len());
+        for (i, node) in response.nodes.iter().enumerate() {
+            log!(info, "[PROTO_DEBUG] ddc-api client EHD node[{}] ehd_id={} customersCount={} providersCount={}",
+                i, node.ehd_id, node.customers.len(), node.providers.len());
+            for (j, customer) in node.customers.iter().enumerate() {
+                if let Some(ref usage) = customer.consumed_usage {
+                    log!(info, "[PROTO_DEBUG] ddc-api client EHD node[{}].customer[{}] transferred={} stored={} puts={} gets={}",
+                        i, j, usage.transferred, usage.stored, usage.put_count, usage.get_count);
+                } else {
+                    log!(info, "[PROTO_DEBUG] ddc-api client EHD node[{}].customer[{}] consumed_usage=None", i, j);
+                }
+            }
+            for (j, provider) in node.providers.iter().enumerate() {
+                if let Some(ref usage) = provider.provided_usage {
+                    log!(info, "[PROTO_DEBUG] ddc-api client EHD node[{}].provider[{}] transferred={} stored={} puts={} gets={}",
+                        i, j, usage.transferred, usage.stored, usage.put_count, usage.get_count);
+                } else {
+                    log!(info, "[PROTO_DEBUG] ddc-api client EHD node[{}].provider[{}] provided_usage=None", i, j);
+                }
+            }
+        }
+
         let api_response = ApiResponse {
             response,
             signed_by,
