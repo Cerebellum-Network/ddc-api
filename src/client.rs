@@ -407,7 +407,7 @@ impl<'a> DdcClient<'a> {
         g_collector: NodePubKey,
         tree_node_id: u32,
         tree_levels_count: u32,
-    ) -> Result<Vec<json::EHDTreeNode>, http::Error> {
+    ) -> Result<ApiResponse<proto::activity_tree::EhdTreeTraversalResponse>, http::Error> {
         let ehd_id = EHDId(cluster_id, g_collector, era);
         let mut url = format!(
             "{}/activity/ehds/{}/traverse?merkleTreeNodeId={}&levels={}",
@@ -417,10 +417,19 @@ impl<'a> DdcClient<'a> {
             tree_levels_count
         );
 
-        let (response, _) =
-            fetch_and_parse_json!(self, url, Vec<json::EHDTreeNode>, Vec<json::EHDTreeNode>)?;
+        let (response, signed_by) = fetch_and_parse_proto!(
+            self,
+            url,
+            proto::activity_tree::EhdTreeTraversalResponse,
+            proto::activity_tree::EhdTreeTraversalResponse
+        )?;
 
-        Ok(response)
+        let api_response = ApiResponse {
+            response,
+            signed_by,
+        };
+
+        Ok(api_response)
     }
 
     pub fn traverse_partial_historical_document(
@@ -429,7 +438,7 @@ impl<'a> DdcClient<'a> {
         collector: NodePubKey,
         tree_node_id: u32,
         tree_levels_count: u32,
-    ) -> Result<Vec<json::PHDTreeNode>, http::Error> {
+    ) -> Result<ApiResponse<proto::activity_tree::PhdTreeTraversalResponse>, http::Error> {
         let phd_id = PHDId(collector, era);
         let mut url = format!(
             "{}/activity/phds/{}/traverse?merkleTreeNodeId={}&levels={}",
@@ -439,10 +448,19 @@ impl<'a> DdcClient<'a> {
             tree_levels_count
         );
 
-        let (response, _) =
-            fetch_and_parse_json!(self, url, Vec<json::PHDTreeNode>, Vec<json::PHDTreeNode>)?;
+        let (response, signed_by) = fetch_and_parse_proto!(
+            self,
+            url,
+            proto::activity_tree::PhdTreeTraversalResponse,
+            proto::activity_tree::PhdTreeTraversalResponse
+        )?;
 
-        Ok(response)
+        let api_response = ApiResponse {
+            response,
+            signed_by,
+        };
+
+        Ok(api_response)
     }
 
     pub fn traverse_node_aggregate(

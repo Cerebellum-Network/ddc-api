@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+package activity_tree;
+
+// ActivityNode represents aggregated activity data
+message ActivityNode {
+    uint64 put_count = 1;
+    uint64 get_count = 2;
+    int64 stored = 3;
+    uint64 transferred = 4;
+    uint64 cpu_units = 5;
+    uint64 gpu_units = 6;
+    uint64 ram_units = 7;
+    uint64 compute_count = 8;
+}
+
+// EhdTreeNodeCustomerAggregate represents customer aggregate in EHD tree node
+message EhdTreeNodeCustomerAggregate {
+    bytes customer_id = 1;      // Customer ID (32 bytes)
+    ActivityNode consumed_usage = 2;
+}
+
+// EhdTreeNodeProviderNodeAggregate represents node aggregate within provider in EHD tree node
+message EhdTreeNodeProviderNodeAggregate {
+    bytes node_id = 1;          // Node ID (32 bytes)
+    ActivityNode activity_node = 2;
+}
+
+// EhdTreeNodeProviderAggregate represents provider aggregate in EHD tree node
+message EhdTreeNodeProviderAggregate {
+    bytes provider_id = 1;      // Provider ID (32 bytes)
+    ActivityNode provided_usage = 2;
+    repeated EhdTreeNodeProviderNodeAggregate nodes = 3;
+}
+
+// EhdTreeNode represents the aggregated node content for EHD merkletree
+message EhdTreeNode {
+    repeated string phd_ids = 1;
+    repeated EhdTreeNodeCustomerAggregate customers = 2;
+    repeated EhdTreeNodeProviderAggregate providers = 3;
+}
+
+// EhdTreeTraversedNode represents a traversed node in the EHD tree
+message EhdTreeTraversedNode {
+    string ehd_id = 1;
+    bytes grouping_collector = 2;   // 32 bytes public key
+    uint64 merkle_tree_node_id = 3;
+    bytes merkle_tree_node_hash = 4;
+    repeated string phd_ids = 5;
+    string status = 6;
+    repeated EhdTreeNodeCustomerAggregate customers = 7;
+    repeated EhdTreeNodeProviderAggregate providers = 8;
+}
+
+// EhdTreeTraversalResponse represents the response from EHD tree traversal endpoint
+message EhdTreeTraversalResponse {
+    repeated EhdTreeTraversedNode nodes = 1;
+}
+
+// PhdTcaAggregate represents TCA-level aggregate data for PHD
+message PhdTcaAggregate {
+    uint32 tca_id = 1;
+    bytes tca_root_hash = 2;
+    ActivityNode activity_node = 3;
+}
+
+// PhdBucketAggregateGroup represents a group of TCA aggregates for a bucket
+message PhdBucketAggregateGroup {
+    uint64 bucket_id = 1;
+    repeated PhdTcaAggregate aggregates = 2;
+}
+
+// PhdNodeAggregateGroup represents a group of TCA aggregates for a node
+message PhdNodeAggregateGroup {
+    bytes node_key = 1; // node public key (32 bytes)
+    repeated PhdTcaAggregate aggregates = 2;
+}
+
+// PhdTreeNode represents the aggregated node content for PHD merkletree
+message PhdTreeNode {
+    repeated PhdBucketAggregateGroup bucket_aggregates = 1;
+    repeated PhdNodeAggregateGroup nodes_aggregates = 2;
+}
+
+// PhdTreeTraversedNode represents a traversed node in the PHD tree
+message PhdTreeTraversedNode {
+    string phd_id = 1;
+    bytes collector_id = 2;         // 32 bytes public key
+    uint64 merkle_tree_node_id = 3;
+    bytes merkle_tree_node_hash = 4;
+    repeated PhdBucketAggregateGroup bucket_aggregates = 5;
+    repeated PhdNodeAggregateGroup nodes_aggregates = 6;
+}
+
+// PhdTreeTraversalResponse represents the response from PHD tree traversal endpoint
+message PhdTreeTraversalResponse {
+    repeated PhdTreeTraversedNode nodes = 1;
+}
+
