@@ -73,5 +73,16 @@ pub mod proto {
                 }
             }
         }
+
+        impl BucketSubAggregate {
+            pub fn get_node_key(&self) -> Option<NodePubKey> {
+                if self.node_key.len() == 32 {
+                    let arr: [u8; 32] = self.node_key.as_slice().try_into().ok()?;
+                    Some(NodePubKey::StoragePubKey(sp_runtime::AccountId32::from(arr)))
+                } else {
+                    None
+                }
+            }
+        }
     }
 }

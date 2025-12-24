@@ -156,7 +156,7 @@ impl<'a> DdcClient<'a> {
         era_id: TcaEra,
         prev_token: Option<BucketId>,
         limit: Option<u32>,
-    ) -> Result<ApiResponse<Vec<json::BucketAggregateResponse>>, http::Error> {
+    ) -> Result<ApiResponse<proto::activity_tree::BucketAggregatesResponse>, http::Error> {
         let mut url = format!("{}/activity/buckets?eraId={}", self.base_url, era_id);
         if let Some(prev_token) = prev_token {
             url = format!("{}&prevToken={}", url, prev_token);
@@ -165,11 +165,11 @@ impl<'a> DdcClient<'a> {
             url = format!("{}&limit={}", url, limit);
         }
 
-        let (response, signed_by) = fetch_and_parse_json!(
+        let (response, signed_by) = fetch_and_parse_proto!(
             self,
             url,
-            Vec<json::BucketAggregateResponse>,
-            Vec<json::BucketAggregateResponse>
+            proto::activity_tree::BucketAggregatesResponse,
+            proto::activity_tree::BucketAggregatesResponse
         )?;
 
         let api_response = ApiResponse {

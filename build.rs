@@ -24,7 +24,6 @@ fn main() -> Result<()> {
         "activity_tree.ActivityNode",
         "#[derive(Eq, PartialOrd, Ord)]",
     );
-
     prost_build.type_attribute(
         "activity_tree.PhdTreeTraversedNode",
         "#[derive(Eq, PartialOrd, Ord)]",
@@ -41,7 +40,18 @@ fn main() -> Result<()> {
         "activity_tree.PhdTcaAggregate",
         "#[derive(Eq, PartialOrd, Ord)]",
     );
-
+    prost_build.type_attribute(
+        "activity_tree.BucketSubAggregate",
+        "#[derive(Eq, PartialOrd, Ord)]",
+    );
+    prost_build.type_attribute(
+        "activity_tree.BucketAggregate",
+        "#[derive(Eq, PartialOrd, Ord)]",
+    );
+    prost_build.type_attribute(
+        "activity_tree.BucketAggregatesResponse",
+        "#[derive(Eq, PartialOrd, Ord)]",
+    );
     prost_build.compile_protos(
         &[
             "src/protos/signature.proto",

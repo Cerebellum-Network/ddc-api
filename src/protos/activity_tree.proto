@@ -97,3 +97,21 @@ message PhdTreeTraversalResponse {
     repeated PhdTreeTraversedNode nodes = 1;
 }
 
+// BucketSubAggregate represents sub-aggregate data for a bucket per node
+message BucketSubAggregate {
+    bytes node_key = 1;
+    ActivityNode activity = 2;
+}
+
+// BucketAggregate represents aggregated activity data for a bucket
+message BucketAggregate {
+    uint64 bucket_id = 1;
+    ActivityNode activity = 2;
+    repeated BucketSubAggregate sub_aggregates = 3;
+}
+
+// BucketAggregatesResponse represents the response from bucket aggregates endpoint
+message BucketAggregatesResponse {
+    repeated BucketAggregate buckets = 1;
+}
+

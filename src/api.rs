@@ -487,7 +487,7 @@ pub fn fetch_bucket_aggregates<
     cluster_id: &ClusterId,
     tca_id: TcaEra,
     collector_key: NodePubKey,
-) -> Result<Vec<json::BucketAggregateResponse>, ApiError> {
+) -> Result<Vec<proto::activity_tree::BucketAggregate>, ApiError> {
     let (_, collector_params) =
         get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key.clone())?;
     let host =
@@ -505,7 +505,7 @@ pub fn fetch_bucket_aggregates<
         false,
     );
 
-    let mut buckets_aggregates = Vec::new();
+    let mut buckets_aggregates: Vec<proto::activity_tree::BucketAggregate> = Vec::new();
     let mut prev_token = None;
 
     loop {
@@ -521,18 +521,18 @@ pub fn fetch_bucket_aggregates<
             })?;
 
         let response = api_response.response;
-        let response_len = response.len();
+        let response_len = response.buckets.len();
 
-        prev_token = response.last().map(|a| a.bucket_id);
+        prev_token = response.buckets.last().map(|a| a.bucket_id);
 
-        buckets_aggregates.extend(response);
+        buckets_aggregates.extend(response.buckets);
 
         if response_len < BUCKETS_AGGREGATES_FETCH_BATCH_SIZE {
             break;
         }
     }
 
-    return Ok(buckets_aggregates);
+    Ok(buckets_aggregates)
 }
 
 /// Traverse PHD record.
