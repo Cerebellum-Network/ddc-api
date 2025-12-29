@@ -3,31 +3,11 @@
 use core::str;
 
 use codec::{Decode, Encode};
-use ddc_primitives::{
-    AccountId32Hex, AggregatorInfo, BucketId, BucketUsage, EHDId, EhdEra, NodePubKey, NodeUsage,
-    PHDId, TcaEra,
-};
+use ddc_primitives::{BucketId, EhdEra, NodePubKey, TcaEra};
 use scale_info::prelude::string::String;
 use serde::{Deserialize, Serialize};
 use serde_with::{base64::Base64, serde_as, TryFromInto};
 use sp_std::{collections::btree_map::BTreeMap, prelude::*};
-
-/// Node aggregate response from aggregator.
-#[serde_as]
-#[derive(Debug, Serialize, Deserialize, Clone, Ord, PartialOrd, PartialEq, Eq, Encode, Decode)]
-pub struct NodeAggregateResponse {
-    #[serde(rename = "node_id")]
-    #[serde_as(as = "TryFromInto<String>")]
-    pub node_key: NodePubKey,
-    /// Total amount of stored bytes.
-    pub stored_bytes: i64,
-    /// Total amount of transferred bytes.
-    pub transferred_bytes: u64,
-    /// Total number of puts.
-    pub number_of_puts: u64,
-    /// Total number of gets.
-    pub number_of_gets: u64,
-}
 
 /// DDC aggregation era
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Encode, Decode)]
@@ -45,187 +25,6 @@ pub struct AggregationEraResponse {
     pub attempt: u32,
 }
 
-/// Bucket aggregate response from aggregator.
-#[derive(Debug, Serialize, Deserialize, Clone, Ord, PartialOrd, PartialEq, Eq, Encode, Decode)]
-pub struct BucketAggregateResponse {
-    /// Bucket id
-    pub bucket_id: BucketId,
-    /// Total amount of stored bytes.
-    pub stored_bytes: i64,
-    /// Total amount of transferred bytes.
-    pub transferred_bytes: u64,
-    /// Total number of puts.
-    pub number_of_puts: u64,
-    /// Total number of gets.
-    pub number_of_gets: u64,
-    /// Bucket sub aggregates.
-    pub sub_aggregates: Vec<BucketSubAggregateResponse>,
-}
-
-/// Sub aggregates of a bucket.
-#[serde_as]
-#[derive(Debug, Serialize, Deserialize, Clone, Ord, PartialOrd, PartialEq, Eq, Encode, Decode)]
-#[allow(non_snake_case)]
-pub struct BucketSubAggregateResponse {
-    #[serde(rename = "NodeID")]
-    #[serde_as(as = "TryFromInto<String>")]
-    pub node_key: NodePubKey,
-    /// Total amount of stored bytes.
-    pub stored_bytes: i64,
-    /// Total amount of transferred bytes.
-    pub transferred_bytes: u64,
-    /// Total number of puts.
-    pub number_of_puts: u64,
-    /// Total number of gets.
-    pub number_of_gets: u64,
-}
-
-/// Bucket activity per a DDC node.
-#[serde_as]
-#[derive(Debug, Serialize, Deserialize, Clone, Ord, PartialOrd, PartialEq, Eq, Encode, Decode)]
-pub struct BucketSubAggregate {
-    /// Bucket id
-    pub bucket_id: BucketId,
-    /// Node id.
-    #[serde(rename = "node_id")]
-    #[serde_as(as = "TryFromInto<String>")]
-    pub node_key: NodePubKey,
-    /// Total amount of stored bytes.
-    pub stored_bytes: i64,
-    /// Total amount of transferred bytes.
-    pub transferred_bytes: u64,
-    /// Total number of puts.
-    pub number_of_puts: u64,
-    /// Total number of gets.
-    pub number_of_gets: u64,
-    /// Aggregator data.
-    pub aggregator: AggregatorInfo,
-}
-
-#[serde_as]
-#[derive(Debug, Serialize, Deserialize, Clone, Ord, PartialOrd, PartialEq, Eq, Encode, Decode)]
-pub struct NodeAggregate {
-    /// Node id.
-    #[serde(rename = "node_id")]
-    #[serde_as(as = "TryFromInto<String>")]
-    pub node_key: NodePubKey,
-    /// Total amount of stored bytes.
-    pub stored_bytes: i64,
-    /// Total amount of transferred bytes.
-    pub transferred_bytes: u64,
-    /// Total number of puts.
-    pub number_of_puts: u64,
-    /// Total number of gets.
-    pub number_of_gets: u64,
-    /// Node data.
-    pub aggregator: AggregatorInfo,
-}
-
-/// Challenge Response
-#[derive(
-    Debug, Serialize, Deserialize, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
-)]
-pub struct ChallengeAggregateResponse {
-    pub proofs: Vec<Proof>, //todo! add optional fields
-}
-
-#[derive(
-    Debug, Serialize, Deserialize, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
-)]
-pub struct Proof {
-    pub merkle_tree_node_id: u64,
-    pub usage: Usage,
-    pub path: Vec<String>,
-}
-
-#[derive(
-    Debug, Serialize, Deserialize, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
-)]
-pub struct Usage {
-    /// Total amount of stored bytes.
-    pub stored_bytes: i64,
-    /// Total amount of transferred bytes.
-    pub transferred_bytes: u64,
-    /// Total number of puts.
-    pub number_of_puts: u64,
-    /// Total number of gets.
-    pub number_of_gets: u64,
-}
-
-#[derive(
-    Debug, Serialize, Deserialize, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
-)]
-pub struct Leaf {
-    pub record: Record,
-    pub transferred_bytes: u64,
-    pub stored_bytes: i64,
-    // todo! add links if there is no record
-}
-
-#[derive(
-    Debug, Serialize, Deserialize, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
-)]
-#[allow(non_snake_case)]
-pub struct Record {
-    pub id: String,
-    pub upstream: Upstream,
-    pub downstream: Vec<Downstream>,
-    pub timestamp: String,
-    pub signature: Signature,
-}
-
-#[derive(
-    Debug, Serialize, Deserialize, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
-)]
-pub struct Upstream {
-    pub request: Request,
-}
-
-#[derive(
-    Debug, Serialize, Deserialize, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
-)]
-pub struct Downstream {
-    pub request: Request,
-}
-#[derive(
-    Debug, Serialize, Deserialize, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
-)]
-#[allow(non_snake_case)]
-pub struct Request {
-    pub requestId: String,
-    pub requestType: String,
-    pub contentType: String,
-    pub bucketId: String,
-    pub pieceCid: String,
-    pub offset: String,
-    pub size: String,
-    pub timestamp: String,
-    pub signature: Signature,
-}
-
-#[derive(
-    Debug, Serialize, Deserialize, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
-)]
-pub struct Signature {
-    pub algorithm: String,
-    pub signer: String,
-    pub value: String,
-}
-
-#[serde_as]
-#[derive(
-    Debug, Serialize, Deserialize, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
-)]
-pub struct MerkleTreeNodeResponse {
-    pub merkle_tree_node_id: u64,
-    #[serde_as(as = "Base64")]
-    pub hash: Vec<u8>,
-    pub transferred_bytes: u64,
-    pub stored_bytes: i64,
-    pub number_of_puts: u64,
-    pub number_of_gets: u64,
-}
-
 /// Json response wrapped with a signature.
 #[serde_as]
 #[derive(
@@ -237,209 +36,6 @@ pub struct SignedJsonResponse<T> {
     pub signer: Vec<u8>,
     #[serde_as(as = "Base64")]
     pub signature: Vec<u8>,
-}
-
-#[derive(
-    Default,
-    Debug,
-    Serialize,
-    Deserialize,
-    Clone,
-    Hash,
-    Ord,
-    PartialOrd,
-    PartialEq,
-    Eq,
-    Encode,
-    Decode,
-)]
-pub struct EHDUsage {
-    #[serde(rename = "storedBytes")]
-    pub stored_bytes: i64,
-    #[serde(rename = "transferredBytes")]
-    pub transferred_bytes: u64,
-    #[serde(rename = "puts")]
-    pub number_of_puts: u64,
-    #[serde(rename = "gets")]
-    pub number_of_gets: u64,
-}
-
-#[serde_as]
-#[derive(Debug, Serialize, Deserialize, Clone, PartialOrd, Ord, Eq, PartialEq, Encode, Decode)]
-pub struct EHDTreeNode {
-    #[serde(rename = "ehdId")]
-    #[serde_as(as = "TryFromInto<String>")]
-    pub ehd_id: EHDId,
-
-    #[serde(rename = "groupingCollector")]
-    #[serde_as(as = "TryFromInto<String>")]
-    pub g_collector: NodePubKey,
-
-    #[serde(rename = "merkleTreeNodeId")]
-    pub tree_node_id: u64,
-
-    #[serde(rename = "merkleTreeNodeHash")]
-    #[serde_as(as = "Base64")]
-    pub tree_node_hash: Vec<u8>,
-
-    #[serde(rename = "pdhIds")]
-    #[serde_as(as = "Vec<TryFromInto<String>>")]
-    pub pdh_ids: Vec<PHDId>,
-
-    pub status: String,
-    pub customers: Vec<EHDCustomer>,
-    pub providers: Vec<EHDProvider>,
-}
-
-impl EHDTreeNode {
-    pub fn get_cluster_usage(&self) -> EHDUsage {
-        self.providers.iter().fold(
-            EHDUsage {
-                stored_bytes: 0,
-                transferred_bytes: 0,
-                number_of_puts: 0,
-                number_of_gets: 0,
-            },
-            |mut acc, provider| {
-                acc.stored_bytes += provider.provided_usage.stored_bytes;
-                acc.transferred_bytes += provider.provided_usage.transferred_bytes;
-                acc.number_of_puts += provider.provided_usage.number_of_puts;
-                acc.number_of_gets += provider.provided_usage.number_of_gets;
-                acc
-            },
-        )
-    }
-}
-
-#[serde_as]
-#[derive(
-    Debug, Serialize, Deserialize, PartialOrd, Ord, Clone, Hash, PartialEq, Eq, Encode, Decode,
-)]
-pub struct EHDCustomer {
-    #[serde(rename = "customerId")]
-    #[serde_as(as = "TryFromInto<String>")]
-    pub customer_id: AccountId32Hex,
-
-    #[serde(rename = "consumedUsage")]
-    pub consumed_usage: EHDUsage,
-}
-
-#[serde_as]
-#[derive(
-    Debug, Serialize, Deserialize, PartialOrd, Ord, Hash, Clone, PartialEq, Eq, Encode, Decode,
-)]
-pub struct EHDProvider {
-    #[serde(rename = "providerId")]
-    #[serde_as(as = "TryFromInto<String>")]
-    pub provider_id: AccountId32Hex,
-
-    #[serde(rename = "providedUsage")]
-    pub provided_usage: EHDUsage,
-    pub nodes: Vec<EHDProviderUsage>,
-}
-
-#[derive(
-    Debug, Serialize, Deserialize, Clone, Hash, PartialOrd, Ord, PartialEq, Eq, Encode, Decode,
-)]
-pub struct EHDProviderUsage {
-    #[serde(rename = "nodeId")]
-    pub node_key: String,
-    #[serde(rename = "storedBytes")]
-    pub stored_bytes: i64,
-    #[serde(rename = "transferredBytes")]
-    pub transferred_bytes: u64,
-    #[serde(rename = "puts")]
-    pub number_of_puts: u64,
-    #[serde(rename = "gets")]
-    pub number_of_gets: u64,
-}
-
-#[serde_as]
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Encode, Decode)]
-pub struct PHDTreeNode {
-    #[serde(rename = "phdId")]
-    #[serde_as(as = "TryFromInto<String>")]
-    pub phd_id: PHDId,
-
-    #[serde(rename = "collectorId")]
-    #[serde_as(as = "TryFromInto<String>")]
-    pub collector: NodePubKey,
-
-    #[serde(rename = "merkleTreeNodeId")]
-    pub tree_node_id: u64,
-
-    #[serde(rename = "merkleTreeNodeHash")]
-    #[serde_as(as = "Base64")]
-    pub tree_node_hash: Vec<u8>,
-
-    #[serde(rename = "nodesAggregates")]
-    #[serde_as(as = "BTreeMap<TryFromInto<String>, _>")]
-    pub nodes_aggregates: PHDNodesTCAs,
-
-    #[serde(rename = "bucketsAggregates")]
-    pub buckets_aggregates: PHDBucketsTCAs,
-}
-
-pub type PHDNodesTCAs = BTreeMap<NodePubKey, Vec<PHDNodeTCA>>;
-
-#[derive(
-    Debug, Serialize, Deserialize, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
-)]
-pub struct PHDNodeTCA {
-    #[serde(rename = "tcaaId")]
-    pub tca_id: TcaEra,
-    #[serde(rename = "tcaaRootHash")]
-    pub tca_hash: String,
-    #[serde(rename = "storedBytes")]
-    pub stored_bytes: i64,
-    #[serde(rename = "transferredBytes")]
-    pub transferred_bytes: u64,
-    #[serde(rename = "numberOfPuts")]
-    pub number_of_puts: u64,
-    #[serde(rename = "numberOfGets")]
-    pub number_of_gets: u64,
-}
-
-impl Into<NodeUsage> for PHDNodeTCA {
-    fn into(self) -> NodeUsage {
-        NodeUsage {
-            transferred_bytes: self.transferred_bytes,
-            stored_bytes: self.stored_bytes,
-            number_of_gets: self.number_of_gets,
-            number_of_puts: self.number_of_puts,
-        }
-    }
-}
-
-pub type PHDBucketsTCAs = BTreeMap<BucketId, Vec<PHDBucketTCA>>;
-
-#[derive(
-    Debug, Serialize, Deserialize, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Encode, Decode,
-)]
-pub struct PHDBucketTCA {
-    #[serde(rename = "tcaaId")]
-    pub tca_id: TcaEra,
-    #[serde(rename = "tcaaRootHash")]
-    pub tca_hash: String,
-    #[serde(rename = "storedBytes")]
-    pub stored_bytes: i64,
-    #[serde(rename = "transferredBytes")]
-    pub transferred_bytes: u64,
-    #[serde(rename = "numberOfPuts")]
-    pub number_of_puts: u64,
-    #[serde(rename = "numberOfGets")]
-    pub number_of_gets: u64,
-}
-
-impl Into<BucketUsage> for PHDBucketTCA {
-    fn into(self) -> BucketUsage {
-        BucketUsage {
-            transferred_bytes: self.transferred_bytes,
-            stored_bytes: self.stored_bytes,
-            number_of_gets: self.number_of_gets,
-            number_of_puts: self.number_of_puts,
-        }
-    }
 }
 
 #[derive(
@@ -499,7 +95,7 @@ pub enum InspPathException {
         node_key: NodePubKey,
         tca_id: TcaEra,
         bad_leaves_ids: Vec<u64>,
-        unverified_usage: NodeUsage,
+        unverified_usage: Vec<u8>,
         unverified_usage_collector: NodePubKey,
         unverified_usage_signature: Vec<u8>,
     },
@@ -508,7 +104,7 @@ pub enum InspPathException {
         node_key: NodePubKey,
         tca_id: TcaEra,
         bad_leaves_ids: Vec<u64>,
-        unverified_usage: BucketUsage,
+        unverified_usage: Vec<u8>,
         unverified_usage_collector: NodePubKey,
         unverified_usage_signature: Vec<u8>,
     },
@@ -516,7 +112,7 @@ pub enum InspPathException {
         node_key: NodePubKey,
         tca_id: TcaEra,
         leaves_ids: Vec<u64>,
-        unverified_usage: NodeUsage,
+        unverified_usage: Vec<u8>,
         unverified_usage_collector: NodePubKey,
         unverified_usage_signature: Vec<u8>,
     },
@@ -525,33 +121,33 @@ pub enum InspPathException {
         node_key: NodePubKey,
         tca_id: TcaEra,
         leaves_ids: Vec<u64>,
-        unverified_usage: BucketUsage,
+        unverified_usage: Vec<u8>,
         unverified_usage_collector: NodePubKey,
         unverified_usage_signature: Vec<u8>,
     },
     NodeAggregateMalformed {
         node_key: NodePubKey,
         tca_id: TcaEra,
-        unverified_usage: NodeUsage,
+        unverified_usage: Vec<u8>,
         unverified_usage_collector: NodePubKey,
         unverified_usage_signature: Vec<u8>,
     },
     BucketAggregateMalformed {
         bucket_id: BucketId,
         tca_id: TcaEra,
-        unverified_usage: BucketUsage,
+        unverified_usage: Vec<u8>,
         unverified_usage_collector: NodePubKey,
         unverified_usage_signature: Vec<u8>,
     },
     NodeCumulativeUsageUnavailable {
         node_key: NodePubKey,
         tca_id: TcaEra,
-        accessible_unverified_usage: NodeUsage,
+        accessible_unverified_usage: Vec<u8>,
     },
     BucketCumulativeUsageUnavailable {
         bucket_id: BucketId,
         node_key: Option<NodePubKey>,
         tca_id: TcaEra,
-        accessible_unverified_usage: BucketUsage,
+        accessible_unverified_usage: Vec<u8>,
     },
 }

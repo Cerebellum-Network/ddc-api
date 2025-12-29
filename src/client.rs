@@ -180,31 +180,6 @@ impl<'a> DdcClient<'a> {
         Ok(api_response)
     }
 
-    pub fn nodes_aggregates(
-        &self,
-        era_id: TcaEra,
-        limit: Option<u32>,
-        prev_token: Option<String>,
-    ) -> Result<Vec<json::NodeAggregateResponse>, http::Error> {
-        let mut url = format!("{}/activity/nodes?eraId={}", self.base_url, era_id);
-
-        if let Some(limit) = limit {
-            url = format!("{}&limit={}", url, limit);
-        }
-        if let Some(prev_token) = prev_token {
-            url = format!("{}&prevToken={}", url, prev_token);
-        }
-
-        let (response, _) = fetch_and_parse_json!(
-            self,
-            url,
-            Vec<json::NodeAggregateResponse>,
-            Vec<json::NodeAggregateResponse>
-        )?;
-
-        Ok(response)
-    }
-
     pub fn challenge_bucket_sub_aggregate(
         &self,
         era_id: TcaEra,
