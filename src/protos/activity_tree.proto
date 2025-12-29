@@ -115,3 +115,15 @@ message BucketAggregatesResponse {
     repeated BucketAggregate buckets = 1;
 }
 
+// ActivityTreeTraversedNode represents a traversed node in activity tree (node or bucket sub-tree)
+message ActivityTreeTraversedNode {
+    uint64 merkle_tree_node_id = 1;
+    bytes hash = 2;
+    ActivityNode activity = 3;
+}
+
+// ActivityTreeTraversalResponse represents the response from activity tree traversal endpoint
+message ActivityTreeTraversalResponse {
+    repeated ActivityTreeTraversedNode nodes = 1;
+}
+

@@ -52,6 +52,14 @@ fn main() -> Result<()> {
         "activity_tree.BucketAggregatesResponse",
         "#[derive(Eq, PartialOrd, Ord)]",
     );
+    prost_build.type_attribute(
+        "activity_tree.ActivityTreeTraversedNode",
+        "#[derive(Eq, PartialOrd, Ord)]",
+    );
+    prost_build.type_attribute(
+        "activity_tree.ActivityTreeTraversalResponse",
+        "#[derive(Eq, PartialOrd, Ord)]",
+    );
     prost_build.compile_protos(
         &[
             "src/protos/signature.proto",

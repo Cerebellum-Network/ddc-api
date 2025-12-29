@@ -608,7 +608,7 @@ pub fn fetch_traversed_node_aggregate<
     tree_node_id: u64,
     tree_levels_count: u16,
     verify_sig: bool,
-) -> Result<ApiResponse<Vec<json::MerkleTreeNodeResponse>>, ApiError> {
+) -> Result<ApiResponse<proto::activity_tree::ActivityTreeTraversalResponse>, ApiError> {
     let (collector_key, collector_params) =
         get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
     let host =
@@ -664,7 +664,7 @@ pub fn fetch_traversed_bucket_sub_aggregate<
     tree_node_id: u64,
     tree_levels_count: u16,
     verify_sig: bool,
-) -> Result<ApiResponse<Vec<json::MerkleTreeNodeResponse>>, ApiError> {
+) -> Result<ApiResponse<proto::activity_tree::ActivityTreeTraversalResponse>, ApiError> {
     let (collector_key, collector_params) =
         get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
     let host =
@@ -679,7 +679,7 @@ pub fn fetch_traversed_bucket_sub_aggregate<
         &base_url,
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
-        verify_sig, // no response signature verification for now
+        verify_sig,
     );
 
     let traversed_bucket_sub_aggregate = client.traverse_bucket_sub_aggregate(

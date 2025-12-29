@@ -469,7 +469,7 @@ impl<'a> DdcClient<'a> {
         node_key: NodePubKey,
         merkle_tree_node_id: u64,
         levels: u16,
-    ) -> Result<ApiResponse<Vec<json::MerkleTreeNodeResponse>>, http::Error> {
+    ) -> Result<ApiResponse<proto::activity_tree::ActivityTreeTraversalResponse>, http::Error> {
         let mut url = format!(
             "{}/activity/nodes/{}/traverse?eraId={}&merkleTreeNodeId={}&levels={}",
             self.base_url,
@@ -479,11 +479,11 @@ impl<'a> DdcClient<'a> {
             levels,
         );
 
-        let (response, signed_by) = fetch_and_parse_json!(
+        let (response, signed_by) = fetch_and_parse_proto!(
             self,
             url,
-            Vec<json::MerkleTreeNodeResponse>,
-            Vec<json::MerkleTreeNodeResponse>
+            proto::activity_tree::ActivityTreeTraversalResponse,
+            proto::activity_tree::ActivityTreeTraversalResponse
         )?;
 
         let api_response = ApiResponse {
@@ -501,7 +501,7 @@ impl<'a> DdcClient<'a> {
         node_key: NodePubKey,
         merkle_tree_node_id: u64,
         levels: u16,
-    ) -> Result<ApiResponse<Vec<json::MerkleTreeNodeResponse>>, http::Error> {
+    ) -> Result<ApiResponse<proto::activity_tree::ActivityTreeTraversalResponse>, http::Error> {
         let mut url = format!(
             "{}/activity/buckets/{}/traverse?eraId={}&nodeId={}&merkleTreeNodeId={}&levels={}",
             self.base_url,
@@ -512,11 +512,11 @@ impl<'a> DdcClient<'a> {
             levels,
         );
 
-        let (response, signed_by) = fetch_and_parse_json!(
+        let (response, signed_by) = fetch_and_parse_proto!(
             self,
             url,
-            Vec<json::MerkleTreeNodeResponse>,
-            Vec<json::MerkleTreeNodeResponse>
+            proto::activity_tree::ActivityTreeTraversalResponse,
+            proto::activity_tree::ActivityTreeTraversalResponse
         )?;
 
         let api_response = ApiResponse {

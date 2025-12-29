@@ -84,5 +84,39 @@ pub mod proto {
                 }
             }
         }
+
+        impl ActivityNode {
+            /// Converts ActivityNode to NodeUsage (for backward compatibility with JSON types)
+            pub fn to_node_usage(&self) -> ddc_primitives::NodeUsage {
+                ddc_primitives::NodeUsage {
+                    transferred_bytes: self.transferred,
+                    stored_bytes: self.stored,
+                    number_of_puts: self.put_count,
+                    number_of_gets: self.get_count,
+                }
+            }
+
+            /// Converts ActivityNode to BucketUsage (for backward compatibility with JSON types)
+            pub fn to_bucket_usage(&self) -> ddc_primitives::BucketUsage {
+                ddc_primitives::BucketUsage {
+                    transferred_bytes: self.transferred,
+                    stored_bytes: self.stored,
+                    number_of_puts: self.put_count,
+                    number_of_gets: self.get_count,
+                }
+            }
+        }
+
+        impl ActivityTreeTraversedNode {
+            /// Get the activity as NodeUsage (for backward compatibility)
+            pub fn get_node_usage(&self) -> Option<ddc_primitives::NodeUsage> {
+                self.activity.as_ref().map(|a| a.to_node_usage())
+            }
+
+            /// Get the activity as BucketUsage (for backward compatibility)
+            pub fn get_bucket_usage(&self) -> Option<ddc_primitives::BucketUsage> {
+                self.activity.as_ref().map(|a| a.to_bucket_usage())
+            }
+        }
     }
 }
