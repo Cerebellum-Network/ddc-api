@@ -12,6 +12,7 @@ use scale_info::{
 use serde::{Deserialize, Serialize};
 use sp_runtime::offchain::{http, Duration};
 use sp_std::{collections::btree_map::BTreeMap, prelude::*};
+use ddc_primitives::StorageNodeMode;
 
 use crate::{
     client::DdcClient,
@@ -247,37 +248,6 @@ pub fn get_sync_node<
     }
 }
 
-/// Fetch customer usage.
-///
-/// Parameters:
-/// - `node_params`: Requesting DDC node
-pub fn check_grouping_collector(
-    cluster_id: &ClusterId,
-    node_key: &NodePubKey,
-    node_params: &StorageNodeParams,
-) -> Result<bool, ApiError> {
-    let host = str::from_utf8(&node_params.host).map_err(|_| ApiError::NodeHostParseError {
-        cluster_id: *cluster_id,
-        node_key: node_key.clone(),
-        host: node_params.host.clone(),
-    })?;
-    let base_url: String = format!("http://{}:{}", host, node_params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        false,
-    );
-
-    let response = client
-        .check_grouping_collector()
-        .map_err(|_| ApiError::HttpClientError {
-            cluster_id: *cluster_id,
-            host: node_params.host.clone(),
-        })?;
-    Ok(response.is_g_collector)
-}
-
 pub fn get_grouping_collectors_keys(
     cluster_id: &ClusterId,
     node_key: &NodePubKey,
@@ -323,8 +293,11 @@ pub fn get_collectors_nodes<
         cluster_id: *cluster_id,
     })?;
     for node_pub_key in nodes {
-        if let Ok(NodeParams::StorageParams(storage_params)) = NM::get_node_params(&node_pub_key) {
-            collectors.push((node_pub_key, storage_params));
+        if let Ok(NodeParams::StorageParams(node_params)) = NM::get_node_params(&node_pub_key) {
+            if node_params.mode == StorageNodeMode::Compute {
+                continue;
+            }
+            collectors.push((node_pub_key, node_params));
         }
     }
 

@@ -582,18 +582,6 @@ impl<'a> DdcClient<'a> {
         Ok(response)
     }
 
-    pub fn check_grouping_collector(&self) -> Result<json::IsGCollectorResponse, http::Error> {
-        let mut url = format!("{}/activity/is-grouping-collector", self.base_url);
-        let (response, _) = fetch_and_parse_json!(
-            self,
-            url,
-            json::IsGCollectorResponse,
-            json::IsGCollectorResponse
-        )?;
-
-        Ok(response)
-    }
-
     pub fn get_grouping_collectors(&self) -> Result<json::GCollectorsResponse, http::Error> {
         let mut url = format!("{}/activity/grouping-collectors", self.base_url);
         let (response, _) = fetch_and_parse_json!(
