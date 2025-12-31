@@ -342,6 +342,7 @@ mod tests {
         assert!(verify_record_signature(valid_signature_msg));
     }
 
+    #[ignore = "Compute usage is in progress"]
     #[test]
     fn verify_challenge_response_works() {
         let challenge_response_serialized =

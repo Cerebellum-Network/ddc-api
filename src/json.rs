@@ -4,8 +4,8 @@ use core::str;
 
 use codec::{Decode, Encode};
 use ddc_primitives::{
-    AccountId32Hex, AggregatorInfo, BucketId, BucketUsage, EHDId, EhdEra, NodePubKey, NodeUsage,
-    PHDId, TcaEra,
+    AggregatorInfo, BucketId, BucketUsage, EhdEra, EHDId, NodePubKey, NodeUsage, PHDId, TcaEra,
+    AccountId32Hex,
 };
 use scale_info::prelude::string::String;
 use serde::{Deserialize, Serialize};
@@ -602,7 +602,7 @@ pub enum InspPathException {
         node_key: NodePubKey,
         tca_id: TcaEra,
         bad_leaves_ids: Vec<u64>,
-        unverified_usage: NodeUsage,
+        unverified_usage: Vec<u8>,
         unverified_usage_collector: NodePubKey,
         unverified_usage_signature: Vec<u8>,
     },
@@ -611,7 +611,7 @@ pub enum InspPathException {
         node_key: NodePubKey,
         tca_id: TcaEra,
         bad_leaves_ids: Vec<u64>,
-        unverified_usage: BucketUsage,
+        unverified_usage: Vec<u8>,
         unverified_usage_collector: NodePubKey,
         unverified_usage_signature: Vec<u8>,
     },
@@ -619,7 +619,7 @@ pub enum InspPathException {
         node_key: NodePubKey,
         tca_id: TcaEra,
         leaves_ids: Vec<u64>,
-        unverified_usage: NodeUsage,
+        unverified_usage: Vec<u8>,
         unverified_usage_collector: NodePubKey,
         unverified_usage_signature: Vec<u8>,
     },
@@ -628,33 +628,33 @@ pub enum InspPathException {
         node_key: NodePubKey,
         tca_id: TcaEra,
         leaves_ids: Vec<u64>,
-        unverified_usage: BucketUsage,
+        unverified_usage: Vec<u8>,
         unverified_usage_collector: NodePubKey,
         unverified_usage_signature: Vec<u8>,
     },
     NodeAggregateMalformed {
         node_key: NodePubKey,
         tca_id: TcaEra,
-        unverified_usage: NodeUsage,
+        unverified_usage: Vec<u8>,
         unverified_usage_collector: NodePubKey,
         unverified_usage_signature: Vec<u8>,
     },
     BucketAggregateMalformed {
         bucket_id: BucketId,
         tca_id: TcaEra,
-        unverified_usage: BucketUsage,
+        unverified_usage: Vec<u8>,
         unverified_usage_collector: NodePubKey,
         unverified_usage_signature: Vec<u8>,
     },
     NodeCumulativeUsageUnavailable {
         node_key: NodePubKey,
         tca_id: TcaEra,
-        accessible_unverified_usage: NodeUsage,
+        accessible_unverified_usage: Vec<u8>,
     },
     BucketCumulativeUsageUnavailable {
         bucket_id: BucketId,
         node_key: Option<NodePubKey>,
         tca_id: TcaEra,
-        accessible_unverified_usage: BucketUsage,
+        accessible_unverified_usage: Vec<u8>,
     },
 }
