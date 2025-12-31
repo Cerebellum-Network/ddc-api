@@ -53,10 +53,10 @@ message Aggregate {
   uint64 delivered = 2;
   uint64 puts = 3;
   uint64 gets = 4;
-  uint64 computes = 5;
-  uint64 cpuUnits = 6;
-  uint64 gpuUnits = 7;
-  uint64 ramUnits = 8;
+  uint64 cpu_units = 5;
+  uint64 gpu_units = 6;
+  uint64 ram_units = 7;
+  uint64 computes = 8;
 }
 
 message ActivityRecord {
