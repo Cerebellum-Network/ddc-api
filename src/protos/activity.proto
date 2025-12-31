@@ -80,7 +80,7 @@ message ActivityRequest {
 		REQUEST_TYPE_GPU_COMPUTE = 4;
 	}
 
-	enum ContentType { //TODO: do we havw to extend this? ask Sergey
+	enum ContentType {
 		CONTENT_TYPE_PIECE = 0;
 		CONTENT_TYPE_SEGMENT = 1;
 		CONTENT_TYPE_MERKLE_TREE = 2;
@@ -154,6 +154,5 @@ enum Operation {
   PUT = 1;
   GET = 2;
   DELETE = 3;
-  CPU_COMPUTE = 4;
-  GPU_COMPUTE = 5;
+  COMPUTE = 4;
 }
