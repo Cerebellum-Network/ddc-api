@@ -28,8 +28,8 @@ sp-std = { version = "14.0.0", default-features = false }
 
 
 # Cere dependencies
-#ddc-primitives = { git = "https://github.com/Cerebellum-Network/ddc-primitives.git", branch = "dev", default-features = false }
-ddc-primitives = { path = "../ddc-primitives", default-features = false }
+ddc-primitives = { git = "https://github.com/Cerebellum-Network/ddc-primitives.git", branch = "feat/dac-compute", default-features = false }
+
 
 
 [build-dependencies]
