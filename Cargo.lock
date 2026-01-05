@@ -868,7 +868,7 @@ dependencies = [
 [[package]]
 name = "ddc-primitives"
 version = "7.3.2"
-source = "git+https://github.com/Cerebellum-Network/ddc-primitives.git?branch=feat%2Fdac-compute#e7b84df857bfa6c4dc0c93d7b4fbc45cbb71ec36"
+source = "git+https://github.com/Cerebellum-Network/ddc-primitives.git?branch=feat%2Fdac-compute#8ae4acd5cc62e93e6cfd8b2f4252ea3e98459ebe"
 dependencies = [
  "blake2",
  "frame-support",

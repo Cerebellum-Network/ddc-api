@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package activity_tree;
 
+import "protos/activity.proto";
+
 // ActivityNode represents aggregated activity data
 message ActivityNode {
     uint64 put_count = 1;
@@ -12,6 +14,64 @@ message ActivityNode {
     uint64 gpu_units = 6;
     uint64 ram_units = 7;
     uint64 compute_count = 8;
+}
+
+// NodeTreeLeaf represents a leaf in the node aggregation merkle tree
+message NodeTreeLeaf {
+    uint64 bucket_id = 1;
+    bytes record_id = 2;
+    activity.ActivityRequest.RequestType request_type = 3;
+    int64 stored = 4;
+    uint64 transferred = 5;
+    uint64 cpu_units = 6;
+    uint64 gpu_units = 7;
+    uint64 ram_units = 8;
+}
+
+// BucketSubTreeLeaf represents a leaf in the bucket sub-tree (per-node within bucket)
+message BucketSubTreeLeaf {
+    bytes record_id = 1;
+    activity.ActivityRequest.RequestType request_type = 2;
+    int64 stored = 3;
+    uint64 transferred = 4;
+    uint64 cpu_units = 5;
+    uint64 gpu_units = 6;
+    uint64 ram_units = 7;
+}
+
+// TcaBucketAggregate represents a bucket's aggregated data within a TCA
+message TcaBucketAggregate {
+    uint64 bucket_id = 1;
+    ActivityNode activity_node = 2;
+    bytes root_hash = 3;
+}
+
+// TcaNodeAggregate represents a node's aggregated data within a TCA
+message TcaNodeAggregate {
+    bytes node_key = 1; // node public key (32 bytes)
+    ActivityNode activity_node = 2;
+    bytes root_hash = 3;
+}
+
+// TcaPayload represents all aggregated data for a specific TCA
+// This is a self-contained structure for passing TCA data to WASM functions
+message TcaPayload {
+    uint32 tca_id = 1;
+    repeated TcaBucketAggregate bucket_aggregates = 2;
+    repeated TcaNodeAggregate node_aggregates = 3;
+}
+
+// PhdPayload represents PHD data from a single collector
+message PhdPayload {
+    bytes node_key = 1;      // Collector's node key (32 bytes)
+    bytes provider_id = 2;   // Provider ID for this collector (32 bytes)
+    PhdTreeNode phd_data = 3; // PHD tree node data
+}
+
+// EhdPayload represents all data needed for EHD era processing
+message EhdPayload {
+    uint32 era_id = 1;
+    repeated PhdPayload collector_phds = 2;
 }
 
 // EhdTreeNodeCustomerAggregate represents customer aggregate in EHD tree node

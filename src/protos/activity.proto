@@ -29,6 +29,9 @@ message ChallengeResponse {
       ActivityRecord record = 1;
       int64 stored = 2;
       uint64 delivered = 3;
+      uint64 cpuUnits = 4;
+      uint64 gpuUnits = 5;
+      uint64 ramUnits = 6;
     }
 
     message RecordLink {

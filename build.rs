@@ -41,6 +41,10 @@ fn main() -> Result<()> {
         "#[derive(Eq, PartialOrd, Ord)]",
     );
     prost_build.type_attribute(
+        "activity_tree.PhdTreeNode",
+        "#[derive(Eq, PartialOrd, Ord)]",
+    );
+    prost_build.type_attribute(
         "activity_tree.BucketSubAggregate",
         "#[derive(Eq, PartialOrd, Ord)]",
     );
@@ -59,6 +63,34 @@ fn main() -> Result<()> {
     prost_build.type_attribute(
         "activity_tree.ActivityTreeTraversalResponse",
         "#[derive(Eq, PartialOrd, Ord)]",
+    );
+    prost_build.type_attribute(
+        "activity_tree.NodeTreeLeaf",
+        "#[derive(Eq, PartialOrd, Ord)]",
+    );
+    prost_build.type_attribute(
+        "activity_tree.BucketSubTreeLeaf",
+        "#[derive(Eq, PartialOrd, Ord)]",
+    );
+    prost_build.type_attribute(
+        "activity_tree.TcaPayload",
+        "#[derive(Eq, PartialOrd, Ord)]",
+    );
+    prost_build.type_attribute(
+        "activity_tree.TcaBucketAggregate",
+        "#[derive(Eq, PartialOrd, Ord)]",
+    );
+    prost_build.type_attribute(
+        "activity_tree.TcaNodeAggregate",
+        "#[derive(Eq, PartialOrd, Ord)]",
+    );
+    prost_build.type_attribute(
+        "activity_tree.PhdPayload",
+        "#[derive(Eq, PartialOrd)]",
+    );
+    prost_build.type_attribute(
+        "activity_tree.EhdPayload",
+        "#[derive(Eq, PartialOrd)]",
     );
     prost_build.compile_protos(
         &[
