@@ -12,6 +12,7 @@ use scale_info::{
 use serde::{Deserialize, Serialize};
 use sp_runtime::offchain::{http, Duration};
 use sp_std::{collections::btree_map::BTreeMap, prelude::*};
+use ddc_primitives::StorageNodeMode;
 
 use crate::{
     client::DdcClient,
@@ -247,37 +248,6 @@ pub fn get_sync_node<
     }
 }
 
-/// Fetch customer usage.
-///
-/// Parameters:
-/// - `node_params`: Requesting DDC node
-pub fn check_grouping_collector(
-    cluster_id: &ClusterId,
-    node_key: &NodePubKey,
-    node_params: &StorageNodeParams,
-) -> Result<bool, ApiError> {
-    let host = str::from_utf8(&node_params.host).map_err(|_| ApiError::NodeHostParseError {
-        cluster_id: *cluster_id,
-        node_key: node_key.clone(),
-        host: node_params.host.clone(),
-    })?;
-    let base_url: String = format!("http://{}:{}", host, node_params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        false,
-    );
-
-    let response = client
-        .check_grouping_collector()
-        .map_err(|_| ApiError::HttpClientError {
-            cluster_id: *cluster_id,
-            host: node_params.host.clone(),
-        })?;
-    Ok(response.is_g_collector)
-}
-
 pub fn get_grouping_collectors_keys(
     cluster_id: &ClusterId,
     node_key: &NodePubKey,
@@ -323,8 +293,11 @@ pub fn get_collectors_nodes<
         cluster_id: *cluster_id,
     })?;
     for node_pub_key in nodes {
-        if let Ok(NodeParams::StorageParams(storage_params)) = NM::get_node_params(&node_pub_key) {
-            collectors.push((node_pub_key, storage_params));
+        if let Ok(NodeParams::StorageParams(node_params)) = NM::get_node_params(&node_pub_key) {
+            if node_params.mode == StorageNodeMode::Compute {
+                continue;
+            }
+            collectors.push((node_pub_key, node_params));
         }
     }
 
@@ -487,7 +460,7 @@ pub fn fetch_bucket_aggregates<
     cluster_id: &ClusterId,
     tca_id: TcaEra,
     collector_key: NodePubKey,
-) -> Result<Vec<json::BucketAggregateResponse>, ApiError> {
+) -> Result<Vec<proto::activity_tree::BucketAggregate>, ApiError> {
     let (_, collector_params) =
         get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key.clone())?;
     let host =
@@ -505,7 +478,7 @@ pub fn fetch_bucket_aggregates<
         false,
     );
 
-    let mut buckets_aggregates = Vec::new();
+    let mut buckets_aggregates: Vec<proto::activity_tree::BucketAggregate> = Vec::new();
     let mut prev_token = None;
 
     loop {
@@ -521,81 +494,18 @@ pub fn fetch_bucket_aggregates<
             })?;
 
         let response = api_response.response;
-        let response_len = response.len();
+        let response_len = response.buckets.len();
 
-        prev_token = response.last().map(|a| a.bucket_id);
+        prev_token = response.buckets.last().map(|a| a.bucket_id);
 
-        buckets_aggregates.extend(response);
+        buckets_aggregates.extend(response.buckets);
 
         if response_len < BUCKETS_AGGREGATES_FETCH_BATCH_SIZE {
             break;
         }
     }
 
-    return Ok(buckets_aggregates);
-}
-
-/// Traverse EHD record.
-///
-/// Parameters:
-/// - `cluster_id`: cluster id of a cluster
-/// - `era`: EHD era
-/// - `tree_node_id` - merkle tree node identifier
-/// - `tree_levels_count` - merkle tree levels to request
-pub fn fetch_traversed_era_historical_document<
-    AccountId,
-    BlockNumber,
-    CM: ClusterManager<AccountId, BlockNumber>,
-    NM: NodeManager<AccountId>,
->(
-    cluster_id: &ClusterId,
-    era: EhdEra,
-    tree_node_id: u32,
-    tree_levels_count: u32,
-) -> Result<Vec<json::EHDTreeNode>, ApiError> {
-    let (g_collector_key, g_collector_params) =
-        get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|_| {
-            ApiError::FailedToFetchGCollectors {
-                cluster_id: *cluster_id,
-            }
-        })?;
-    let host =
-        str::from_utf8(&g_collector_params.host).map_err(|_| ApiError::NodeHostParseError {
-            cluster_id: *cluster_id,
-            node_key: g_collector_key.clone(),
-            host: g_collector_params.host.clone(),
-        })?;
-
-    let base_url = format!("http://{}:{}", host, g_collector_params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        false, // no response signature verification for now
-    );
-
-    let traversed_ehd = client.traverse_era_historical_document(
-        *cluster_id,
-        era,
-        g_collector_key.clone(),
-        tree_node_id,
-        tree_levels_count,
-    ).map_err(|_| {
-        log!(error,
-            "❌ G-Collector from cluster {:?} is unavailable while fetching EHD record or responded with unexpected body. Key: {:?} Host: {:?}",
-            cluster_id,
-            g_collector_key,
-            String::from_utf8_lossy(&g_collector_params.host)
-        );
-        ApiError::FailedToFetchTraversedEHD {
-            cluster_id: *cluster_id,
-            era,
-            tree_node_id,
-            tree_levels_count,
-        }
-    })?;
-    // proceed with the first available EHD record for the prototype
-    Ok(traversed_ehd)
+    Ok(buckets_aggregates)
 }
 
 /// Traverse PHD record.
@@ -617,7 +527,7 @@ pub fn fetch_traversed_partial_historical_document<
     collector_key: NodePubKey,
     tree_node_id: u32,
     tree_levels_count: u32,
-) -> Result<Vec<json::PHDTreeNode>, ApiError> {
+) -> Result<ApiResponse<proto::activity_tree::PhdTreeTraversalResponse>, ApiError> {
     let (collector_key, collector_params) =
         get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
     let host =
@@ -642,7 +552,7 @@ pub fn fetch_traversed_partial_historical_document<
         tree_levels_count,
     ).map_err(|_| {
         log!(error,
-            "❌ Collector from cluster {:?} is unavailable while fetching PHD record or responded with unexpected body. Key: {:?} Host: {:?}",
+            "❌ Collector from cluster {:?} is unavailable while fetching PHD record (proto) or responded with unexpected body. Key: {:?} Host: {:?}",
             cluster_id,
             collector_key,
             String::from_utf8_lossy(&collector_params.host)
@@ -671,7 +581,7 @@ pub fn fetch_traversed_node_aggregate<
     tree_node_id: u64,
     tree_levels_count: u16,
     verify_sig: bool,
-) -> Result<ApiResponse<Vec<json::MerkleTreeNodeResponse>>, ApiError> {
+) -> Result<ApiResponse<proto::activity_tree::ActivityTreeTraversalResponse>, ApiError> {
     let (collector_key, collector_params) =
         get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
     let host =
@@ -727,7 +637,7 @@ pub fn fetch_traversed_bucket_sub_aggregate<
     tree_node_id: u64,
     tree_levels_count: u16,
     verify_sig: bool,
-) -> Result<ApiResponse<Vec<json::MerkleTreeNodeResponse>>, ApiError> {
+) -> Result<ApiResponse<proto::activity_tree::ActivityTreeTraversalResponse>, ApiError> {
     let (collector_key, collector_params) =
         get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
     let host =
@@ -742,7 +652,7 @@ pub fn fetch_traversed_bucket_sub_aggregate<
         &base_url,
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
-        verify_sig, // no response signature verification for now
+        verify_sig,
     );
 
     let traversed_bucket_sub_aggregate = client.traverse_bucket_sub_aggregate(
@@ -771,6 +681,69 @@ pub fn fetch_traversed_bucket_sub_aggregate<
     Ok(traversed_bucket_sub_aggregate)
 }
 
+/// Traverse EHD record.
+///
+/// Parameters:
+/// - `cluster_id`: cluster id of a cluster
+/// - `era`: EHD era
+/// - `tree_node_id` - merkle tree node identifier
+/// - `tree_levels_count` - merkle tree levels to request
+pub fn fetch_traversed_era_historical_document<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
+    cluster_id: &ClusterId,
+    era: EhdEra,
+    tree_node_id: u32,
+    tree_levels_count: u32,
+) -> Result<ApiResponse<proto::activity_tree::EhdTreeTraversalResponse>, ApiError> {
+    let (g_collector_key, g_collector_params) =
+        get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|_| {
+            ApiError::FailedToFetchGCollectors {
+                cluster_id: *cluster_id,
+            }
+        })?;
+    let host =
+        str::from_utf8(&g_collector_params.host).map_err(|_| ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: g_collector_key.clone(),
+            host: g_collector_params.host.clone(),
+        })?;
+
+    let base_url = format!("http://{}:{}", host, g_collector_params.http_port);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+        false, // no response signature verification for now
+    );
+
+    let traversed_ehd = client.traverse_era_historical_document(
+        *cluster_id,
+        era,
+        g_collector_key.clone(),
+        tree_node_id,
+        tree_levels_count,
+    ).map_err(|_| {
+        log!(error,
+            "❌ G-Collector from cluster {:?} is unavailable while fetching EHD record or responded with unexpected body. Key: {:?} Host: {:?}",
+            cluster_id,
+            g_collector_key,
+            String::from_utf8_lossy(&g_collector_params.host)
+        );
+        ApiError::FailedToFetchTraversedEHD {
+            cluster_id: *cluster_id,
+            era,
+            tree_node_id,
+            tree_levels_count,
+        }
+    })?;
+    
+    Ok(traversed_ehd)
+}
+
 /// Fetch EHD merkle root node.
 ///
 /// Parameters:
@@ -784,18 +757,25 @@ pub fn get_ehd_root<
 >(
     cluster_id: &ClusterId,
     era: EhdEra,
-) -> Result<json::EHDTreeNode, ApiError> {
-    fetch_traversed_era_historical_document::<AccountId, BlockNumber, CM, NM>(
+) -> Result<ApiResponse<proto::activity_tree::EhdTreeTraversedNode>, ApiError> {
+    let api_response = fetch_traversed_era_historical_document::<AccountId, BlockNumber, CM, NM>(
         cluster_id, era, 1, 1,
-    )?
-    .first()
-    .ok_or(ApiError::FailedToFetchTraversedEHD {
-        cluster_id: *cluster_id,
-        era,
-        tree_node_id: 1,
-        tree_levels_count: 1,
+    )?;
+    
+    let first_node = api_response.response.nodes
+        .into_iter()
+        .next()
+        .ok_or(ApiError::FailedToFetchTraversedEHD {
+            cluster_id: *cluster_id,
+            era,
+            tree_node_id: 1,
+            tree_levels_count: 1,
+        })?;
+    
+    Ok(ApiResponse {
+        response: first_node,
+        signed_by: api_response.signed_by,
     })
-    .cloned()
 }
 
 /// Fetch PHD merkle root node.
@@ -813,18 +793,25 @@ pub fn get_phd_root<
     cluster_id: &ClusterId,
     era: EhdEra,
     collector: NodePubKey,
-) -> Result<json::PHDTreeNode, ApiError> {
-    fetch_traversed_partial_historical_document::<AccountId, BlockNumber, CM, NM>(
+) -> Result<ApiResponse<proto::activity_tree::PhdTreeTraversedNode>, ApiError> {
+    let api_response = fetch_traversed_partial_historical_document::<AccountId, BlockNumber, CM, NM>(
         cluster_id, era, collector, 1, 1,
-    )?
-    .first()
-    .ok_or(ApiError::FailedToFetchTraversedPHD {
-        cluster_id: *cluster_id,
-        era,
-        tree_node_id: 1,
-        tree_levels_count: 1,
+    )?;
+
+    let first_node = api_response.response.nodes
+        .into_iter()
+        .next()
+        .ok_or(ApiError::FailedToFetchTraversedPHD {
+            cluster_id: *cluster_id,
+            era,
+            tree_node_id: 1,
+            tree_levels_count: 1,
+        })?;
+
+    Ok(ApiResponse {
+        response: first_node,
+        signed_by: api_response.signed_by,
     })
-    .cloned()
 }
 
 /// Fetch processed EHD eras.
