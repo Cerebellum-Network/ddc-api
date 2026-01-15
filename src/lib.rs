@@ -85,6 +85,28 @@ pub mod proto {
             }
         }
 
+        impl EhdTreeNodeCustomerAggregate {
+            pub fn get_customer_id(&self) -> Option<sp_runtime::AccountId32> {
+                if self.customer_id.len() == 32 {
+                    let arr: [u8; 32] = self.customer_id.as_slice().try_into().ok()?;
+                    Some(sp_runtime::AccountId32::from(arr))
+                } else {
+                    None
+                }
+            }
+        }
+
+        impl EhdTreeNodeProviderAggregate {
+            pub fn get_provider_id(&self) -> Option<sp_runtime::AccountId32> {
+                if self.provider_id.len() == 32 {
+                    let arr: [u8; 32] = self.provider_id.as_slice().try_into().ok()?;
+                    Some(sp_runtime::AccountId32::from(arr))
+                } else {
+                    None
+                }
+            }
+        }
+
         impl ActivityNode {
 
             /// Encodes ActivityNode to protobuf bytes

@@ -22,23 +22,23 @@ fn main() -> Result<()> {
     );
     prost_build.type_attribute(
         "activity_tree.ActivityNode",
-        "#[derive(Eq, PartialOrd, Ord)]",
+        "#[derive(Eq, PartialOrd, Ord, codec::Encode, codec::Decode, scale_info::TypeInfo)]",
     );
     prost_build.type_attribute(
         "activity_tree.PhdTreeTraversedNode",
-        "#[derive(Eq, PartialOrd, Ord)]",
+        "#[derive(Eq, PartialOrd, Ord, codec::Encode, codec::Decode)]",
     );
     prost_build.type_attribute(
         "activity_tree.PhdBucketAggregateGroup",
-        "#[derive(Eq, PartialOrd, Ord)]",
+        "#[derive(Eq, PartialOrd, Ord, codec::Encode, codec::Decode)]",
     );
     prost_build.type_attribute(
         "activity_tree.PhdNodeAggregateGroup",
-        "#[derive(Eq, PartialOrd, Ord)]",
+        "#[derive(Eq, PartialOrd, Ord, codec::Encode, codec::Decode)]",
     );
     prost_build.type_attribute(
         "activity_tree.PhdTcaAggregate",
-        "#[derive(Eq, PartialOrd, Ord)]",
+        "#[derive(Eq, PartialOrd, Ord, codec::Encode, codec::Decode)]",
     );
     prost_build.type_attribute(
         "activity_tree.PhdTreeNode",
