@@ -22,6 +22,447 @@ pub mod proto {
 
     pub mod inspection_sync {
         include!(concat!(env!("OUT_DIR"), "/inspection_sync.rs"));
+
+        #[cfg(test)]
+        mod tests {
+            use super::*;
+            use prost::Message;
+            use std::collections::BTreeMap;
+
+            // =================================================================
+            // T091: Protobuf serialization round-trip tests
+            // =================================================================
+
+            #[test]
+            fn lease_request_round_trip() {
+                let req = LeaseRequest {
+                    era_id: 42,
+                    inspector_key: "0xabc123".into(),
+                    ttl_seconds: 300,
+                };
+
+                let bytes = req.encode_to_vec();
+                assert!(!bytes.is_empty());
+
+                let decoded = LeaseRequest::decode(bytes.as_slice()).unwrap();
+                assert_eq!(decoded.era_id, 42);
+                assert_eq!(decoded.inspector_key, "0xabc123");
+                assert_eq!(decoded.ttl_seconds, 300);
+            }
+
+            #[test]
+            fn lease_result_round_trip() {
+                let res = LeaseResult {
+                    status: LeaseStatus::Acquired as i32,
+                    era_id: 42,
+                    inspector_key: "0xabc123".into(),
+                    lease_id: "lease-001".into(),
+                    expires_at: 1700000000,
+                    current_holder: String::new(),
+                    error_message: String::new(),
+                };
+
+                let bytes = res.encode_to_vec();
+                let decoded = LeaseResult::decode(bytes.as_slice()).unwrap();
+                assert_eq!(decoded.status, LeaseStatus::Acquired as i32);
+                assert_eq!(decoded.era_id, 42);
+                assert_eq!(decoded.inspector_key, "0xabc123");
+                assert_eq!(decoded.lease_id, "lease-001");
+                assert_eq!(decoded.expires_at, 1700000000);
+            }
+
+            #[test]
+            fn assignment_table_round_trip() {
+                let mut paths = BTreeMap::new();
+                paths.insert(
+                    "path-001".into(),
+                    InspectionPath {
+                        path_id: vec![0x01, 0x02],
+                        path_type: "type1".into(),
+                        node_key: vec![0x0a, 0x0b],
+                        bucket_id: 100,
+                        tca_id: 5,
+                    },
+                );
+
+                let mut assignments = BTreeMap::new();
+                assignments.insert(
+                    "path-001".into(),
+                    InspectorAssignments {
+                        main_inspectors: vec!["insp1".into(), "insp2".into()],
+                        backup_inspectors: vec!["insp3".into()],
+                    },
+                );
+
+                let table = AssignmentTable {
+                    cluster_id: vec![0xaa, 0xbb],
+                    era: 42,
+                    irf: 3,
+                    paths,
+                    assignments,
+                    collective_seed: 12345,
+                    builder: "0xabc123".into(),
+                    submitted_at: 1700000000,
+                    archived_cid: vec![],
+                    archived_at: 0,
+                    archival_status: ArchivalStatus::Pending as i32,
+                };
+
+                let bytes = table.encode_to_vec();
+                let decoded = AssignmentTable::decode(bytes.as_slice()).unwrap();
+                assert_eq!(decoded.era, 42);
+                assert_eq!(decoded.irf, 3);
+                assert_eq!(decoded.paths.len(), 1);
+                assert_eq!(decoded.assignments.len(), 1);
+                assert_eq!(decoded.paths["path-001"].path_type, "type1");
+                assert_eq!(decoded.assignments["path-001"].main_inspectors.len(), 2);
+            }
+
+            #[test]
+            fn post_assignment_table_request_round_trip() {
+                let req = PostAssignmentTableRequest {
+                    era_id: 42,
+                    inspector_key: "0xabc123".into(),
+                    table: Some(AssignmentTable {
+                        cluster_id: vec![0xaa],
+                        era: 42,
+                        irf: 3,
+                        paths: BTreeMap::new(),
+                        assignments: BTreeMap::new(),
+                        collective_seed: 0,
+                        builder: "0xabc123".into(),
+                        submitted_at: 0,
+                        archived_cid: vec![],
+                        archived_at: 0,
+                        archival_status: 0,
+                    }),
+                };
+
+                let bytes = req.encode_to_vec();
+                let decoded = PostAssignmentTableRequest::decode(bytes.as_slice()).unwrap();
+                assert_eq!(decoded.era_id, 42);
+                assert!(decoded.table.is_some());
+                assert_eq!(decoded.table.unwrap().irf, 3);
+            }
+
+            #[test]
+            fn post_assignment_table_response_round_trip() {
+                let res = PostAssignmentTableResponse {
+                    status: PostAssignmentTableStatus::Accepted as i32,
+                    era_id: 42,
+                    submitted_at: 1700000000,
+                    error_code: String::new(),
+                    error_message: String::new(),
+                };
+
+                let bytes = res.encode_to_vec();
+                let decoded = PostAssignmentTableResponse::decode(bytes.as_slice()).unwrap();
+                assert_eq!(decoded.status, PostAssignmentTableStatus::Accepted as i32);
+                assert_eq!(decoded.submitted_at, 1700000000);
+            }
+
+            #[test]
+            fn get_assignment_table_response_round_trip() {
+                let res = GetAssignmentTableResponse {
+                    status: GetAssignmentTableStatus::Building as i32,
+                    era_id: 42,
+                    table: None,
+                    lease_holder: "0xdef456".into(),
+                    lease_expires_at: 1700001000,
+                    message: "Table is being built".into(),
+                };
+
+                let bytes = res.encode_to_vec();
+                let decoded = GetAssignmentTableResponse::decode(bytes.as_slice()).unwrap();
+                assert_eq!(decoded.status, GetAssignmentTableStatus::Building as i32);
+                assert!(decoded.table.is_none());
+                assert_eq!(decoded.lease_holder, "0xdef456");
+            }
+
+            #[test]
+            fn post_inspection_result_request_round_trip() {
+                let req = PostInspectionResultRequest {
+                    era_id: 42,
+                    inspector_key: "0xabc123".into(),
+                    paths_results: vec![
+                        InspectionPathResult {
+                            path_id: vec![0x01],
+                            result_hash: vec![0xaa, 0xbb, 0xcc],
+                            exception: vec![],
+                        },
+                        InspectionPathResult {
+                            path_id: vec![0x02],
+                            result_hash: vec![0xdd, 0xee],
+                            exception: vec![0xff],
+                        },
+                    ],
+                };
+
+                let bytes = req.encode_to_vec();
+                let decoded = PostInspectionResultRequest::decode(bytes.as_slice()).unwrap();
+                assert_eq!(decoded.paths_results.len(), 2);
+                assert_eq!(decoded.paths_results[0].path_id, vec![0x01]);
+                assert_eq!(decoded.paths_results[1].exception, vec![0xff]);
+            }
+
+            #[test]
+            fn post_inspection_result_response_round_trip() {
+                let res = PostInspectionResultResponse {
+                    status: PostInspectionResultStatus::Partial as i32,
+                    accepted_count: 3,
+                    rejected_count: 1,
+                    quorum_reached_paths: vec!["path-001".into()],
+                    rejected_paths: vec![RejectedInspectionPath {
+                        path_id: vec![0x02],
+                        reason: "duplicate".into(),
+                    }],
+                    details: "3 accepted, 1 rejected".into(),
+                };
+
+                let bytes = res.encode_to_vec();
+                let decoded = PostInspectionResultResponse::decode(bytes.as_slice()).unwrap();
+                assert_eq!(decoded.status, PostInspectionResultStatus::Partial as i32);
+                assert_eq!(decoded.accepted_count, 3);
+                assert_eq!(decoded.rejected_count, 1);
+                assert_eq!(decoded.rejected_paths[0].reason, "duplicate");
+            }
+
+            #[test]
+            fn inspection_state_round_trip() {
+                let mut paths = BTreeMap::new();
+                let mut submissions = BTreeMap::new();
+                submissions.insert("0xaabb".into(), 2);
+                submissions.insert("0xccdd".into(), 1);
+
+                paths.insert(
+                    "path-001".into(),
+                    InspectionPathStatus {
+                        status: InspectionPathStatusEnum::InspectionPathStatusIrfReached as i32,
+                        irf_count: 3,
+                        result_hash: vec![0xaa, 0xbb],
+                        exception: vec![],
+                        submissions,
+                        inspectors: vec!["insp1".into(), "insp2".into(), "insp3".into()],
+                    },
+                );
+
+                let state = InspectionState {
+                    era_id: 42,
+                    total_paths: 10,
+                    verified_paths: 5,
+                    unverified_paths: 2,
+                    pending_paths: 3,
+                    paths,
+                    updated_at: 1700000000,
+                    archived_cid: vec![],
+                    archived_at: 0,
+                    archival_status: 0,
+                };
+
+                let bytes = state.encode_to_vec();
+                let decoded = InspectionState::decode(bytes.as_slice()).unwrap();
+                assert_eq!(decoded.era_id, 42);
+                assert_eq!(decoded.total_paths, 10);
+                assert_eq!(decoded.verified_paths, 5);
+                assert_eq!(decoded.paths.len(), 1);
+                let path_status = &decoded.paths["path-001"];
+                assert_eq!(path_status.irf_count, 3);
+                assert_eq!(path_status.submissions.len(), 2);
+                assert_eq!(path_status.inspectors.len(), 3);
+            }
+
+            #[test]
+            fn inspection_receipt_round_trip() {
+                let receipt = InspectionReceipt {
+                    era_id: 42,
+                    cluster_id: vec![0xaa, 0xbb],
+                    verified_paths: vec![vec![0x01], vec![0x02]],
+                    unverified_paths: vec![UnverifiedPath {
+                        path_id: vec![0x03],
+                        exception: vec![0xff],
+                        irf_count: 3,
+                    }],
+                    quorum_unreached_paths: vec![vec![0x04]],
+                    assignment_table_hash: vec![0xde, 0xad],
+                    generated_at: 1700000000,
+                    complete: true,
+                    pending_paths_count: 0,
+                    message: "All paths processed".into(),
+                    archived_cid: vec![],
+                    archived_at: 0,
+                    archival_status: 0,
+                };
+
+                let bytes = receipt.encode_to_vec();
+                let decoded = InspectionReceipt::decode(bytes.as_slice()).unwrap();
+                assert_eq!(decoded.era_id, 42);
+                assert_eq!(decoded.verified_paths.len(), 2);
+                assert_eq!(decoded.unverified_paths.len(), 1);
+                assert_eq!(decoded.unverified_paths[0].irf_count, 3);
+                assert_eq!(decoded.quorum_unreached_paths.len(), 1);
+                assert!(decoded.complete);
+            }
+
+            #[test]
+            fn quorum_info_round_trip() {
+                let info = InspSyncQuorumInfo {
+                    era_id: 42,
+                    quorum_members: vec![
+                        InspSyncQuorumMember {
+                            node_key: "node1".into(),
+                            http_endpoint: "http://node1:8080".into(),
+                            etcd_client_url: "http://node1:2379".into(),
+                            is_leader: true,
+                            is_healthy: true,
+                        },
+                        InspSyncQuorumMember {
+                            node_key: "node2".into(),
+                            http_endpoint: "http://node2:8080".into(),
+                            etcd_client_url: "http://node2:2379".into(),
+                            is_leader: false,
+                            is_healthy: true,
+                        },
+                    ],
+                    quorum_size: 2,
+                    healthy_members: 2,
+                    election_seed: vec![0x01, 0x02, 0x03],
+                    formation_time: 1700000000,
+                    single_endpoint: String::new(),
+                };
+
+                let bytes = info.encode_to_vec();
+                let decoded = InspSyncQuorumInfo::decode(bytes.as_slice()).unwrap();
+                assert_eq!(decoded.quorum_members.len(), 2);
+                assert_eq!(decoded.quorum_size, 2);
+                assert!(decoded.quorum_members[0].is_leader);
+                assert!(!decoded.quorum_members[1].is_leader);
+            }
+
+            #[test]
+            fn default_values_are_zero() {
+                let req = LeaseRequest::default();
+                assert_eq!(req.era_id, 0);
+                assert_eq!(req.inspector_key, "");
+                assert_eq!(req.ttl_seconds, 0);
+
+                let state = InspectionState::default();
+                assert_eq!(state.total_paths, 0);
+                assert_eq!(state.paths.len(), 0);
+            }
+
+            #[test]
+            fn enum_values_preserved() {
+                assert_eq!(LeaseStatus::Unspecified as i32, 0);
+                assert_eq!(LeaseStatus::Acquired as i32, 1);
+                assert_eq!(LeaseStatus::HeldByOther as i32, 2);
+                assert_eq!(LeaseStatus::Error as i32, 3);
+
+                assert_eq!(InspectionPathStatusEnum::InspectionPathStatusUnspecified as i32, 0);
+                assert_eq!(InspectionPathStatusEnum::InspectionPathStatusPending as i32, 1);
+                assert_eq!(InspectionPathStatusEnum::InspectionPathStatusIrfReached as i32, 2);
+                assert_eq!(InspectionPathStatusEnum::InspectionPathStatusIrfUnreached as i32, 3);
+
+                assert_eq!(GetAssignmentTableStatus::Found as i32, 1);
+                assert_eq!(GetAssignmentTableStatus::NotFound as i32, 2);
+                assert_eq!(GetAssignmentTableStatus::Building as i32, 3);
+
+                assert_eq!(PostAssignmentTableStatus::Accepted as i32, 1);
+                assert_eq!(PostAssignmentTableStatus::Rejected as i32, 2);
+
+                assert_eq!(PostInspectionResultStatus::Accepted as i32, 1);
+                assert_eq!(PostInspectionResultStatus::Partial as i32, 2);
+                assert_eq!(PostInspectionResultStatus::Rejected as i32, 3);
+            }
+
+            // =================================================================
+            // T092: Lease acquisition protobuf tests
+            // =================================================================
+
+            #[test]
+            fn lease_request_serialize_and_deserialize() {
+                let req = LeaseRequest {
+                    era_id: 100,
+                    inspector_key: "0x1234567890abcdef".into(),
+                    ttl_seconds: 60,
+                };
+
+                // Serialize to bytes (as inspector client would send)
+                let bytes = req.encode_to_vec();
+                assert!(!bytes.is_empty());
+
+                // Deserialize (as ddc-node would receive)
+                let decoded = LeaseRequest::decode(bytes.as_slice()).unwrap();
+                assert_eq!(decoded.era_id, req.era_id);
+                assert_eq!(decoded.inspector_key, req.inspector_key);
+                assert_eq!(decoded.ttl_seconds, req.ttl_seconds);
+            }
+
+            #[test]
+            fn lease_result_acquired_deserialize() {
+                // Simulate ddc-node returning ACQUIRED lease
+                let result = LeaseResult {
+                    status: LeaseStatus::Acquired as i32,
+                    era_id: 100,
+                    inspector_key: "0x1234567890abcdef".into(),
+                    lease_id: "lease-abc-123".into(),
+                    expires_at: 1700000060,
+                    current_holder: String::new(),
+                    error_message: String::new(),
+                };
+
+                let bytes = result.encode_to_vec();
+
+                // Deserialize (as inspector client would receive)
+                let decoded = LeaseResult::decode(bytes.as_slice()).unwrap();
+                assert_eq!(decoded.status, LeaseStatus::Acquired as i32);
+                assert_eq!(decoded.era_id, 100);
+                assert_eq!(decoded.lease_id, "lease-abc-123");
+                assert_eq!(decoded.expires_at, 1700000060);
+                assert!(decoded.current_holder.is_empty());
+                assert!(decoded.error_message.is_empty());
+            }
+
+            #[test]
+            fn lease_result_held_by_other_deserialize() {
+                // Simulate ddc-node returning HELD_BY_OTHER lease
+                let result = LeaseResult {
+                    status: LeaseStatus::HeldByOther as i32,
+                    era_id: 100,
+                    inspector_key: "0x1234567890abcdef".into(),
+                    lease_id: String::new(),
+                    expires_at: 1700000120,
+                    current_holder: "0xother_inspector_key".into(),
+                    error_message: String::new(),
+                };
+
+                let bytes = result.encode_to_vec();
+                let decoded = LeaseResult::decode(bytes.as_slice()).unwrap();
+                assert_eq!(decoded.status, LeaseStatus::HeldByOther as i32);
+                assert_eq!(decoded.current_holder, "0xother_inspector_key");
+                assert!(decoded.lease_id.is_empty());
+            }
+
+            #[test]
+            fn lease_result_error_deserialize() {
+                // Simulate ddc-node returning ERROR lease
+                let result = LeaseResult {
+                    status: LeaseStatus::Error as i32,
+                    era_id: 100,
+                    inspector_key: "0x1234567890abcdef".into(),
+                    lease_id: String::new(),
+                    expires_at: 0,
+                    current_holder: String::new(),
+                    error_message: "etcd cluster unavailable".into(),
+                };
+
+                let bytes = result.encode_to_vec();
+                let decoded = LeaseResult::decode(bytes.as_slice()).unwrap();
+                assert_eq!(decoded.status, LeaseStatus::Error as i32);
+                assert_eq!(decoded.error_message, "etcd cluster unavailable");
+                assert!(decoded.lease_id.is_empty());
+                assert_eq!(decoded.expires_at, 0);
+            }
+        }
     }
 
     pub mod activity_tree {
