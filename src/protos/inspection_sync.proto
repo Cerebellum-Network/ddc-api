@@ -112,13 +112,32 @@ message AssignmentTable {
   ArchivalStatus archival_status = 11;
 }
 
+enum InspectionPathType {
+  INSPECTION_PATH_TYPE_UNSPECIFIED = 0;
+  INSPECTION_PATH_TYPE_NODE_AR = 1;
+  INSPECTION_PATH_TYPE_BUCKET_AR = 2;
+}
+
+message NodeARPath {
+  bytes node_key = 1;              // Data node being inspected (NodePubKey, 32 bytes)
+  repeated uint64 leaves_ids = 2;  // Merkle tree leaf IDs in NodeAggregate tree
+  uint32 tca_id = 3;              // Time capsule era (specific to NodeAR inspection)
+}
+
+message BucketARPath {
+  uint64 bucket_id = 1;            // Bucket being inspected
+  repeated uint64 leaves_pos = 2;  // Merkle tree leaf positions in BucketAggregate tree
+  uint32 tca_id = 3;              // Time capsule era (specific to BucketAR inspection)
+}
+
 message InspectionPath {
-  bytes path_id = 1;
-  string path_type = 2;  // "type1", "type2", "type3", "type4"
-  bytes node_key = 3;     // Data node being inspected
-  uint64 bucket_id = 4;
-  uint32 tca_id = 5;
-  // Additional path-specific metadata can be added here
+  bytes path_id = 1;                       // H256 hash (32 bytes)
+  InspectionPathType path_type = 2;        // NodeAR or BucketAR
+  repeated bytes collectors = 3;           // Collector node keys (32 bytes each)
+  oneof path_data {
+    NodeARPath node_ar = 4;
+    BucketARPath bucket_ar = 5;
+  }
 }
 
 message InspectorAssignments {

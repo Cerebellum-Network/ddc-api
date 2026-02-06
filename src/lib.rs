@@ -73,15 +73,20 @@ pub mod proto {
 
             #[test]
             fn assignment_table_round_trip() {
+                use inspection_path::PathData;
+
                 let mut paths = BTreeMap::new();
                 paths.insert(
                     "path-001".into(),
                     InspectionPath {
                         path_id: vec![0x01, 0x02],
-                        path_type: "type1".into(),
-                        node_key: vec![0x0a, 0x0b],
-                        bucket_id: 100,
-                        tca_id: 5,
+                        path_type: InspectionPathType::NodeAr as i32,
+                        collectors: vec![vec![0xc0, 0xc1], vec![0xc2, 0xc3]],
+                        path_data: Some(PathData::NodeAr(NodeArPath {
+                            node_key: vec![0x0a, 0x0b],
+                            leaves_ids: vec![1, 2, 3],
+                            tca_id: 5,
+                        })),
                     },
                 );
 
@@ -114,7 +119,19 @@ pub mod proto {
                 assert_eq!(decoded.irf, 3);
                 assert_eq!(decoded.paths.len(), 1);
                 assert_eq!(decoded.assignments.len(), 1);
-                assert_eq!(decoded.paths["path-001"].path_type, "type1");
+                assert_eq!(
+                    decoded.paths["path-001"].path_type,
+                    InspectionPathType::NodeAr as i32
+                );
+                assert_eq!(decoded.paths["path-001"].collectors.len(), 2);
+                match &decoded.paths["path-001"].path_data {
+                    Some(PathData::NodeAr(node_ar)) => {
+                        assert_eq!(node_ar.node_key, vec![0x0a, 0x0b]);
+                        assert_eq!(node_ar.leaves_ids, vec![1, 2, 3]);
+                        assert_eq!(node_ar.tca_id, 5);
+                    }
+                    _ => panic!("Expected NodeAr path_data"),
+                }
                 assert_eq!(decoded.assignments["path-001"].main_inspectors.len(), 2);
             }
 
