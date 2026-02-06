@@ -1,0 +1,256 @@
+syntax = "proto3";
+
+package inspection_sync;
+
+// ============================================================================
+// Inspection Sync Quorum - Protocol Buffer Definitions
+// ============================================================================
+// This file defines all data structures for the etcd-based sync quorum
+// that provides shared memory coordination for inspectors running in OCW.
+//
+// Version: 2.0.0 (Protobuf Migration)
+// Origin: ddc-node/pb/inspection_sync.proto (Go implementation)
+// ============================================================================
+
+// ============================================================================
+// Core Enums
+// ============================================================================
+
+enum LeaseStatus {
+  LEASE_STATUS_UNSPECIFIED = 0;
+  LEASE_STATUS_ACQUIRED = 1;
+  LEASE_STATUS_HELD_BY_OTHER = 2;
+  LEASE_STATUS_ERROR = 3;
+}
+
+enum InspectionPathStatusEnum {
+  INSPECTION_PATH_STATUS_UNSPECIFIED = 0;
+  INSPECTION_PATH_STATUS_PENDING = 1;
+  INSPECTION_PATH_STATUS_IRF_REACHED = 2;
+  INSPECTION_PATH_STATUS_IRF_UNREACHED = 3;
+}
+
+enum ArchivalStatus {
+  ARCHIVAL_STATUS_UNSPECIFIED = 0;
+  ARCHIVAL_STATUS_PENDING = 1;
+  ARCHIVAL_STATUS_IN_PROGRESS = 2;
+  ARCHIVAL_STATUS_COMPLETE = 3;
+  ARCHIVAL_STATUS_FAILED = 4;
+}
+
+enum GetAssignmentTableStatus {
+  GET_ASSIGNMENT_TABLE_STATUS_UNSPECIFIED = 0;
+  GET_ASSIGNMENT_TABLE_STATUS_FOUND = 1;
+  GET_ASSIGNMENT_TABLE_STATUS_NOT_FOUND = 2;
+  GET_ASSIGNMENT_TABLE_STATUS_BUILDING = 3;
+}
+
+enum PostAssignmentTableStatus {
+  POST_ASSIGNMENT_TABLE_STATUS_UNSPECIFIED = 0;
+  POST_ASSIGNMENT_TABLE_STATUS_ACCEPTED = 1;
+  POST_ASSIGNMENT_TABLE_STATUS_REJECTED = 2;
+}
+
+enum PostInspectionResultStatus {
+  POST_INSPECTION_RESULT_STATUS_UNSPECIFIED = 0;
+  POST_INSPECTION_RESULT_STATUS_ACCEPTED = 1;
+  POST_INSPECTION_RESULT_STATUS_PARTIAL = 2;
+  POST_INSPECTION_RESULT_STATUS_REJECTED = 3;
+}
+
+// ============================================================================
+// Lease Management (POST /itm/lease)
+// ============================================================================
+
+message LeaseRequest {
+  uint32 era_id = 1;
+  string inspector_key = 2;  // Public key of inspector's task manager
+  int64 ttl_seconds = 3;      // Lease time-to-live
+}
+
+message LeaseResult {
+  LeaseStatus status = 1;
+  uint32 era_id = 2;
+  string inspector_key = 3;
+  string lease_id = 4;
+  int64 expires_at = 5;       // Unix timestamp
+  string current_holder = 6;  // Populated if status == HELD_BY_OTHER
+  string error_message = 7;   // Populated if status == ERROR
+}
+
+// ============================================================================
+// Assignment Table (POST /itm/submit, GET /itm/table)
+// ============================================================================
+
+message PostAssignmentTableRequest {
+  uint32 era_id = 1;
+  string inspector_key = 2;
+  AssignmentTable table = 3;
+}
+
+message PostAssignmentTableResponse {
+  PostAssignmentTableStatus status = 1;
+  uint32 era_id = 2;
+  int64 submitted_at = 3;      // Unix timestamp
+  string error_code = 4;       // Populated if status == REJECTED
+  string error_message = 5;    // Populated if status == REJECTED
+}
+
+message AssignmentTable {
+  bytes cluster_id = 1;
+  uint32 era = 2;
+  uint32 irf = 3;  // Inspection Redundancy Factor
+  map<string, InspectionPath> paths = 4;
+  map<string, InspectorAssignments> assignments = 5;
+  uint64 collective_seed = 6;  // From multi-party commitment (salts from inspectors)
+  string builder = 7;           // Inspector's task manager that built the table
+  int64 submitted_at = 8;       // Unix timestamp
+
+  // Archival metadata (managed by system during archival to DDC cluster)
+  bytes archived_cid = 9;
+  int64 archived_at = 10;
+  ArchivalStatus archival_status = 11;
+}
+
+message InspectionPath {
+  bytes path_id = 1;
+  string path_type = 2;  // "type1", "type2", "type3", "type4"
+  bytes node_key = 3;     // Data node being inspected
+  uint64 bucket_id = 4;
+  uint32 tca_id = 5;
+  // Additional path-specific metadata can be added here
+}
+
+message InspectorAssignments {
+  repeated string main_inspectors = 1;   // First IRF inspectors (start immediately)
+  repeated string backup_inspectors = 2; // Backup inspectors (delayed start)
+}
+
+message GetAssignmentTableResponse {
+  GetAssignmentTableStatus status = 1;
+  uint32 era_id = 2;
+  AssignmentTable table = 3;      // Populated if status == FOUND
+  string lease_holder = 4;         // Populated if status == BUILDING
+  int64 lease_expires_at = 5;      // Populated if status == BUILDING
+  string message = 6;
+}
+
+// ============================================================================
+// Path Receipts & State (POST /itm/path, GET /itm/state)
+// ============================================================================
+
+message PostInspectionResultRequest {
+  uint32 era_id = 1;
+  string inspector_key = 2;
+  repeated InspectionPathResult paths_results = 3;
+}
+
+message InspectionPathResult {
+  bytes path_id = 1;
+  bytes result_hash = 2;
+  bytes exception = 3;      // Optional - fraud evidence
+}
+
+message PostInspectionResultResponse {
+  PostInspectionResultStatus status = 1;
+  int32 accepted_count = 2;
+  int32 rejected_count = 3;
+  repeated string quorum_reached_paths = 4;  // Path IDs that reached IRF quorum
+  repeated RejectedInspectionPath rejected_paths = 5;
+  string details = 6;
+}
+
+message RejectedInspectionPath {
+  bytes path_id = 1;
+  string reason = 2;  // "not_assigned", "invalid_path", "duplicate"
+}
+
+message InspectionState {
+  uint32 era_id = 1;
+  int32 total_paths = 2;
+  int32 verified_paths = 3;      // Quorum reached, no exception
+  int32 unverified_paths = 4;    // Quorum reached, with exception
+  int32 pending_paths = 5;       // Still waiting for quorum
+  map<string, InspectionPathStatus> paths = 6;  // path_id (hex string) -> status
+  int64 updated_at = 7;           // Unix timestamp
+
+  // Archival metadata - InspectionState is archived for audit trail
+  bytes archived_cid = 8;
+  int64 archived_at = 9;
+  ArchivalStatus archival_status = 10;
+}
+
+message InspectionPathStatus {
+  InspectionPathStatusEnum status = 1;
+  int32 irf_count = 2;           // Count for winning hash
+  bytes result_hash = 3;         // Winning hash (if quorum reached)
+  bytes exception = 4;           // Exception data (if any)
+  map<string, int32> submissions = 5;  // hash (hex string) -> inspector count
+  repeated string inspectors = 6;      // Inspectors who submitted
+}
+
+// ============================================================================
+// Inspection Receipt (GET /itm/summary)
+// ============================================================================
+
+message InspectionReceipt {
+  uint32 era_id = 1;
+  bytes cluster_id = 2;
+  repeated bytes verified_paths = 3;
+  repeated UnverifiedPath unverified_paths = 4;
+  repeated bytes quorum_unreached_paths = 5;
+  bytes assignment_table_hash = 6;
+  int64 generated_at = 7;         // Unix timestamp
+  bool complete = 8;
+  int32 pending_paths_count = 9;  // If not complete
+  string message = 10;
+
+  // Archival metadata
+  bytes archived_cid = 11;
+  int64 archived_at = 12;
+  ArchivalStatus archival_status = 13;
+}
+
+message UnverifiedPath {
+  bytes path_id = 1;
+  bytes exception = 2;  // Fraud evidence
+  int32 irf_count = 3;  // IRF was reached (consensus on invalidity)
+}
+
+// ============================================================================
+// Quorum Discovery (GET /itm/quorum)
+// ============================================================================
+
+message InspSyncQuorumInfo {
+  uint32 era_id = 1;
+  repeated InspSyncQuorumMember quorum_members = 2;
+  int32 quorum_size = 3;
+  int32 healthy_members = 4;
+  bytes election_seed = 5;
+  int64 formation_time = 6;      // Unix timestamp
+  string single_endpoint = 7;    // Populated if mode == SINGLE (not used in this version)
+}
+
+message InspSyncQuorumMember {
+  string node_key = 1;
+  string http_endpoint = 2;
+  string etcd_client_url = 3;
+  bool is_leader = 4;
+  bool is_healthy = 5;
+}
+
+// ============================================================================
+// Error Handling
+// ============================================================================
+
+message ErrorResponse {
+  string error_code = 1;
+  string error_message = 2;
+  map<string, string> details = 3;
+}
+
+message StateError {
+  string status = 1;  // "not_found"
+  uint32 era_id = 2;
+  string message = 3;
+}

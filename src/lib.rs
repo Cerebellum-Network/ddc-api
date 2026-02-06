@@ -20,6 +20,10 @@ pub mod proto {
         include!(concat!(env!("OUT_DIR"), "/inspection.rs"));
     }
 
+    pub mod inspection_sync {
+        include!(concat!(env!("OUT_DIR"), "/inspection_sync.rs"));
+    }
+
     pub mod activity_tree {
         include!(concat!(env!("OUT_DIR"), "/activity_tree.rs"));
 
