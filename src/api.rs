@@ -1258,3 +1258,240 @@ pub fn get_inspection_summary<
             era,
         })
 }
+
+// ============================================================================
+// Inspection Sync API Functions (inspection_sync protobuf types)
+// ============================================================================
+// These functions use the new etcd-based sync quorum API with full protobuf
+// serialization. They correspond to the inspection_sync_router endpoints.
+
+pub fn post_itm_lease_sync<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
+    cluster_id: &ClusterId,
+    request: &proto::inspection_sync::LeaseRequest,
+) -> Result<proto::inspection_sync::LeaseResult, ApiError> {
+    let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+
+    let host =
+        str::from_utf8(&sync_node.params.host).map_err(|_| ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: sync_node.key.clone(),
+            host: sync_node.params.host.clone(),
+        })?;
+    let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+        false,
+    );
+
+    client
+        .post_itm_lease_sync(request)
+        .map_err(|_| ApiError::HttpClientError {
+            cluster_id: *cluster_id,
+            host: sync_node.params.host.clone(),
+        })
+}
+
+pub fn submit_assignments_table_sync<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
+    cluster_id: &ClusterId,
+    request: &proto::inspection_sync::PostAssignmentTableRequest,
+) -> Result<proto::inspection_sync::PostAssignmentTableResponse, ApiError> {
+    let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+
+    let host =
+        str::from_utf8(&sync_node.params.host).map_err(|_| ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: sync_node.key.clone(),
+            host: sync_node.params.host.clone(),
+        })?;
+    let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+        false,
+    );
+
+    client
+        .submit_assignments_table_sync(request)
+        .map_err(|_| ApiError::HttpClientError {
+            cluster_id: *cluster_id,
+            host: sync_node.params.host.clone(),
+        })
+}
+
+pub fn get_assignments_table_sync<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
+    cluster_id: &ClusterId,
+    era: EhdEra,
+) -> Result<proto::inspection_sync::GetAssignmentTableResponse, ApiError> {
+    let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+
+    let host =
+        str::from_utf8(&sync_node.params.host).map_err(|_| ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: sync_node.key.clone(),
+            host: sync_node.params.host.clone(),
+        })?;
+    let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+        false,
+    );
+
+    client
+        .get_assignments_table_sync(era)
+        .map_err(|_| ApiError::HttpClientError {
+            cluster_id: *cluster_id,
+            host: sync_node.params.host.clone(),
+        })
+}
+
+pub fn submit_inspection_result_sync<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
+    cluster_id: &ClusterId,
+    request: &proto::inspection_sync::PostInspectionResultRequest,
+) -> Result<proto::inspection_sync::PostInspectionResultResponse, ApiError> {
+    let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+
+    let host =
+        str::from_utf8(&sync_node.params.host).map_err(|_| ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: sync_node.key.clone(),
+            host: sync_node.params.host.clone(),
+        })?;
+    let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+        false,
+    );
+
+    client
+        .submit_inspection_result_sync(request)
+        .map_err(|_| ApiError::HttpClientError {
+            cluster_id: *cluster_id,
+            host: sync_node.params.host.clone(),
+        })
+}
+
+pub fn get_inspection_state_sync<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
+    cluster_id: &ClusterId,
+    era: EhdEra,
+) -> Result<proto::inspection_sync::InspectionState, ApiError> {
+    let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+
+    let host =
+        str::from_utf8(&sync_node.params.host).map_err(|_| ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: sync_node.key.clone(),
+            host: sync_node.params.host.clone(),
+        })?;
+    let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+        false,
+    );
+
+    client
+        .get_inspection_state_sync(era)
+        .map_err(|_| ApiError::HttpClientError {
+            cluster_id: *cluster_id,
+            host: sync_node.params.host.clone(),
+        })
+}
+
+pub fn get_inspection_receipt_sync<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
+    cluster_id: &ClusterId,
+    era: EhdEra,
+) -> Result<proto::inspection_sync::InspectionReceipt, ApiError> {
+    let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+
+    let host =
+        str::from_utf8(&sync_node.params.host).map_err(|_| ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: sync_node.key.clone(),
+            host: sync_node.params.host.clone(),
+        })?;
+    let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+        false,
+    );
+
+    client
+        .get_inspection_receipt_sync(era)
+        .map_err(|_| ApiError::FailedToFetchInspSummary {
+            cluster_id: *cluster_id,
+            era,
+        })
+}
+
+pub fn get_quorum_info_sync<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
+    cluster_id: &ClusterId,
+    era: EhdEra,
+) -> Result<proto::inspection_sync::InspSyncQuorumInfo, ApiError> {
+    let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+
+    let host =
+        str::from_utf8(&sync_node.params.host).map_err(|_| ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: sync_node.key.clone(),
+            host: sync_node.params.host.clone(),
+        })?;
+    let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+        false,
+    );
+
+    client
+        .get_quorum_info_sync(era)
+        .map_err(|_| ApiError::HttpClientError {
+            cluster_id: *cluster_id,
+            host: sync_node.params.host.clone(),
+        })
+}

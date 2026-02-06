@@ -582,6 +582,157 @@ impl<'a> DdcClient<'a> {
         Ok(response)
     }
 
+    // ========================================================================
+    // Inspection Sync Client Methods (inspection_sync protobuf types)
+    // ========================================================================
+    // These methods use the new etcd-based sync quorum API with full protobuf
+    // serialization for both request and response bodies.
+
+    /// POST /itm/lease - Acquire exclusive lease for building assignment table (protobuf)
+    pub fn post_itm_lease_sync(
+        &self,
+        request: &proto::inspection_sync::LeaseRequest,
+    ) -> Result<proto::inspection_sync::LeaseResult, http::Error> {
+        let url = format!("{}/itm/lease", self.base_url);
+        let body = request.encode_to_vec();
+
+        let response = self.post_proto(&url, body)?;
+        let body = response.body().collect::<Vec<u8>>();
+
+        proto::inspection_sync::LeaseResult::decode(body.as_slice()).map_err(|e| {
+            log!(error, "❌ Failed to decode LeaseResult protobuf: {:?}", e);
+            http::Error::Unknown
+        })
+    }
+
+    /// POST /itm/submit - Submit completed assignment table (protobuf)
+    pub fn submit_assignments_table_sync(
+        &self,
+        request: &proto::inspection_sync::PostAssignmentTableRequest,
+    ) -> Result<proto::inspection_sync::PostAssignmentTableResponse, http::Error> {
+        let url = format!("{}/itm/submit", self.base_url);
+        let body = request.encode_to_vec();
+
+        let response = self.post_proto(&url, body)?;
+        let body = response.body().collect::<Vec<u8>>();
+
+        proto::inspection_sync::PostAssignmentTableResponse::decode(body.as_slice()).map_err(
+            |e| {
+                log!(
+                    error,
+                    "❌ Failed to decode PostAssignmentTableResponse protobuf: {:?}",
+                    e
+                );
+                http::Error::Unknown
+            },
+        )
+    }
+
+    /// GET /itm/table - Retrieve assignment table (protobuf)
+    pub fn get_assignments_table_sync(
+        &self,
+        era: EhdEra,
+    ) -> Result<proto::inspection_sync::GetAssignmentTableResponse, http::Error> {
+        let url = format!("{}/itm/table?eraId={}", self.base_url, era);
+
+        let response = self.get(&url, Accept::Protobuf)?;
+        let body = response.body().collect::<Vec<u8>>();
+
+        proto::inspection_sync::GetAssignmentTableResponse::decode(body.as_slice()).map_err(
+            |e| {
+                log!(
+                    error,
+                    "❌ Failed to decode GetAssignmentTableResponse protobuf: {:?}",
+                    e
+                );
+                http::Error::Unknown
+            },
+        )
+    }
+
+    /// POST /itm/path - Submit inspection path results (protobuf)
+    pub fn submit_inspection_result_sync(
+        &self,
+        request: &proto::inspection_sync::PostInspectionResultRequest,
+    ) -> Result<proto::inspection_sync::PostInspectionResultResponse, http::Error> {
+        let url = format!("{}/itm/path", self.base_url);
+        let body = request.encode_to_vec();
+
+        let response = self.post_proto(&url, body)?;
+        let body = response.body().collect::<Vec<u8>>();
+
+        proto::inspection_sync::PostInspectionResultResponse::decode(body.as_slice()).map_err(
+            |e| {
+                log!(
+                    error,
+                    "❌ Failed to decode PostInspectionResultResponse protobuf: {:?}",
+                    e
+                );
+                http::Error::Unknown
+            },
+        )
+    }
+
+    /// GET /itm/state - Retrieve inspection state (protobuf)
+    pub fn get_inspection_state_sync(
+        &self,
+        era: EhdEra,
+    ) -> Result<proto::inspection_sync::InspectionState, http::Error> {
+        let url = format!("{}/itm/state?eraId={}", self.base_url, era);
+
+        let response = self.get(&url, Accept::Protobuf)?;
+        let body = response.body().collect::<Vec<u8>>();
+
+        proto::inspection_sync::InspectionState::decode(body.as_slice()).map_err(|e| {
+            log!(
+                error,
+                "❌ Failed to decode InspectionState protobuf: {:?}",
+                e
+            );
+            http::Error::Unknown
+        })
+    }
+
+    /// GET /itm/summary - Retrieve inspection receipt (protobuf)
+    pub fn get_inspection_receipt_sync(
+        &self,
+        era: EhdEra,
+    ) -> Result<proto::inspection_sync::InspectionReceipt, http::Error> {
+        let url = format!("{}/itm/summary?eraId={}", self.base_url, era);
+
+        let response = self.get(&url, Accept::Protobuf)?;
+        let body = response.body().collect::<Vec<u8>>();
+
+        proto::inspection_sync::InspectionReceipt::decode(body.as_slice()).map_err(|e| {
+            log!(
+                error,
+                "❌ Failed to decode InspectionReceipt protobuf: {:?}",
+                e
+            );
+            http::Error::Unknown
+        })
+    }
+
+    /// GET /itm/quorum - Retrieve quorum information (protobuf)
+    pub fn get_quorum_info_sync(
+        &self,
+        era: EhdEra,
+    ) -> Result<proto::inspection_sync::InspSyncQuorumInfo, http::Error> {
+        let url = format!("{}/itm/quorum?eraId={}", self.base_url, era);
+
+        let response = self.get(&url, Accept::Protobuf)?;
+        let body = response.body().collect::<Vec<u8>>();
+
+        proto::inspection_sync::InspSyncQuorumInfo::decode(body.as_slice()).map_err(|e| {
+            log!(
+                error,
+                "❌ Failed to decode InspSyncQuorumInfo protobuf: {:?}",
+                e
+            );
+            http::Error::Unknown
+        })
+    }
+
     pub fn get_grouping_collectors(&self) -> Result<json::GCollectorsResponse, http::Error> {
         let mut url = format!("{}/activity/grouping-collectors", self.base_url);
         let (response, _) = fetch_and_parse_json!(
@@ -738,6 +889,90 @@ impl<'a> DdcClient<'a> {
         }
 
         log!(trace, "HTTP GET request to {:?} completed", url,);
+
+        Ok(response)
+    }
+
+    /// Send a POST request with protobuf-encoded body (Content-Type: application/protobuf)
+    /// and expect a protobuf response (Accept: application/protobuf).
+    /// Used by inspection_sync client methods for the new etcd-based sync quorum API.
+    fn post_proto(
+        &self,
+        url: &str,
+        request_body: Vec<u8>,
+    ) -> Result<http::Response, http::Error> {
+        let mut maybe_response = None;
+
+        let deadline = timestamp().add(self.timeout);
+        let mut error = None;
+
+        for i in 0..self.retries {
+            log!(
+                trace,
+                "Sending HTTP POST (protobuf) request to {:?}, attempt: {:?}",
+                url,
+                i + 1
+            );
+            let request = http::Request::post(url, vec![request_body.clone()])
+                .add_header("content-type", "application/protobuf")
+                .add_header("Accept", "application/protobuf");
+
+            let pending = request
+                .deadline(deadline)
+                .body(vec![request_body.clone()])
+                .send()
+                .map_err(|_| http::Error::IoError)?;
+
+            match pending.try_wait(deadline) {
+                Ok(Ok(r)) => {
+                    maybe_response = Some(r);
+                    error = None;
+                    break;
+                }
+                Ok(Err(_)) | Err(_) => {
+                    error = Some(http::Error::DeadlineReached);
+                    continue;
+                }
+            }
+        }
+
+        if let Some(e) = error {
+            log!(
+                error,
+                "❌ HTTP POST (protobuf) client error for url {:?}, error {:?}",
+                url,
+                e
+            );
+            return Err(e);
+        }
+
+        let response = match maybe_response {
+            Some(r) => r,
+            None => {
+                log!(
+                    error,
+                    "❌ HTTP POST (protobuf) client error for url {:?}, no response",
+                    url
+                );
+                return Err(http::Error::Unknown);
+            }
+        };
+
+        if response.code >= 500 {
+            log!(
+                error,
+                "❌ HTTP POST (protobuf) client error for url {:?}, status code is {:?}",
+                url,
+                response.code
+            );
+            return Err(http::Error::Unknown);
+        }
+
+        log!(
+            trace,
+            "HTTP POST (protobuf) request to {:?} completed",
+            url,
+        );
 
         Ok(response)
     }
