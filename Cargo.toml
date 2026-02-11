@@ -10,8 +10,8 @@ repository = "https://github.com/Cerebellum-Network/ddc-api"
 [dependencies]
 blake2 = { version = "0.10.6", default-features = false }
 codec = { package = "parity-scale-codec", version = "3.6.12", default-features = false, features = ["derive", "max-encoded-len"] }
-frame-support = { version = "43.0.0", default-features = false, features = ["tuples-96"] }
-frame-system = { version = "43.0.0", default-features = false }
+frame-support = { version = "45.0.0", default-features = false, features = ["tuples-96"] }
+frame-system = { version = "45.0.0", default-features = false }
 hex = { version = "0.4.3", default-features = false, features = ["alloc"] }
 log = { version = "0.4.22", default-features = false }
 polkadot-ckb-merkle-mountain-range = { version = "0.7.0", default-features = false }
@@ -20,10 +20,10 @@ scale-info = { version = "2.11.3", default-features = false, features = ["derive
 serde = { version = "1.0.210", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0.1", default-features = false }
 serde_with = { version = "3", default-features = false, features = ["base64", "macros"] }
-sp-application-crypto = { version = "43.0.0", default-features = false }
-sp-core = { version = "38.1.0", default-features = false, features = ["serde"] }
-sp-io = { version = "43.0.0", default-features = false }
-sp-runtime = { version = "44.0.0", default-features = false }
+sp-application-crypto = { version = "44.0.0", default-features = false }
+sp-core = { version = "39.0.0", default-features = false, features = ["serde"] }
+sp-io = { version = "44.0.0", default-features = false }
+sp-runtime = { version = "45.0.0", default-features = false }
 sp-std = { version = "14.0.0", default-features = false }
 
 
