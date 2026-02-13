@@ -205,7 +205,8 @@ message InspectionPathStatus {
   bytes result_hash = 3;         // Winning hash (if quorum reached)
   bytes exception = 4;           // Exception data (if any)
   map<string, int32> submissions = 5;  // hash (hex string) -> inspector count
-  repeated string inspectors = 6;      // Inspectors who submitted
+  repeated string inspectors = 6;              // Inspectors who already submitted
+  repeated string remaining_inspectors = 7;    // Assigned inspectors who haven't submitted yet
 }
 
 // ============================================================================
