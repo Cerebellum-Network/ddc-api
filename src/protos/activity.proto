@@ -29,6 +29,9 @@ message ChallengeResponse {
       ActivityRecord record = 1;
       int64 stored = 2;
       uint64 delivered = 3;
+      uint64 cpuUnits = 4;
+      uint64 gpuUnits = 5;
+      uint64 ramUnits = 6;
     }
 
     message RecordLink {
@@ -50,6 +53,10 @@ message Aggregate {
   uint64 delivered = 2;
   uint64 puts = 3;
   uint64 gets = 4;
+  uint64 cpu_units = 5;
+  uint64 gpu_units = 6;
+  uint64 ram_units = 7;
+  uint64 computes = 8;
 }
 
 message ActivityRecord {
@@ -69,6 +76,7 @@ message ActivityRequest {
 		REQUEST_TYPE_PUT = 0;
 		REQUEST_TYPE_GET = 1;
 		REQUEST_TYPE_DELETE = 2;
+		REQUEST_TYPE_COMPUTE = 3;
 	}
 
 	enum ContentType {
@@ -76,6 +84,7 @@ message ActivityRequest {
 		CONTENT_TYPE_SEGMENT = 1;
 		CONTENT_TYPE_MERKLE_TREE = 2;
 		CONTENT_TYPE_METADATA = 3;
+		CONTENT_TYPE_NONE = 4;
 	}
 
 	RequestType requestType = 3;
@@ -96,7 +105,10 @@ message ActivityAcknowledgment {
 	string requestId = 1;
 	uint64 bytesStoredOrDelivered = 2;
 	uint64 timestamp = 3;
-	signature.Signature signature = 4;
+	uint64 cpuUnits = 4;
+	uint64 gpuUnits = 5;
+	uint64 ramUnits = 6;
+	signature.Signature signature = 7;
 }
 
 message ActivityResponse {
@@ -141,4 +153,5 @@ enum Operation {
   PUT = 1;
   GET = 2;
   DELETE = 3;
+  COMPUTE = 4;
 }
