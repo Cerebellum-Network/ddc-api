@@ -156,7 +156,7 @@ impl<'a> DdcClient<'a> {
         era_id: TcaEra,
         prev_token: Option<BucketId>,
         limit: Option<u32>,
-    ) -> Result<ApiResponse<Vec<json::BucketAggregateResponse>>, http::Error> {
+    ) -> Result<ApiResponse<proto::activity_tree::BucketAggregatesResponse>, http::Error> {
         let mut url = format!("{}/activity/buckets?eraId={}", self.base_url, era_id);
         if let Some(prev_token) = prev_token {
             url = format!("{}&prevToken={}", url, prev_token);
@@ -165,11 +165,11 @@ impl<'a> DdcClient<'a> {
             url = format!("{}&limit={}", url, limit);
         }
 
-        let (response, signed_by) = fetch_and_parse_json!(
+        let (response, signed_by) = fetch_and_parse_proto!(
             self,
             url,
-            Vec<json::BucketAggregateResponse>,
-            Vec<json::BucketAggregateResponse>
+            proto::activity_tree::BucketAggregatesResponse,
+            proto::activity_tree::BucketAggregatesResponse
         )?;
 
         let api_response = ApiResponse {
@@ -178,31 +178,6 @@ impl<'a> DdcClient<'a> {
         };
 
         Ok(api_response)
-    }
-
-    pub fn nodes_aggregates(
-        &self,
-        era_id: TcaEra,
-        limit: Option<u32>,
-        prev_token: Option<String>,
-    ) -> Result<Vec<json::NodeAggregateResponse>, http::Error> {
-        let mut url = format!("{}/activity/nodes?eraId={}", self.base_url, era_id);
-
-        if let Some(limit) = limit {
-            url = format!("{}&limit={}", url, limit);
-        }
-        if let Some(prev_token) = prev_token {
-            url = format!("{}&prevToken={}", url, prev_token);
-        }
-
-        let (response, _) = fetch_and_parse_json!(
-            self,
-            url,
-            Vec<json::NodeAggregateResponse>,
-            Vec<json::NodeAggregateResponse>
-        )?;
-
-        Ok(response)
     }
 
     pub fn challenge_bucket_sub_aggregate(
@@ -407,7 +382,7 @@ impl<'a> DdcClient<'a> {
         g_collector: NodePubKey,
         tree_node_id: u32,
         tree_levels_count: u32,
-    ) -> Result<Vec<json::EHDTreeNode>, http::Error> {
+    ) -> Result<ApiResponse<proto::activity_tree::EhdTreeTraversalResponse>, http::Error> {
         let ehd_id = EHDId(cluster_id, g_collector, era);
         let mut url = format!(
             "{}/activity/ehds/{}/traverse?merkleTreeNodeId={}&levels={}",
@@ -417,10 +392,19 @@ impl<'a> DdcClient<'a> {
             tree_levels_count
         );
 
-        let (response, _) =
-            fetch_and_parse_json!(self, url, Vec<json::EHDTreeNode>, Vec<json::EHDTreeNode>)?;
+        let (response, signed_by) = fetch_and_parse_proto!(
+            self,
+            url,
+            proto::activity_tree::EhdTreeTraversalResponse,
+            proto::activity_tree::EhdTreeTraversalResponse
+        )?;
 
-        Ok(response)
+        let api_response = ApiResponse {
+            response,
+            signed_by,
+        };
+
+        Ok(api_response)
     }
 
     pub fn traverse_partial_historical_document(
@@ -429,7 +413,7 @@ impl<'a> DdcClient<'a> {
         collector: NodePubKey,
         tree_node_id: u32,
         tree_levels_count: u32,
-    ) -> Result<Vec<json::PHDTreeNode>, http::Error> {
+    ) -> Result<ApiResponse<proto::activity_tree::PhdTreeTraversalResponse>, http::Error> {
         let phd_id = PHDId(collector, era);
         let mut url = format!(
             "{}/activity/phds/{}/traverse?merkleTreeNodeId={}&levels={}",
@@ -439,10 +423,19 @@ impl<'a> DdcClient<'a> {
             tree_levels_count
         );
 
-        let (response, _) =
-            fetch_and_parse_json!(self, url, Vec<json::PHDTreeNode>, Vec<json::PHDTreeNode>)?;
+        let (response, signed_by) = fetch_and_parse_proto!(
+            self,
+            url,
+            proto::activity_tree::PhdTreeTraversalResponse,
+            proto::activity_tree::PhdTreeTraversalResponse
+        )?;
 
-        Ok(response)
+        let api_response = ApiResponse {
+            response,
+            signed_by,
+        };
+
+        Ok(api_response)
     }
 
     pub fn traverse_node_aggregate(
@@ -451,7 +444,7 @@ impl<'a> DdcClient<'a> {
         node_key: NodePubKey,
         merkle_tree_node_id: u64,
         levels: u16,
-    ) -> Result<ApiResponse<Vec<json::MerkleTreeNodeResponse>>, http::Error> {
+    ) -> Result<ApiResponse<proto::activity_tree::ActivityTreeTraversalResponse>, http::Error> {
         let mut url = format!(
             "{}/activity/nodes/{}/traverse?eraId={}&merkleTreeNodeId={}&levels={}",
             self.base_url,
@@ -461,11 +454,11 @@ impl<'a> DdcClient<'a> {
             levels,
         );
 
-        let (response, signed_by) = fetch_and_parse_json!(
+        let (response, signed_by) = fetch_and_parse_proto!(
             self,
             url,
-            Vec<json::MerkleTreeNodeResponse>,
-            Vec<json::MerkleTreeNodeResponse>
+            proto::activity_tree::ActivityTreeTraversalResponse,
+            proto::activity_tree::ActivityTreeTraversalResponse
         )?;
 
         let api_response = ApiResponse {
@@ -483,7 +476,7 @@ impl<'a> DdcClient<'a> {
         node_key: NodePubKey,
         merkle_tree_node_id: u64,
         levels: u16,
-    ) -> Result<ApiResponse<Vec<json::MerkleTreeNodeResponse>>, http::Error> {
+    ) -> Result<ApiResponse<proto::activity_tree::ActivityTreeTraversalResponse>, http::Error> {
         let mut url = format!(
             "{}/activity/buckets/{}/traverse?eraId={}&nodeId={}&merkleTreeNodeId={}&levels={}",
             self.base_url,
@@ -494,11 +487,11 @@ impl<'a> DdcClient<'a> {
             levels,
         );
 
-        let (response, signed_by) = fetch_and_parse_json!(
+        let (response, signed_by) = fetch_and_parse_proto!(
             self,
             url,
-            Vec<json::MerkleTreeNodeResponse>,
-            Vec<json::MerkleTreeNodeResponse>
+            proto::activity_tree::ActivityTreeTraversalResponse,
+            proto::activity_tree::ActivityTreeTraversalResponse
         )?;
 
         let api_response = ApiResponse {
@@ -585,18 +578,6 @@ impl<'a> DdcClient<'a> {
             url = format!("{}&dryRun=true", url);
         }
         let (response, _) = fetch_and_parse_json!(self, url, json::InspSummary, json::InspSummary)?;
-
-        Ok(response)
-    }
-
-    pub fn check_grouping_collector(&self) -> Result<json::IsGCollectorResponse, http::Error> {
-        let mut url = format!("{}/activity/is-grouping-collector", self.base_url);
-        let (response, _) = fetch_and_parse_json!(
-            self,
-            url,
-            json::IsGCollectorResponse,
-            json::IsGCollectorResponse
-        )?;
 
         Ok(response)
     }
