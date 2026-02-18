@@ -483,7 +483,36 @@ pub mod proto {
     }
 
     pub use self::inspection_sync::InspectionReceipt;
+    pub use self::inspection_sync::InspPathException;
+    pub use self::inspection_sync::insp_path_exception;
     pub type ProtoUnverifiedPath = inspection_sync::UnverifiedPath;
+
+    pub trait NodePubKeyExt {
+        fn try_from_bytes(bytes: &[u8]) -> Option<ddc_primitives::NodePubKey>;
+        fn to_bytes(&self) -> sp_std::vec::Vec<u8>;
+    }
+
+    impl NodePubKeyExt for ddc_primitives::NodePubKey {
+        fn try_from_bytes(bytes: &[u8]) -> Option<ddc_primitives::NodePubKey> {
+            if bytes.len() != 32 {
+                return None;
+            }
+            let mut arr = [0u8; 32];
+            arr.copy_from_slice(bytes);
+            Some(ddc_primitives::NodePubKey::StoragePubKey(
+                sp_runtime::AccountId32::new(arr),
+            ))
+        }
+
+        fn to_bytes(&self) -> sp_std::vec::Vec<u8> {
+            match self {
+                ddc_primitives::NodePubKey::StoragePubKey(account_id) => {
+                    let bytes: &[u8] = account_id.as_ref();
+                    bytes.to_vec()
+                }
+            }
+        }
+    }
 
     impl InspectionReceipt {
         pub fn to_proto_bytes(&self) -> sp_std::vec::Vec<u8> {

@@ -233,8 +233,93 @@ message InspectionReceipt {
 
 message UnverifiedPath {
   bytes path_id = 1;
-  bytes exception = 2;  // Fraud evidence
+  bytes exception = 2;  // Protobuf-encoded InspPathException
   int32 irf_count = 3;  // IRF was reached (consensus on invalidity)
+}
+
+message InspPathException {
+  oneof kind {
+    MultipleExceptions multiple_exceptions = 1;
+    NodeARsSigUnverified node_ars_sig_unverified = 2;
+    BucketARsSigUnverified bucket_ars_sig_unverified = 3;
+    NodeARsUnavailable node_ars_unavailable = 4;
+    BucketARsUnavailable bucket_ars_unavailable = 5;
+    NodeAggregateMalformed node_aggregate_malformed = 6;
+    BucketAggregateMalformed bucket_aggregate_malformed = 7;
+    NodeCumulativeUsageUnavailable node_cumulative_usage_unavailable = 8;
+    BucketCumulativeUsageUnavailable bucket_cumulative_usage_unavailable = 9;
+  }
+}
+
+message MultipleExceptions {
+  repeated InspPathException exceptions = 1;
+}
+
+message NodeARsSigUnverified {
+  bytes node_key = 1;
+  uint32 tca_id = 2;
+  repeated uint64 bad_leaves_ids = 3;
+  bytes unverified_usage = 4;
+  bytes unverified_usage_collector = 5;
+  bytes unverified_usage_signature = 6;
+}
+
+message BucketARsSigUnverified {
+  uint64 bucket_id = 1;
+  bytes node_key = 2;
+  uint32 tca_id = 3;
+  repeated uint64 bad_leaves_ids = 4;
+  bytes unverified_usage = 5;
+  bytes unverified_usage_collector = 6;
+  bytes unverified_usage_signature = 7;
+}
+
+message NodeARsUnavailable {
+  bytes node_key = 1;
+  uint32 tca_id = 2;
+  repeated uint64 leaves_ids = 3;
+  bytes unverified_usage = 4;
+  bytes unverified_usage_collector = 5;
+  bytes unverified_usage_signature = 6;
+}
+
+message BucketARsUnavailable {
+  uint64 bucket_id = 1;
+  bytes node_key = 2;
+  uint32 tca_id = 3;
+  repeated uint64 leaves_ids = 4;
+  bytes unverified_usage = 5;
+  bytes unverified_usage_collector = 6;
+  bytes unverified_usage_signature = 7;
+}
+
+message NodeAggregateMalformed {
+  bytes node_key = 1;
+  uint32 tca_id = 2;
+  bytes unverified_usage = 3;
+  bytes unverified_usage_collector = 4;
+  bytes unverified_usage_signature = 5;
+}
+
+message BucketAggregateMalformed {
+  uint64 bucket_id = 1;
+  uint32 tca_id = 2;
+  bytes unverified_usage = 3;
+  bytes unverified_usage_collector = 4;
+  bytes unverified_usage_signature = 5;
+}
+
+message NodeCumulativeUsageUnavailable {
+  bytes node_key = 1;
+  uint32 tca_id = 2;
+  bytes accessible_unverified_usage = 3;
+}
+
+message BucketCumulativeUsageUnavailable {
+  uint64 bucket_id = 1;
+  bytes node_key = 2;
+  uint32 tca_id = 3;
+  bytes accessible_unverified_usage = 4;
 }
 
 // ============================================================================
