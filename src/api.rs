@@ -1010,12 +1010,12 @@ pub fn fetch_inspected_eras(
 }
 
 // ============================================================================
-// Inspection Sync API Functions (inspection_sync protobuf types)
+// Inspection API Functions (inspection_sync protobuf types)
 // ============================================================================
 // These functions use the new etcd-based sync quorum API with full protobuf
 // serialization. They correspond to the inspection_sync_router endpoints.
 
-pub fn post_itm_lease_sync<
+pub fn post_itm_lease<
     AccountId,
     BlockNumber,
     CM: ClusterManager<AccountId, BlockNumber>,
@@ -1041,14 +1041,14 @@ pub fn post_itm_lease_sync<
     );
 
     client
-        .post_itm_lease_sync(request)
+        .post_itm_lease(request)
         .map_err(|_| ApiError::HttpClientError {
             cluster_id: *cluster_id,
             host: sync_node.params.host.clone(),
         })
 }
 
-pub fn submit_assignments_table_sync<
+pub fn submit_assignments_table<
     AccountId,
     BlockNumber,
     CM: ClusterManager<AccountId, BlockNumber>,
@@ -1074,14 +1074,14 @@ pub fn submit_assignments_table_sync<
     );
 
     client
-        .submit_assignments_table_sync(request)
+        .submit_assignments_table(request)
         .map_err(|_| ApiError::HttpClientError {
             cluster_id: *cluster_id,
             host: sync_node.params.host.clone(),
         })
 }
 
-pub fn get_assignments_table_sync<
+pub fn get_assignments_table<
     AccountId,
     BlockNumber,
     CM: ClusterManager<AccountId, BlockNumber>,
@@ -1107,14 +1107,14 @@ pub fn get_assignments_table_sync<
     );
 
     client
-        .get_assignments_table_sync(era)
+        .get_assignments_table(era)
         .map_err(|_| ApiError::HttpClientError {
             cluster_id: *cluster_id,
             host: sync_node.params.host.clone(),
         })
 }
 
-pub fn submit_inspection_result_sync<
+pub fn submit_inspection_result<
     AccountId,
     BlockNumber,
     CM: ClusterManager<AccountId, BlockNumber>,
@@ -1140,14 +1140,14 @@ pub fn submit_inspection_result_sync<
     );
 
     client
-        .submit_inspection_result_sync(request)
+        .submit_inspection_result(request)
         .map_err(|_| ApiError::HttpClientError {
             cluster_id: *cluster_id,
             host: sync_node.params.host.clone(),
         })
 }
 
-pub fn get_inspection_state_sync<
+pub fn get_inspection_state<
     AccountId,
     BlockNumber,
     CM: ClusterManager<AccountId, BlockNumber>,
@@ -1173,14 +1173,14 @@ pub fn get_inspection_state_sync<
     );
 
     client
-        .get_inspection_state_sync(era)
+        .get_inspection_state(era)
         .map_err(|_| ApiError::HttpClientError {
             cluster_id: *cluster_id,
             host: sync_node.params.host.clone(),
         })
 }
 
-pub fn get_inspection_receipt_sync<
+pub fn get_inspection_receipt<
     AccountId,
     BlockNumber,
     CM: ClusterManager<AccountId, BlockNumber>,
@@ -1206,14 +1206,14 @@ pub fn get_inspection_receipt_sync<
     );
 
     client
-        .get_inspection_receipt_sync(era)
+        .get_inspection_receipt(era)
         .map_err(|_| ApiError::FailedToFetchInspSummary {
             cluster_id: *cluster_id,
             era,
         })
 }
 
-pub fn get_quorum_info_sync<
+pub fn get_quorum_info<
     AccountId,
     BlockNumber,
     CM: ClusterManager<AccountId, BlockNumber>,
@@ -1239,7 +1239,7 @@ pub fn get_quorum_info_sync<
     );
 
     client
-        .get_quorum_info_sync(era)
+        .get_quorum_info(era)
         .map_err(|_| ApiError::HttpClientError {
             cluster_id: *cluster_id,
             host: sync_node.params.host.clone(),

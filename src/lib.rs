@@ -482,6 +482,21 @@ pub mod proto {
         }
     }
 
+    pub use self::inspection_sync::InspectionReceipt;
+    pub type ProtoUnverifiedPath = inspection_sync::UnverifiedPath;
+
+    impl InspectionReceipt {
+        pub fn to_proto_bytes(&self) -> sp_std::vec::Vec<u8> {
+            use prost::Message;
+            self.encode_to_vec()
+        }
+
+        pub fn from_proto_bytes(bytes: &[u8]) -> Option<Self> {
+            use prost::Message;
+            Self::decode(bytes).ok()
+        }
+    }
+
     pub mod activity_tree {
         include!(concat!(env!("OUT_DIR"), "/activity_tree.rs"));
 

@@ -4,7 +4,7 @@
 use api::{ApiResponse, SignedBy};
 use ddc_primitives::{BucketId, ClusterId, EHDId, EhdEra, NodePubKey, PHDId, TcaEra};
 use prost::Message;
-use scale_info::prelude::{collections::BTreeMap, format, string::String, vec::Vec};
+use scale_info::prelude::{format, string::String, vec::Vec};
 use sp_io::offchain::timestamp;
 use sp_runtime::offchain::{http, Duration};
 use sp_std::vec;
@@ -510,86 +510,15 @@ impl<'a> DdcClient<'a> {
             .join(",")
     }
 
-    pub fn get_inspection_state(
-        &self,
-        era: EhdEra,
-        dry_run: bool,
-    ) -> Result<proto::inspection::EndpointItmGetPathsState, http::Error> {
-        let mut url = format!("{}/itm/state?eraId={}", self.base_url, era);
-        
-        if dry_run {
-            url = format!("{}&dryRun=true", url);
-        }
-        let response = self.get(&url, Accept::Protobuf)?;
-        let body = response.body().collect::<Vec<u8>>();
-        let proto_response = proto::inspection::EndpointItmGetPathsState::decode(body.as_slice())
-            .map_err(|e| {
-            log!(error, "❌ Decode ITM Path Report protobuf error: {:?}", e);
-            http::Error::Unknown
-        })?;
-
-        Ok(proto_response)
-    }
-
-    pub fn submit_inspection_report(
-        &self,
-        report_json_str: String,
-        dry_run: bool,
-    ) -> Result<proto::inspection::EndpointItmPostPath, http::Error> {
-        let mut url = format!("{}/itm/path", self.base_url);
-        
-        if dry_run {
-            url = format!("{}?dryRun=true", url);
-        }
-        let body = report_json_str;
-
-        let response = self.post(&url, body.into(), Accept::Protobuf)?;
-        let body = response.body().collect::<Vec<u8>>();
-
-        let proto_response = proto::inspection::EndpointItmPostPath::decode(body.as_slice())
-            .map_err(|_| http::Error::Unknown)?;
-        Ok(proto_response)
-    }
-
-    pub fn fetch_inspection_exceptions(
-        &self,
-        era: EhdEra,
-        dry_run: bool,
-    ) -> Result<BTreeMap<String, BTreeMap<String, json::InspPathException>>, http::Error> {
-        let mut url = format!("{}/itm/exception?eraId={}", self.base_url, era);
-        
-        if dry_run {
-            url = format!("{}&dryRun=true", url);
-        }
-        let (response, _) = fetch_and_parse_json!(
-            self,
-            url,
-            BTreeMap<String, BTreeMap<String, json::InspPathException>>,
-            BTreeMap<String, BTreeMap<String, json::InspPathException>>
-        )?;
-
-        Ok(response)
-    }
-
-    pub fn get_inspection_summary(&self, era: EhdEra, dry_run: bool) -> Result<json::InspSummary, http::Error> {
-        let mut url = format!("{}/itm/summary?eraId={}", self.base_url, era);
-        
-        if dry_run {
-            url = format!("{}&dryRun=true", url);
-        }
-        let (response, _) = fetch_and_parse_json!(self, url, json::InspSummary, json::InspSummary)?;
-
-        Ok(response)
-    }
 
     // ========================================================================
-    // Inspection Sync Client Methods (inspection_sync protobuf types)
+    // Inspection Client Methods (inspection_sync protobuf types)
     // ========================================================================
     // These methods use the new etcd-based sync quorum API with full protobuf
     // serialization for both request and response bodies.
 
     /// POST /itm/lease - Acquire exclusive lease for building assignment table (protobuf)
-    pub fn post_itm_lease_sync(
+    pub fn post_itm_lease(
         &self,
         request: &proto::inspection_sync::LeaseRequest,
     ) -> Result<proto::inspection_sync::LeaseResult, http::Error> {
@@ -606,7 +535,7 @@ impl<'a> DdcClient<'a> {
     }
 
     /// POST /itm/submit - Submit completed assignment table (protobuf)
-    pub fn submit_assignments_table_sync(
+    pub fn submit_assignments_table(
         &self,
         request: &proto::inspection_sync::PostAssignmentTableRequest,
     ) -> Result<proto::inspection_sync::PostAssignmentTableResponse, http::Error> {
@@ -629,7 +558,7 @@ impl<'a> DdcClient<'a> {
     }
 
     /// GET /itm/table - Retrieve assignment table (protobuf)
-    pub fn get_assignments_table_sync(
+    pub fn get_assignments_table(
         &self,
         era: EhdEra,
     ) -> Result<proto::inspection_sync::GetAssignmentTableResponse, http::Error> {
@@ -651,7 +580,7 @@ impl<'a> DdcClient<'a> {
     }
 
     /// POST /itm/path - Submit inspection path results (protobuf)
-    pub fn submit_inspection_result_sync(
+    pub fn submit_inspection_result(
         &self,
         request: &proto::inspection_sync::PostInspectionResultRequest,
     ) -> Result<proto::inspection_sync::PostInspectionResultResponse, http::Error> {
@@ -674,7 +603,7 @@ impl<'a> DdcClient<'a> {
     }
 
     /// GET /itm/state - Retrieve inspection state (protobuf)
-    pub fn get_inspection_state_sync(
+    pub fn get_inspection_state(
         &self,
         era: EhdEra,
     ) -> Result<proto::inspection_sync::InspectionState, http::Error> {
@@ -694,7 +623,7 @@ impl<'a> DdcClient<'a> {
     }
 
     /// GET /itm/summary - Retrieve inspection receipt (protobuf)
-    pub fn get_inspection_receipt_sync(
+    pub fn get_inspection_receipt(
         &self,
         era: EhdEra,
     ) -> Result<proto::inspection_sync::InspectionReceipt, http::Error> {
@@ -714,7 +643,7 @@ impl<'a> DdcClient<'a> {
     }
 
     /// GET /itm/quorum - Retrieve quorum information (protobuf)
-    pub fn get_quorum_info_sync(
+    pub fn get_quorum_info(
         &self,
         era: EhdEra,
     ) -> Result<proto::inspection_sync::InspSyncQuorumInfo, http::Error> {
@@ -743,77 +672,6 @@ impl<'a> DdcClient<'a> {
         )?;
 
         Ok(response)
-    }
-
-    pub fn submit_assignments_table(
-        &self,
-        era: EhdEra,
-        table_json_str: String, /* todo(yahortsaryk): add .proto definition for
-                                 * `InspAssignmentsTable` type */
-        inspector_hex: String,
-        dry_run: bool,
-    ) -> Result<proto::inspection::EndpointItmSubmit, http::Error> {
-        let mut url = format!(
-            "{}/itm/submit?eraId={}&inspectorKey={}",
-            self.base_url, era, inspector_hex
-        );
-        
-        if dry_run {
-            url = format!("{}&dryRun=true", url);
-        }
-        let body = table_json_str;
-
-        let response = self.post(&url, body.into(), Accept::Protobuf)?;
-        let body = response.body().collect::<Vec<u8>>();
-
-        let proto_response = proto::inspection::EndpointItmSubmit::decode(body.as_slice())
-            .map_err(|_| http::Error::Unknown)?;
-        Ok(proto_response)
-    }
-
-    pub fn get_assignments_table(
-        &self,
-        era: EhdEra,
-        dry_run: bool,
-    ) -> Result<proto::inspection::EndpointItmTable, http::Error> {
-        let mut url = format!("{}/itm/table?eraId={}", self.base_url, era);
-        
-        if dry_run {
-            url = format!("{}&dryRun=true", url);
-        }
-        let response = self.get(&url, Accept::Protobuf)?;
-        let body = response.body().collect::<Vec<u8>>();
-
-        let proto_response = proto::inspection::EndpointItmTable::decode(body.as_slice())
-            .map_err(|_| http::Error::Unknown)?;
-        Ok(proto_response)
-    }
-
-    pub fn post_itm_lease(
-        &self,
-        era: EhdEra,
-        inspector_hex: String,
-        dry_run: bool,
-    ) -> Result<proto::inspection::EndpointItmLease, http::Error> {
-        let mut url = format!(
-            "{}/itm/lease?eraId={}&inspectorKey={}",
-            self.base_url, era, inspector_hex
-        );
-        
-        if dry_run {
-            url = format!("{}&dryRun=true", url);
-        }
-
-        let json = serde_json::json!({ "inspector_key": inspector_hex });
-        let body = serde_json::to_string(&json).expect("Assignments table to be encoded");
-
-        let response = self.post(&url, body.into(), Accept::Protobuf)?;
-        let body = response.body().collect::<Vec<u8>>();
-
-        let proto_response = proto::inspection::EndpointItmLease::decode(body.as_slice())
-            .map_err(|_| http::Error::Unknown)?;
-
-        Ok(proto_response)
     }
 
     fn get(&self, url: &str, accept: Accept) -> Result<http::Response, http::Error> {
