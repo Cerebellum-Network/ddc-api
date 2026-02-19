@@ -306,7 +306,7 @@ impl<'a> DdcClient<'a> {
         limit: Option<u32>,
         dry_run: bool,
     ) -> Result<ApiResponse<Vec<json::EHDEra>>, http::Error> {
-        let mut url = format!("{}/itm/inspected-eras", self.base_url);
+        let mut url = format!("{}/activity/inspected-eras", self.base_url);
         if let Some(prev) = prev {
             url = format!("{}?prevToken={}", url, prev);
         }
@@ -344,7 +344,7 @@ impl<'a> DdcClient<'a> {
         limit: Option<u32>,
         dry_run: bool,
     ) -> Result<ApiResponse<Vec<json::EHDEra>>, http::Error> {
-        let mut url = format!("{}/itm/processed-eras", self.base_url);
+        let mut url = format!("{}/activity/processed-eras", self.base_url);
         if let Some(prev) = prev {
             url = format!("{}?prevToken={}", url, prev);
         }
