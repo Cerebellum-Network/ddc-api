@@ -97,14 +97,14 @@ message PostAssignmentTableResponse {
 }
 
 message AssignmentTable {
-  bytes cluster_id = 1;
+  string cluster_id = 1;       // 0x-hex encoded ClusterId
   uint32 era = 2;
   uint32 irf = 3;  // Inspection Redundancy Factor
   map<string, InspectionPath> paths = 4;
   map<string, InspectorAssignments> assignments = 5;
   uint64 collective_seed = 6;  // From multi-party commitment (salts from inspectors)
-  string builder = 7;           // Inspector's task manager that built the table
-  int64 submitted_at = 8;       // Unix timestamp
+  string builder = 7;          // Inspector's task manager that built the table
+  int64 submitted_at = 8;      // Unix timestamp
 
   // Archival metadata (managed by system during archival to DDC cluster)
   bytes archived_cid = 9;
@@ -119,21 +119,21 @@ enum InspectionPathType {
 }
 
 message NodeARPath {
-  bytes node_key = 1;              // Data node being inspected (NodePubKey, 32 bytes)
+  string node_key = 1;             // Data node being inspected (0x-hex encoded NodePubKey)
   repeated uint64 leaves_ids = 2;  // Merkle tree leaf IDs in NodeAggregate tree
-  uint32 tca_id = 3;              // Time capsule era (specific to NodeAR inspection)
+  uint32 tca_id = 3;               // Time capsule era (specific to NodeAR inspection)
 }
 
 message BucketARPath {
   uint64 bucket_id = 1;            // Bucket being inspected
   repeated uint64 leaves_pos = 2;  // Merkle tree leaf positions in BucketAggregate tree
-  uint32 tca_id = 3;              // Time capsule era (specific to BucketAR inspection)
+  uint32 tca_id = 3;               // Time capsule era (specific to BucketAR inspection)
 }
 
 message InspectionPath {
-  bytes path_id = 1;                       // H256 hash (32 bytes)
+  string path_id = 1;                      // 0x-hex encoded H256 hash
   InspectionPathType path_type = 2;        // NodeAR or BucketAR
-  repeated bytes collectors = 3;           // Collector node keys (32 bytes each)
+  repeated string collectors = 3;          // 0x-hex encoded collector node keys
   oneof path_data {
     NodeARPath node_ar = 4;
     BucketARPath bucket_ar = 5;
@@ -148,7 +148,7 @@ message InspectorAssignments {
 message GetAssignmentTableResponse {
   GetAssignmentTableStatus status = 1;
   uint32 era_id = 2;
-  AssignmentTable table = 3;      // Populated if status == FOUND
+  AssignmentTable table = 3;       // Populated if status == FOUND
   string lease_holder = 4;         // Populated if status == BUILDING
   int64 lease_expires_at = 5;      // Populated if status == BUILDING
   string message = 6;
@@ -165,9 +165,9 @@ message PostInspectionResultRequest {
 }
 
 message InspectionPathResult {
-  bytes path_id = 1;
-  bytes result_hash = 2;
-  bytes exception = 3;      // Optional - fraud evidence
+  string path_id = 1;              // 0x-hex encoded H256 path identifier
+  string result_hash = 2;          // 0x-hex encoded result hash
+  bytes exception = 3;             // Optional - fraud evidence (opaque blob)
 }
 
 message PostInspectionResultResponse {
@@ -180,16 +180,16 @@ message PostInspectionResultResponse {
 }
 
 message RejectedInspectionPath {
-  bytes path_id = 1;
-  string reason = 2;  // "not_assigned", "invalid_path", "duplicate"
+  string path_id = 1;             // 0x-hex encoded H256 path identifier
+  string reason = 2;              // "not_assigned", "invalid_path", "duplicate"
 }
 
 message InspectionState {
   uint32 era_id = 1;
   int32 total_paths = 2;
-  int32 verified_paths = 3;      // Quorum reached, no exception
-  int32 unverified_paths = 4;    // Quorum reached, with exception
-  int32 pending_paths = 5;       // Still waiting for quorum
+  int32 verified_paths = 3;       // Quorum reached, no exception
+  int32 unverified_paths = 4;     // Quorum reached, with exception
+  int32 pending_paths = 5;        // Still waiting for quorum
   map<string, InspectionPathStatus> paths = 6;  // path_id (hex string) -> status
   int64 updated_at = 7;           // Unix timestamp
 
@@ -201,9 +201,9 @@ message InspectionState {
 
 message InspectionPathStatus {
   InspectionPathStatusEnum status = 1;
-  int32 irf_count = 2;           // Count for winning hash
-  bytes result_hash = 3;         // Winning hash (if quorum reached)
-  bytes exception = 4;           // Exception data (if any)
+  int32 irf_count = 2;            // Count for winning hash
+  string result_hash = 3;         // 0x-hex encoded winning hash (if quorum reached)
+  bytes exception = 4;            // Exception data (opaque blob)
   map<string, int32> submissions = 5;  // hash (hex string) -> inspector count
   repeated string inspectors = 6;              // Inspectors who already submitted
   repeated string remaining_inspectors = 7;    // Assigned inspectors who haven't submitted yet
@@ -215,11 +215,11 @@ message InspectionPathStatus {
 
 message InspectionReceipt {
   uint32 era_id = 1;
-  bytes cluster_id = 2;
-  repeated bytes verified_paths = 3;
+  string cluster_id = 2;                           // 0x-hex encoded ClusterId
+  repeated string verified_paths = 3;              // 0x-hex encoded path IDs
   repeated UnverifiedPath unverified_paths = 4;
-  repeated bytes quorum_unreached_paths = 5;
-  bytes assignment_table_hash = 6;
+  repeated string quorum_unreached_paths = 5;      // 0x-hex encoded path IDs
+  string assignment_table_hash = 6;                // 0x-hex encoded hash
   int64 generated_at = 7;         // Unix timestamp
   bool complete = 8;
   int32 pending_paths_count = 9;  // If not complete
@@ -232,7 +232,7 @@ message InspectionReceipt {
 }
 
 message UnverifiedPath {
-  bytes path_id = 1;
+  string path_id = 1;   // 0x-hex encoded H256 path identifier
   bytes exception = 2;  // Protobuf-encoded InspPathException
   int32 irf_count = 3;  // IRF was reached (consensus on invalidity)
 }
@@ -256,7 +256,7 @@ message MultipleExceptions {
 }
 
 message NodeARsSigUnverified {
-  bytes node_key = 1;
+  string node_key = 1;            // 0x-hex encoded NodePubKey
   uint32 tca_id = 2;
   repeated uint64 bad_leaves_ids = 3;
   bytes unverified_usage = 4;
@@ -266,7 +266,7 @@ message NodeARsSigUnverified {
 
 message BucketARsSigUnverified {
   uint64 bucket_id = 1;
-  bytes node_key = 2;
+  string node_key = 2;            // 0x-hex encoded NodePubKey
   uint32 tca_id = 3;
   repeated uint64 bad_leaves_ids = 4;
   bytes unverified_usage = 5;
@@ -275,7 +275,7 @@ message BucketARsSigUnverified {
 }
 
 message NodeARsUnavailable {
-  bytes node_key = 1;
+  string node_key = 1;            // 0x-hex encoded NodePubKey
   uint32 tca_id = 2;
   repeated uint64 leaves_ids = 3;
   bytes unverified_usage = 4;
@@ -285,7 +285,7 @@ message NodeARsUnavailable {
 
 message BucketARsUnavailable {
   uint64 bucket_id = 1;
-  bytes node_key = 2;
+  string node_key = 2;            // 0x-hex encoded NodePubKey
   uint32 tca_id = 3;
   repeated uint64 leaves_ids = 4;
   bytes unverified_usage = 5;
@@ -294,7 +294,7 @@ message BucketARsUnavailable {
 }
 
 message NodeAggregateMalformed {
-  bytes node_key = 1;
+  string node_key = 1;            // 0x-hex encoded NodePubKey
   uint32 tca_id = 2;
   bytes unverified_usage = 3;
   bytes unverified_usage_collector = 4;
@@ -310,14 +310,14 @@ message BucketAggregateMalformed {
 }
 
 message NodeCumulativeUsageUnavailable {
-  bytes node_key = 1;
+  string node_key = 1;            // 0x-hex encoded NodePubKey
   uint32 tca_id = 2;
   bytes accessible_unverified_usage = 3;
 }
 
 message BucketCumulativeUsageUnavailable {
   uint64 bucket_id = 1;
-  bytes node_key = 2;
+  string node_key = 2;            // 0x-hex encoded NodePubKey
   uint32 tca_id = 3;
   bytes accessible_unverified_usage = 4;
 }
