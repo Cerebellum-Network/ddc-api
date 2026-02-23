@@ -73,6 +73,11 @@ pub enum ApiError {
         cluster_id: ClusterId,
         tca_id: TcaEra,
     },
+    FailedToFetchNodeAggregate {
+        cluster_id: ClusterId,
+        tca_id: TcaEra,
+        node_key: NodePubKey,
+    },
     FailedToFetchTraversedEHD {
         cluster_id: ClusterId,
         era: EhdEra,
@@ -511,6 +516,99 @@ pub fn fetch_bucket_aggregates<
     }
 
     Ok((buckets_aggregates, last_sig))
+}
+
+pub fn fetch_bucket_aggregate<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
+    cluster_id: &ClusterId,
+    tca_id: TcaEra,
+    collector_key: NodePubKey,
+    bucket_id: BucketId,
+) -> Result<(Option<proto::activity_tree::BucketAggregate>, Vec<u8>), ApiError> {
+    let (_, collector_params) =
+        get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key.clone())?;
+    let host =
+        str::from_utf8(&collector_params.host).map_err(|_| ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: collector_key,
+            host: collector_params.host.clone(),
+        })?;
+
+    let base_url = format!("http://{}:{}", host, collector_params.http_port);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+        true,
+    );
+
+    let api_response = client
+        .bucket_aggregate(tca_id, bucket_id)
+        .map_err(|_| ApiError::FailedToFetchBucketAggregates {
+            cluster_id: *cluster_id,
+            tca_id,
+        })?;
+
+    let sig = api_response
+        .signed_by
+        .map(|signed_by| signed_by.signature)
+        .unwrap_or_default();
+
+    let aggregate = api_response
+        .response
+        .buckets
+        .into_iter()
+        .find(|a| a.bucket_id == bucket_id as u64);
+
+    Ok((aggregate, sig))
+}
+
+pub fn fetch_node_aggregate<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
+    cluster_id: &ClusterId,
+    tca_id: TcaEra,
+    collector_key: NodePubKey,
+    node_key: NodePubKey,
+) -> Result<(json::NodeAggregateResponse, Vec<u8>), ApiError> {
+    let (_, collector_params) =
+        get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key.clone())?;
+    let host =
+        str::from_utf8(&collector_params.host).map_err(|_| ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: collector_key,
+            host: collector_params.host.clone(),
+        })?;
+
+    let base_url = format!("http://{}:{}", host, collector_params.http_port);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+        true,
+    );
+
+    let api_response = client
+        .node_aggregate(tca_id, node_key.clone())
+        .map_err(|_| ApiError::FailedToFetchNodeAggregate {
+            cluster_id: *cluster_id,
+            tca_id,
+            node_key: node_key.clone(),
+        })?;
+
+    let sig = api_response
+        .signed_by
+        .map(|signed_by| signed_by.signature)
+        .unwrap_or_default();
+
+    Ok((api_response.response, sig))
 }
 
 /// Traverse PHD record.

@@ -180,6 +180,58 @@ impl<'a> DdcClient<'a> {
         Ok(api_response)
     }
 
+    pub fn bucket_aggregate(
+        &self,
+        era_id: TcaEra,
+        bucket_id: BucketId,
+    ) -> Result<ApiResponse<proto::activity_tree::BucketAggregatesResponse>, http::Error> {
+        let mut url = format!(
+            "{}/activity/buckets/{}?eraId={}",
+            self.base_url, bucket_id, era_id
+        );
+
+        let (response, signed_by) = fetch_and_parse_proto!(
+            self,
+            url,
+            proto::activity_tree::BucketAggregatesResponse,
+            proto::activity_tree::BucketAggregatesResponse
+        )?;
+
+        let api_response = ApiResponse {
+            response,
+            signed_by,
+        };
+
+        Ok(api_response)
+    }
+
+    pub fn node_aggregate(
+        &self,
+        era_id: TcaEra,
+        node_key: NodePubKey,
+    ) -> Result<ApiResponse<json::NodeAggregateResponse>, http::Error> {
+        let mut url = format!(
+            "{}/activity/nodes/{}?eraId={}",
+            self.base_url,
+            <NodePubKey as Into<String>>::into(node_key),
+            era_id
+        );
+
+        let (response, signed_by) = fetch_and_parse_json!(
+            self,
+            url,
+            json::NodeAggregateResponse,
+            json::NodeAggregateResponse
+        )?;
+
+        let api_response = ApiResponse {
+            response,
+            signed_by,
+        };
+
+        Ok(api_response)
+    }
+
     pub fn challenge_bucket_sub_aggregate(
         &self,
         era_id: TcaEra,

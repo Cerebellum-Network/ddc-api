@@ -64,3 +64,16 @@ pub struct GCollectorsResponse {
     pub nodes_keys: Vec<NodePubKey>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode)]
+pub struct NodeAggregateResponse {
+    pub node_id: String,
+    pub stored_bytes: i64,
+    pub transferred_bytes: u64,
+    pub number_of_puts: u64,
+    pub number_of_gets: u64,
+    pub number_of_computes: u64,
+    pub cpu_used: u64,
+    pub gpu_used: u64,
+    pub ram_used: u64,
+}
+

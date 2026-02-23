@@ -205,11 +205,13 @@ pub mod proto {
                             path_hash: "0x01".into(),
                             result_hash: "0xaabbcc".into(),
                             exception: vec![],
+                            collector_responses: vec![],
                         },
                         InspectionPathResult {
                             path_hash: "0x02".into(),
                             result_hash: "0xddee".into(),
                             exception: vec![0xff],
+                            collector_responses: vec![],
                         },
                     ],
                 };
@@ -259,6 +261,7 @@ pub mod proto {
                         exception: vec![],
                         submissions,
                         inspectors: vec!["insp1".into(), "insp2".into(), "insp3".into()],
+                        remaining_inspectors: vec!["insp4".into()],
                     },
                 );
 
