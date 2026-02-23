@@ -79,11 +79,10 @@ pub mod proto {
                 paths.insert(
                     "path-001".into(),
                     InspectionPath {
-                        path_id: vec![0x01, 0x02],
                         path_type: InspectionPathType::NodeAr as i32,
-                        collectors: vec![vec![0xc0, 0xc1], vec![0xc2, 0xc3]],
+                        collectors: vec!["0xc0c1".into(), "0xc2c3".into()],
                         path_data: Some(PathData::NodeAr(NodeArPath {
-                            node_key: vec![0x0a, 0x0b],
+                            node_key: "0x0a0b".into(),
                             leaves_ids: vec![1, 2, 3],
                             tca_id: 5,
                         })),
@@ -100,7 +99,7 @@ pub mod proto {
                 );
 
                 let table = AssignmentTable {
-                    cluster_id: vec![0xaa, 0xbb],
+                    cluster_id: "0xaabb".into(),
                     era: 42,
                     irf: 3,
                     paths,
@@ -126,7 +125,7 @@ pub mod proto {
                 assert_eq!(decoded.paths["path-001"].collectors.len(), 2);
                 match &decoded.paths["path-001"].path_data {
                     Some(PathData::NodeAr(node_ar)) => {
-                        assert_eq!(node_ar.node_key, vec![0x0a, 0x0b]);
+                        assert_eq!(node_ar.node_key, "0x0a0b");
                         assert_eq!(node_ar.leaves_ids, vec![1, 2, 3]);
                         assert_eq!(node_ar.tca_id, 5);
                     }
@@ -141,7 +140,7 @@ pub mod proto {
                     era_id: 42,
                     inspector_key: "0xabc123".into(),
                     table: Some(AssignmentTable {
-                        cluster_id: vec![0xaa],
+                        cluster_id: "0xaa".into(),
                         era: 42,
                         irf: 3,
                         paths: BTreeMap::new(),
@@ -203,13 +202,13 @@ pub mod proto {
                     inspector_key: "0xabc123".into(),
                     paths_results: vec![
                         InspectionPathResult {
-                            path_id: vec![0x01],
-                            result_hash: vec![0xaa, 0xbb, 0xcc],
+                            path_hash: "0x01".into(),
+                            result_hash: "0xaabbcc".into(),
                             exception: vec![],
                         },
                         InspectionPathResult {
-                            path_id: vec![0x02],
-                            result_hash: vec![0xdd, 0xee],
+                            path_hash: "0x02".into(),
+                            result_hash: "0xddee".into(),
                             exception: vec![0xff],
                         },
                     ],
@@ -218,7 +217,7 @@ pub mod proto {
                 let bytes = req.encode_to_vec();
                 let decoded = PostInspectionResultRequest::decode(bytes.as_slice()).unwrap();
                 assert_eq!(decoded.paths_results.len(), 2);
-                assert_eq!(decoded.paths_results[0].path_id, vec![0x01]);
+                assert_eq!(decoded.paths_results[0].path_hash, "0x01");
                 assert_eq!(decoded.paths_results[1].exception, vec![0xff]);
             }
 
@@ -230,7 +229,7 @@ pub mod proto {
                     rejected_count: 1,
                     quorum_reached_paths: vec!["path-001".into()],
                     rejected_paths: vec![RejectedInspectionPath {
-                        path_id: vec![0x02],
+                        path_hash: "0x02".into(),
                         reason: "duplicate".into(),
                     }],
                     details: "3 accepted, 1 rejected".into(),
@@ -256,7 +255,7 @@ pub mod proto {
                     InspectionPathStatus {
                         status: InspectionPathStatusEnum::InspectionPathStatusIrfReached as i32,
                         irf_count: 3,
-                        result_hash: vec![0xaa, 0xbb],
+                        result_hash: "0xaabb".into(),
                         exception: vec![],
                         submissions,
                         inspectors: vec!["insp1".into(), "insp2".into(), "insp3".into()],
@@ -292,15 +291,15 @@ pub mod proto {
             fn inspection_receipt_round_trip() {
                 let receipt = InspectionReceipt {
                     era_id: 42,
-                    cluster_id: vec![0xaa, 0xbb],
-                    verified_paths: vec![vec![0x01], vec![0x02]],
+                    cluster_id: "0xaabb".into(),
+                    verified_paths: vec!["0x01".into(), "0x02".into()],
                     unverified_paths: vec![UnverifiedPath {
-                        path_id: vec![0x03],
+                        path_hash: "0x03".into(),
                         exception: vec![0xff],
                         irf_count: 3,
                     }],
-                    quorum_unreached_paths: vec![vec![0x04]],
-                    assignment_table_hash: vec![0xde, 0xad],
+                    quorum_unreached_paths: vec!["0x04".into()],
+                    assignment_table_hash: "0xdead".into(),
                     generated_at: 1700000000,
                     complete: true,
                     pending_paths_count: 0,
@@ -497,6 +496,20 @@ pub mod proto {
         pub fn from_proto_bytes(bytes: &[u8]) -> Option<Self> {
             use prost::Message;
             Self::decode(bytes).ok()
+        }
+    }
+
+    impl inspection_sync::InspectionPath {
+        /// Blake2b-256 hash of protobuf-serialized bytes, returned as raw 32-byte array.
+        pub fn path_hash(&self) -> [u8; 32] {
+            use blake2::digest::{consts::U32, Digest};
+            use prost::Message;
+            blake2::Blake2b::<U32>::digest(self.encode_to_vec()).into()
+        }
+
+        /// Blake2b-256 hash of protobuf-serialized bytes, returned as 0x-hex string.
+        pub fn path_hash_hex(&self) -> scale_info::prelude::string::String {
+            scale_info::prelude::format!("0x{}", hex::encode(self.path_hash()))
         }
     }
 

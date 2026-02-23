@@ -100,8 +100,8 @@ message AssignmentTable {
   string cluster_id = 1;       // 0x-hex encoded ClusterId
   uint32 era = 2;
   uint32 irf = 3;  // Inspection Redundancy Factor
-  map<string, InspectionPath> paths = 4;
-  map<string, InspectorAssignments> assignments = 5;
+  map<string, InspectionPath> paths = 4;          // path_hash (hex string) -> InspectionPath
+  map<string, InspectorAssignments> assignments = 5;  // path_hash (hex string) -> assignments
   uint64 collective_seed = 6;  // From multi-party commitment (salts from inspectors)
   string builder = 7;          // Inspector's task manager that built the table
   int64 submitted_at = 8;      // Unix timestamp
@@ -131,12 +131,11 @@ message BucketARPath {
 }
 
 message InspectionPath {
-  string path_id = 1;                      // 0x-hex encoded H256 hash
-  InspectionPathType path_type = 2;        // NodeAR or BucketAR
-  repeated string collectors = 3;          // 0x-hex encoded collector node keys
+  InspectionPathType path_type = 1;        // NodeAR or BucketAR
+  repeated string collectors = 2;          // 0x-hex encoded collector node keys
   oneof path_data {
-    NodeARPath node_ar = 4;
-    BucketARPath bucket_ar = 5;
+    NodeARPath node_ar = 3;
+    BucketARPath bucket_ar = 4;
   }
 }
 
@@ -165,7 +164,7 @@ message PostInspectionResultRequest {
 }
 
 message InspectionPathResult {
-  string path_id = 1;              // 0x-hex encoded H256 path identifier
+  string path_hash = 1;            // 0x-hex encoded Blake2b-256 path hash
   string result_hash = 2;          // 0x-hex encoded result hash
   bytes exception = 3;             // Optional - fraud evidence (opaque blob)
 }
@@ -174,13 +173,13 @@ message PostInspectionResultResponse {
   PostInspectionResultStatus status = 1;
   int32 accepted_count = 2;
   int32 rejected_count = 3;
-  repeated string quorum_reached_paths = 4;  // Path IDs that reached IRF quorum
+  repeated string quorum_reached_paths = 4;  // Path hashes that reached IRF quorum
   repeated RejectedInspectionPath rejected_paths = 5;
   string details = 6;
 }
 
 message RejectedInspectionPath {
-  string path_id = 1;             // 0x-hex encoded H256 path identifier
+  string path_hash = 1;           // 0x-hex encoded Blake2b-256 path hash
   string reason = 2;              // "not_assigned", "invalid_path", "duplicate"
 }
 
@@ -190,7 +189,7 @@ message InspectionState {
   int32 verified_paths = 3;       // Quorum reached, no exception
   int32 unverified_paths = 4;     // Quorum reached, with exception
   int32 pending_paths = 5;        // Still waiting for quorum
-  map<string, InspectionPathStatus> paths = 6;  // path_id (hex string) -> status
+  map<string, InspectionPathStatus> paths = 6;  // path_hash (hex string) -> status
   int64 updated_at = 7;           // Unix timestamp
 
   // Archival metadata - InspectionState is archived for audit trail
@@ -216,9 +215,9 @@ message InspectionPathStatus {
 message InspectionReceipt {
   uint32 era_id = 1;
   string cluster_id = 2;                           // 0x-hex encoded ClusterId
-  repeated string verified_paths = 3;              // 0x-hex encoded path IDs
+  repeated string verified_paths = 3;              // 0x-hex encoded path hashes
   repeated UnverifiedPath unverified_paths = 4;
-  repeated string quorum_unreached_paths = 5;      // 0x-hex encoded path IDs
+  repeated string quorum_unreached_paths = 5;      // 0x-hex encoded path hashes
   string assignment_table_hash = 6;                // 0x-hex encoded hash
   int64 generated_at = 7;         // Unix timestamp
   bool complete = 8;
@@ -232,7 +231,7 @@ message InspectionReceipt {
 }
 
 message UnverifiedPath {
-  string path_id = 1;   // 0x-hex encoded H256 path identifier
+  string path_hash = 1; // 0x-hex encoded Blake2b-256 path hash
   bytes exception = 2;  // Protobuf-encoded InspPathException
   int32 irf_count = 3;  // IRF was reached (consensus on invalidity)
 }
