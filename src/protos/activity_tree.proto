@@ -175,6 +175,17 @@ message BucketAggregatesResponse {
     repeated BucketAggregate buckets = 1;
 }
 
+// NodeAggregate represents aggregated activity data for a node
+message NodeAggregate {
+    bytes node_key = 1;
+    ActivityNode activity = 2;
+}
+
+// NodeAggregatesResponse represents the response from node aggregates endpoint
+message NodeAggregatesResponse {
+    repeated NodeAggregate nodes = 1;
+}
+
 // ActivityTreeTraversedNode represents a traversed node in activity tree (node or bucket sub-tree)
 message ActivityTreeTraversedNode {
     uint64 merkle_tree_node_id = 1;

@@ -577,7 +577,7 @@ pub fn fetch_node_aggregate<
     tca_id: TcaEra,
     collector_key: NodePubKey,
     node_key: NodePubKey,
-) -> Result<(json::NodeAggregateResponse, Vec<u8>), ApiError> {
+) -> Result<(Option<proto::activity_tree::NodeAggregate>, Vec<u8>), ApiError> {
     let (_, collector_params) =
         get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key.clone())?;
     let host =
@@ -608,7 +608,13 @@ pub fn fetch_node_aggregate<
         .map(|signed_by| signed_by.signature)
         .unwrap_or_default();
 
-    Ok((api_response.response, sig))
+    let node_aggregate = api_response
+        .response
+        .nodes
+        .into_iter()
+        .next();
+
+    Ok((node_aggregate, sig))
 }
 
 /// Traverse PHD record.

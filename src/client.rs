@@ -209,7 +209,7 @@ impl<'a> DdcClient<'a> {
         &self,
         era_id: TcaEra,
         node_key: NodePubKey,
-    ) -> Result<ApiResponse<json::NodeAggregateResponse>, http::Error> {
+    ) -> Result<ApiResponse<proto::activity_tree::NodeAggregatesResponse>, http::Error> {
         let mut url = format!(
             "{}/activity/nodes/{}?eraId={}",
             self.base_url,
@@ -217,11 +217,11 @@ impl<'a> DdcClient<'a> {
             era_id
         );
 
-        let (response, signed_by) = fetch_and_parse_json!(
+        let (response, signed_by) = fetch_and_parse_proto!(
             self,
             url,
-            json::NodeAggregateResponse,
-            json::NodeAggregateResponse
+            proto::activity_tree::NodeAggregatesResponse,
+            proto::activity_tree::NodeAggregatesResponse
         )?;
 
         let api_response = ApiResponse {
