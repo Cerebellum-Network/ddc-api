@@ -513,6 +513,34 @@ pub mod proto {
         }
     }
 
+    impl inspection_sync::InspectionPathResult {
+        /// Creates a new `InspectionPathResult` with `result_hash` computed as
+        /// Blake2b-256(path_hash_bytes || exception || collector_responses).
+        pub fn new(
+            path_hash: scale_info::prelude::string::String,
+            exception: sp_std::vec::Vec<u8>,
+            collector_responses: sp_std::vec::Vec<inspection_sync::CollectorResponse>,
+        ) -> Self {
+            use blake2::digest::{consts::U32, Digest};
+            let path_hash_bytes = hex::decode(path_hash.trim_start_matches("0x"))
+                .unwrap_or_default();
+            let mut data = sp_std::vec::Vec::new();
+            data.extend_from_slice(&path_hash_bytes);
+            data.extend_from_slice(&exception);
+            for cr in &collector_responses {
+                data.extend_from_slice(cr.collector_key.as_bytes());
+                data.extend_from_slice(&cr.response_signature);
+            }
+            let hash: [u8; 32] = blake2::Blake2b::<U32>::digest(&data).into();
+            Self {
+                path_hash,
+                result_hash: scale_info::prelude::format!("0x{}", hex::encode(hash)),
+                exception,
+                collector_responses,
+            }
+        }
+    }
+
     pub mod activity_tree {
         include!(concat!(env!("OUT_DIR"), "/activity_tree.rs"));
 

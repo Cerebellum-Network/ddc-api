@@ -163,10 +163,16 @@ message PostInspectionResultRequest {
   repeated InspectionPathResult paths_results = 3;
 }
 
+message CollectorResponse {
+  string collector_key = 1;        // 0x-hex encoded collector node public key
+  bytes response_signature = 2;    // Collector's signature over the challenge response
+}
+
 message InspectionPathResult {
   string path_hash = 1;            // 0x-hex encoded Blake2b-256 path hash
   string result_hash = 2;          // 0x-hex encoded result hash
   bytes exception = 3;             // Optional - fraud evidence (opaque blob)
+  repeated CollectorResponse collector_responses = 4;
 }
 
 message PostInspectionResultResponse {
