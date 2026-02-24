@@ -197,21 +197,21 @@ message InspectionState {
   int32 pending_paths = 5;        // Still waiting for quorum
   map<string, InspectionPathStatus> paths = 6;  // path_hash (hex string) -> status
   int64 updated_at = 7;           // Unix timestamp
+  uint32 irf = 8;                // Inspection Redundancy Factor (from AssignmentTable)
 
   // Archival metadata - InspectionState is archived for audit trail
-  bytes archived_cid = 8;
-  int64 archived_at = 9;
-  ArchivalStatus archival_status = 10;
+  bytes archived_cid = 9;
+  int64 archived_at = 10;
+  ArchivalStatus archival_status = 11;
 }
 
 message InspectionPathStatus {
   InspectionPathStatusEnum status = 1;
-  int32 irf_count = 2;            // Count for winning hash
-  string result_hash = 3;         // 0x-hex encoded winning hash (if quorum reached)
-  bytes exception = 4;            // Exception data (opaque blob)
-  map<string, int32> submissions = 5;  // hash (hex string) -> inspector count
-  repeated string inspectors = 6;              // Inspectors who already submitted
-  repeated string remaining_inspectors = 7;    // Assigned inspectors who haven't submitted yet
+  string result_hash = 2;         // 0x-hex encoded winning hash (if quorum reached)
+  bytes exception = 3;            // Exception data (opaque blob)
+  map<string, int32> submissions = 4;  // hash (hex string) -> inspector count
+  repeated string inspectors = 5;              // Inspectors who already submitted
+  repeated string remaining_inspectors = 6;    // Assigned inspectors who haven't submitted yet
 }
 
 // ============================================================================

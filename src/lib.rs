@@ -256,7 +256,6 @@ pub mod proto {
                     "path-001".into(),
                     InspectionPathStatus {
                         status: InspectionPathStatusEnum::InspectionPathStatusIrfReached as i32,
-                        irf_count: 3,
                         result_hash: "0xaabb".into(),
                         exception: vec![],
                         submissions,
@@ -271,6 +270,7 @@ pub mod proto {
                     verified_paths: 5,
                     unverified_paths: 2,
                     pending_paths: 3,
+                    irf: 3,
                     paths,
                     updated_at: 1700000000,
                     archived_cid: vec![],
@@ -283,9 +283,9 @@ pub mod proto {
                 assert_eq!(decoded.era_id, 42);
                 assert_eq!(decoded.total_paths, 10);
                 assert_eq!(decoded.verified_paths, 5);
+                assert_eq!(decoded.irf, 3);
                 assert_eq!(decoded.paths.len(), 1);
                 let path_status = &decoded.paths["path-001"];
-                assert_eq!(path_status.irf_count, 3);
                 assert_eq!(path_status.submissions.len(), 2);
                 assert_eq!(path_status.inspectors.len(), 3);
             }
