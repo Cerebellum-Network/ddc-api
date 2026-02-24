@@ -163,16 +163,21 @@ message PostInspectionResultRequest {
   repeated InspectionPathResult paths_results = 3;
 }
 
-message CollectorResponse {
+message Provenance {
   string collector_key = 1;        // 0x-hex encoded collector node public key
   bytes response_signature = 2;    // Collector's signature over the challenge response
+}
+
+message UnverifiedUsage {
+  bytes usage = 1;                          // Protobuf-encoded ActivityNode
+  optional Provenance source_collector = 2; // Collector that provided the usage data (absent if unavailable)
 }
 
 message InspectionPathResult {
   string path_hash = 1;            // 0x-hex encoded Blake2b-256 path hash
   string result_hash = 2;          // 0x-hex encoded result hash
   bytes exception = 3;             // Optional - fraud evidence (opaque blob)
-  repeated CollectorResponse collector_responses = 4;
+  repeated Provenance source_collectors = 4;
 }
 
 message PostInspectionResultResponse {
@@ -251,8 +256,8 @@ message InspPathException {
     BucketARsUnavailable bucket_ars_unavailable = 5;
     NodeAggregateMalformed node_aggregate_malformed = 6;
     BucketAggregateMalformed bucket_aggregate_malformed = 7;
-    NodeCumulativeUsageUnavailable node_cumulative_usage_unavailable = 8;
-    BucketCumulativeUsageUnavailable bucket_cumulative_usage_unavailable = 9;
+    NodeTCAUsageUnavailable node_tca_usage_unavailable = 8;
+    BucketTCAUsageUnavailable bucket_tca_usage_unavailable = 9;
   }
 }
 
@@ -264,9 +269,7 @@ message NodeARsSigUnverified {
   string node_key = 1;            // 0x-hex encoded NodePubKey
   uint32 tca_id = 2;
   repeated uint64 bad_leaves_ids = 3;
-  bytes unverified_usage = 4;
-  bytes unverified_usage_collector = 5;
-  bytes unverified_usage_signature = 6;
+  UnverifiedUsage unverified_usage = 4;
 }
 
 message BucketARsSigUnverified {
@@ -274,18 +277,14 @@ message BucketARsSigUnverified {
   string node_key = 2;            // 0x-hex encoded NodePubKey
   uint32 tca_id = 3;
   repeated uint64 bad_leaves_ids = 4;
-  bytes unverified_usage = 5;
-  bytes unverified_usage_collector = 6;
-  bytes unverified_usage_signature = 7;
+  UnverifiedUsage unverified_usage = 5;
 }
 
 message NodeARsUnavailable {
   string node_key = 1;            // 0x-hex encoded NodePubKey
   uint32 tca_id = 2;
   repeated uint64 leaves_ids = 3;
-  bytes unverified_usage = 4;
-  bytes unverified_usage_collector = 5;
-  bytes unverified_usage_signature = 6;
+  UnverifiedUsage unverified_usage = 4;
 }
 
 message BucketARsUnavailable {
@@ -293,38 +292,32 @@ message BucketARsUnavailable {
   string node_key = 2;            // 0x-hex encoded NodePubKey
   uint32 tca_id = 3;
   repeated uint64 leaves_ids = 4;
-  bytes unverified_usage = 5;
-  bytes unverified_usage_collector = 6;
-  bytes unverified_usage_signature = 7;
+  UnverifiedUsage unverified_usage = 5;
 }
 
 message NodeAggregateMalformed {
   string node_key = 1;            // 0x-hex encoded NodePubKey
   uint32 tca_id = 2;
-  bytes unverified_usage = 3;
-  bytes unverified_usage_collector = 4;
-  bytes unverified_usage_signature = 5;
+  UnverifiedUsage unverified_usage = 3;
 }
 
 message BucketAggregateMalformed {
   uint64 bucket_id = 1;
   uint32 tca_id = 2;
-  bytes unverified_usage = 3;
-  bytes unverified_usage_collector = 4;
-  bytes unverified_usage_signature = 5;
+  UnverifiedUsage unverified_usage = 3;
 }
 
-message NodeCumulativeUsageUnavailable {
+message NodeTCAUsageUnavailable {
   string node_key = 1;            // 0x-hex encoded NodePubKey
   uint32 tca_id = 2;
-  bytes accessible_unverified_usage = 3;
+  UnverifiedUsage unverified_usage = 3;
 }
 
-message BucketCumulativeUsageUnavailable {
+message BucketTCAUsageUnavailable {
   uint64 bucket_id = 1;
   string node_key = 2;            // 0x-hex encoded NodePubKey
   uint32 tca_id = 3;
-  bytes accessible_unverified_usage = 4;
+  UnverifiedUsage unverified_usage = 4;
 }
 
 // ============================================================================

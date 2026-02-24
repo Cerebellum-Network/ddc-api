@@ -923,6 +923,87 @@ pub fn get_phd_root<
     })
 }
 
+/// Fetch node TCA merkle root node.
+///
+/// Parameters:
+/// - `cluster_id`: Cluster Id
+/// - `tca_id`: TCA era
+/// - `collector_key`: Collector node key
+/// - `node_key`: Node key
+pub fn get_node_tca_root<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
+    cluster_id: &ClusterId,
+    tca_id: TcaEra,
+    collector_key: NodePubKey,
+    node_key: NodePubKey,
+) -> Result<ApiResponse<proto::activity_tree::ActivityTreeTraversedNode>, ApiError> {
+    let api_response = fetch_traversed_node_aggregate::<AccountId, BlockNumber, CM, NM>(
+        cluster_id, tca_id, collector_key, node_key.clone(), 1, 1, true,
+    )?;
+
+    let first_node = api_response.response.nodes
+        .into_iter()
+        .next()
+        .ok_or(ApiError::FailedToFetchTraversedNodeAggregate {
+            cluster_id: *cluster_id,
+            tca_id,
+            node_key: node_key.clone(),
+            tree_node_id: 1,
+            tree_levels_count: 1,
+        })?;
+
+    Ok(ApiResponse {
+        response: first_node,
+        signed_by: api_response.signed_by,
+    })
+}
+
+/// Fetch bucket TCA merkle root node.
+///
+/// Parameters:
+/// - `cluster_id`: Cluster Id
+/// - `tca_id`: TCA era
+/// - `collector_key`: Collector node key
+/// - `bucket_id`: Bucket Id
+/// - `node_key`: Node key
+pub fn get_bucket_tca_root<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
+    cluster_id: &ClusterId,
+    tca_id: TcaEra,
+    collector_key: NodePubKey,
+    bucket_id: BucketId,
+    node_key: NodePubKey,
+) -> Result<ApiResponse<proto::activity_tree::ActivityTreeTraversedNode>, ApiError> {
+    let api_response = fetch_traversed_bucket_sub_aggregate::<AccountId, BlockNumber, CM, NM>(
+        cluster_id, tca_id, collector_key, bucket_id, node_key.clone(), 1, 1, true,
+    )?;
+
+    let first_node = api_response.response.nodes
+        .into_iter()
+        .next()
+        .ok_or(ApiError::FailedToFetchTraversedBucketSubAggregate {
+            cluster_id: *cluster_id,
+            tca_id,
+            bucket_id,
+            node_key: node_key.clone(),
+            tree_node_id: 1,
+            tree_levels_count: 1,
+        })?;
+
+    Ok(ApiResponse {
+        response: first_node,
+        signed_by: api_response.signed_by,
+    })
+}
+
 /// Fetch processed EHD eras.
 ///
 /// Parameters:
