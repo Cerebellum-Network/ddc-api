@@ -163,8 +163,9 @@ message GetAssignmentTableResponse {
 
 message PostInspectionResultRequest {
   uint32 era_id = 1;
-  string inspector_key = 2;
-  repeated InspectionPathResult paths_results = 3;
+  string inspector_key = 2;                    // 0x-hex encoded inspector public key
+  string inspector_signature = 3;              // 0x-hex encoded Sr25519 signature over sorted result hashes
+  repeated InspectionPathResult paths_results = 4;
 }
 
 message Provenance {
