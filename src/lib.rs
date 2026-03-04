@@ -185,7 +185,6 @@ pub mod proto {
                     table: None,
                     lease_holder: "0xdef456".into(),
                     lease_expires_at: 1700001000,
-                    message: "Table is being built".into(),
                 };
 
                 let bytes = res.encode_to_vec();
@@ -204,13 +203,13 @@ pub mod proto {
                         InspectionPathResult {
                             path_hash: "0x01".into(),
                             result_hash: "0xaabbcc".into(),
-                            exception: vec![],
+                            exception: None,
                             source_collectors: vec![],
                         },
                         InspectionPathResult {
                             path_hash: "0x02".into(),
                             result_hash: "0xddee".into(),
-                            exception: vec![0xff],
+                            exception: Some(vec![0xff]),
                             source_collectors: vec![],
                         },
                     ],
@@ -220,7 +219,7 @@ pub mod proto {
                 let decoded = PostInspectionResultRequest::decode(bytes.as_slice()).unwrap();
                 assert_eq!(decoded.paths_results.len(), 2);
                 assert_eq!(decoded.paths_results[0].path_hash, "0x01");
-                assert_eq!(decoded.paths_results[1].exception, vec![0xff]);
+                assert_eq!(decoded.paths_results[1].exception, Some(vec![0xff]));
             }
 
             #[test]
@@ -232,9 +231,8 @@ pub mod proto {
                     quorum_reached_paths: vec!["path-001".into()],
                     rejected_paths: vec![RejectedInspectionPath {
                         path_hash: "0x02".into(),
-                        reason: "duplicate".into(),
+                        reason: RejectionReason::Duplicate as i32,
                     }],
-                    details: "3 accepted, 1 rejected".into(),
                 };
 
                 let bytes = res.encode_to_vec();
@@ -242,7 +240,7 @@ pub mod proto {
                 assert_eq!(decoded.status, PostInspectionResultStatus::Partial as i32);
                 assert_eq!(decoded.accepted_count, 3);
                 assert_eq!(decoded.rejected_count, 1);
-                assert_eq!(decoded.rejected_paths[0].reason, "duplicate");
+                assert_eq!(decoded.rejected_paths[0].reason, RejectionReason::Duplicate as i32);
             }
 
             #[test]
@@ -299,14 +297,10 @@ pub mod proto {
                     unverified_paths: vec![UnverifiedPath {
                         path_hash: "0x03".into(),
                         exception: vec![0xff],
-                        irf_count: 3,
                     }],
                     quorum_unreached_paths: vec!["0x04".into()],
-                    assignment_table_hash: "0xdead".into(),
                     generated_at: 1700000000,
                     complete: true,
-                    pending_paths_count: 0,
-                    message: "All paths processed".into(),
                     archived_cid: vec![],
                     archived_at: 0,
                     archival_status: 0,
@@ -317,7 +311,7 @@ pub mod proto {
                 assert_eq!(decoded.era_id, 42);
                 assert_eq!(decoded.verified_paths.len(), 2);
                 assert_eq!(decoded.unverified_paths.len(), 1);
-                assert_eq!(decoded.unverified_paths[0].irf_count, 3);
+                assert_eq!(decoded.unverified_paths[0].exception, vec![0xff]);
                 assert_eq!(decoded.quorum_unreached_paths.len(), 1);
                 assert!(decoded.complete);
             }
@@ -521,7 +515,7 @@ pub mod proto {
         /// Blake2b-256(path_hash_bytes || exception || source_collectors).
         pub fn new(
             path_hash: scale_info::prelude::string::String,
-            exception: sp_std::vec::Vec<u8>,
+            exception: Option<sp_std::vec::Vec<u8>>,
             source_collectors: sp_std::vec::Vec<inspection_sync::Provenance>,
         ) -> Self {
             use blake2::digest::{consts::U32, Digest};
@@ -529,7 +523,9 @@ pub mod proto {
                 .unwrap_or_default();
             let mut data = sp_std::vec::Vec::new();
             data.extend_from_slice(&path_hash_bytes);
-            data.extend_from_slice(&exception);
+            if let Some(ref exc) = exception {
+                data.extend_from_slice(exc);
+            }
             for cr in &source_collectors {
                 data.extend_from_slice(cr.collector_key.as_bytes());
                 data.extend_from_slice(&cr.response_signature);
