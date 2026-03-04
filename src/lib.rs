@@ -209,7 +209,16 @@ pub mod proto {
                         InspectionPathResult {
                             path_hash: "0x02".into(),
                             result_hash: "0xddee".into(),
-                            exception: Some(vec![0xff]),
+                            exception: Some(InspPathException {
+                                kind: Some(insp_path_exception::Kind::NodeArsUnavailable(
+                                    NodeARsUnavailable {
+                                        node_key: "0xnode1".into(),
+                                        tca_id: 1,
+                                        leaves_ids: vec![],
+                                        unverified_usage: None,
+                                    },
+                                )),
+                            }),
                             source_collectors: vec![],
                         },
                     ],
@@ -219,7 +228,14 @@ pub mod proto {
                 let decoded = PostInspectionResultRequest::decode(bytes.as_slice()).unwrap();
                 assert_eq!(decoded.paths_results.len(), 2);
                 assert_eq!(decoded.paths_results[0].path_hash, "0x01");
-                assert_eq!(decoded.paths_results[1].exception, Some(vec![0xff]));
+                assert!(decoded.paths_results[1].exception.is_some());
+                match &decoded.paths_results[1].exception.as_ref().unwrap().kind {
+                    Some(insp_path_exception::Kind::NodeArsUnavailable(inner)) => {
+                        assert_eq!(inner.node_key, "0xnode1");
+                        assert_eq!(inner.tca_id, 1);
+                    }
+                    _ => panic!("Expected NodeArsUnavailable exception"),
+                }
             }
 
             #[test]
@@ -255,7 +271,7 @@ pub mod proto {
                     InspectionPathStatus {
                         status: InspectionPathStatusEnum::InspectionPathStatusIrfReached as i32,
                         result_hash: "0xaabb".into(),
-                        exception: vec![],
+                        exception: None,
                         submissions,
                         inspectors: vec!["insp1".into(), "insp2".into(), "insp3".into()],
                         remaining_inspectors: vec!["insp4".into()],
@@ -296,7 +312,17 @@ pub mod proto {
                     verified_paths: vec!["0x01".into(), "0x02".into()],
                     unverified_paths: vec![UnverifiedPath {
                         path_hash: "0x03".into(),
-                        exception: vec![0xff],
+                        exception: Some(InspPathException {
+                            kind: Some(insp_path_exception::Kind::BucketArsUnavailable(
+                                BucketARsUnavailable {
+                                    bucket_id: 42,
+                                    node_key: "0xnode1".into(),
+                                    tca_id: 1,
+                                    leaves_ids: vec![],
+                                    unverified_usage: None,
+                                },
+                            )),
+                        }),
                     }],
                     quorum_unreached_paths: vec!["0x04".into()],
                     generated_at: 1700000000,
@@ -311,7 +337,7 @@ pub mod proto {
                 assert_eq!(decoded.era_id, 42);
                 assert_eq!(decoded.verified_paths.len(), 2);
                 assert_eq!(decoded.unverified_paths.len(), 1);
-                assert_eq!(decoded.unverified_paths[0].exception, vec![0xff]);
+                assert!(decoded.unverified_paths[0].exception.is_some());
                 assert_eq!(decoded.quorum_unreached_paths.len(), 1);
                 assert!(decoded.complete);
             }
@@ -496,6 +522,26 @@ pub mod proto {
         }
     }
 
+    impl InspPathException {
+        /// Merges `other` into `self`, wrapping both in `MultipleExceptions` if needed.
+        /// If `self` is already a `MultipleExceptions`, appends `other` to its list.
+        pub fn merge(self, other: Self) -> Self {
+            match self.kind {
+                Some(insp_path_exception::Kind::MultipleExceptions(mut m)) => {
+                    m.exceptions.push(other);
+                    Self { kind: Some(insp_path_exception::Kind::MultipleExceptions(m)) }
+                }
+                _ => Self {
+                    kind: Some(insp_path_exception::Kind::MultipleExceptions(
+                        inspection_sync::MultipleExceptions {
+                            exceptions: sp_std::vec![self, other],
+                        },
+                    )),
+                },
+            }
+        }
+    }
+
     impl inspection_sync::InspectionPath {
         /// Blake2b-256 hash of protobuf-serialized bytes, returned as raw 32-byte array.
         pub fn path_hash(&self) -> [u8; 32] {
@@ -512,19 +558,20 @@ pub mod proto {
 
     impl inspection_sync::InspectionPathResult {
         /// Creates a new `InspectionPathResult` with `result_hash` computed as
-        /// Blake2b-256(path_hash_bytes || exception || source_collectors).
+        /// Blake2b-256(path_hash_bytes || exception_bytes || source_collectors).
         pub fn new(
             path_hash: scale_info::prelude::string::String,
-            exception: Option<sp_std::vec::Vec<u8>>,
+            exception: Option<inspection_sync::InspPathException>,
             source_collectors: sp_std::vec::Vec<inspection_sync::Provenance>,
         ) -> Self {
             use blake2::digest::{consts::U32, Digest};
+            use prost::Message;
             let path_hash_bytes = hex::decode(path_hash.trim_start_matches("0x"))
                 .unwrap_or_default();
             let mut data = sp_std::vec::Vec::new();
             data.extend_from_slice(&path_hash_bytes);
             if let Some(ref exc) = exception {
-                data.extend_from_slice(exc);
+                data.extend_from_slice(&exc.encode_to_vec());
             }
             for cr in &source_collectors {
                 data.extend_from_slice(cr.collector_key.as_bytes());
