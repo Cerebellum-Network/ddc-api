@@ -356,7 +356,6 @@ impl<'a> DdcClient<'a> {
         &self,
         prev: Option<EhdEra>,
         limit: Option<u32>,
-        dry_run: bool,
     ) -> Result<ApiResponse<Vec<json::EHDEra>>, http::Error> {
         let mut url = format!("{}/activity/inspected-eras", self.base_url);
         if let Some(prev) = prev {
@@ -369,32 +368,17 @@ impl<'a> DdcClient<'a> {
                 url = format!("{}?limit={}", url, limit);
             }
         }
-        
-        if dry_run {
-            if url.contains('?') {
-                url = format!("{}&dryRun=true", url);
-            } else {
-                url = format!("{}?dryRun=true", url);
-            }
-        }
 
         let (response, signed_by) =
             fetch_and_parse_json!(self, url, Vec<json::EHDEra>, Vec<json::EHDEra>)?;
 
-        let api_response = ApiResponse {
-            response,
-            signed_by,
-        };
-
-        Ok(api_response)
+        Ok(ApiResponse { response, signed_by })
     }
-
 
     pub fn processed_eras(
         &self,
         prev: Option<EhdEra>,
         limit: Option<u32>,
-        dry_run: bool,
     ) -> Result<ApiResponse<Vec<json::EHDEra>>, http::Error> {
         let mut url = format!("{}/activity/processed-eras", self.base_url);
         if let Some(prev) = prev {
@@ -407,24 +391,57 @@ impl<'a> DdcClient<'a> {
                 url = format!("{}?limit={}", url, limit);
             }
         }
-        
-        if dry_run {
+
+        let (response, signed_by) =
+            fetch_and_parse_json!(self, url, Vec<json::EHDEra>, Vec<json::EHDEra>)?;
+
+        Ok(ApiResponse { response, signed_by })
+    }
+
+    pub fn dry_run_inspected_eras(
+        &self,
+        prev: Option<EhdEra>,
+        limit: Option<u32>,
+    ) -> Result<ApiResponse<Vec<json::EHDEra>>, http::Error> {
+        let mut url = format!("{}/itm/dry-run/inspected-eras", self.base_url);
+        if let Some(prev) = prev {
+            url = format!("{}?prevToken={}", url, prev);
+        }
+        if let Some(limit) = limit {
             if url.contains('?') {
-                url = format!("{}&dryRun=true", url);
+                url = format!("{}&limit={}", url, limit);
             } else {
-                url = format!("{}?dryRun=true", url);
+                url = format!("{}?limit={}", url, limit);
             }
         }
 
         let (response, signed_by) =
             fetch_and_parse_json!(self, url, Vec<json::EHDEra>, Vec<json::EHDEra>)?;
 
-        let api_response = ApiResponse {
-            response,
-            signed_by,
-        };
+        Ok(ApiResponse { response, signed_by })
+    }
 
-        Ok(api_response)
+    pub fn dry_run_processed_eras(
+        &self,
+        prev: Option<EhdEra>,
+        limit: Option<u32>,
+    ) -> Result<ApiResponse<Vec<json::EHDEra>>, http::Error> {
+        let mut url = format!("{}/itm/dry-run/processed-eras", self.base_url);
+        if let Some(prev) = prev {
+            url = format!("{}?prevToken={}", url, prev);
+        }
+        if let Some(limit) = limit {
+            if url.contains('?') {
+                url = format!("{}&limit={}", url, limit);
+            } else {
+                url = format!("{}?limit={}", url, limit);
+            }
+        }
+
+        let (response, signed_by) =
+            fetch_and_parse_json!(self, url, Vec<json::EHDEra>, Vec<json::EHDEra>)?;
+
+        Ok(ApiResponse { response, signed_by })
     }
 
     pub fn traverse_era_historical_document(
