@@ -92,13 +92,12 @@ fn main() -> Result<()> {
         "activity_tree.EhdPayload",
         "#[derive(Eq, PartialOrd)]",
     );
-    // Use BTreeMap instead of HashMap for map fields in inspection_sync
+    // Use BTreeMap instead of HashMap for map fields in inspection
     // (required for no_std compatibility since HashMap is not available)
     prost_build.btree_map(&[
-        ".inspection_sync.AssignmentTable",
-        ".inspection_sync.InspectionState",
-        ".inspection_sync.InspectionPathStatus",
-        ".inspection_sync.ErrorResponse",
+        ".inspection.AssignmentTable",
+        ".inspection.InspectionState",
+        ".inspection.InspectionPathStatus",
     ]);
 
     prost_build.compile_protos(
@@ -106,7 +105,6 @@ fn main() -> Result<()> {
             "src/protos/signature.proto",
             "src/protos/activity.proto",
             "src/protos/inspection.proto",
-            "src/protos/inspection_sync.proto",
             "src/protos/activity_tree.proto",
         ],
         &["src/"],

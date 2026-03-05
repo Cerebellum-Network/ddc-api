@@ -312,12 +312,12 @@ impl<'a> DdcClient<'a> {
         Ok(api_response)
     }
 
-    pub fn eras(
+    pub fn tcas(
         &self,
         prev: Option<EhdEra>,
         limit: Option<u32>,
     ) -> Result<ApiResponse<Vec<json::AggregationEraResponse>>, http::Error> {
-        let mut url = format!("{}/activity/eras", self.base_url);
+        let mut url = format!("{}/activity/tcas", self.base_url);
         if let Some(prev) = prev {
             url = format!("{}?prevToken={}", url, prev);
         }
@@ -344,12 +344,12 @@ impl<'a> DdcClient<'a> {
         Ok(api_response)
     }
 
-    pub fn activity_eras(
+    pub fn eras(
         &self,
         prev: Option<EhdEra>,
         limit: Option<u32>,
     ) -> Result<ApiResponse<Vec<json::EHDEra>>, http::Error> {
-        let mut url = format!("{}/activity/payment-eras", self.base_url);
+        let mut url = format!("{}/activity/eras", self.base_url);
         if let Some(prev) = prev {
             url = format!("{}?prevToken={}", url, prev);
         }
@@ -601,7 +601,7 @@ impl<'a> DdcClient<'a> {
 
 
     // ========================================================================
-    // Inspection Client Methods (inspection_sync protobuf types)
+    // Inspection Client Methods (inspection protobuf types)
     // ========================================================================
     // These methods use the new etcd-based sync quorum API with full protobuf
     // serialization for both request and response bodies.
@@ -609,15 +609,15 @@ impl<'a> DdcClient<'a> {
     /// POST /itm/lease - Acquire exclusive lease for building assignment table (protobuf)
     pub fn post_itm_lease(
         &self,
-        request: &proto::inspection_sync::LeaseRequest,
-    ) -> Result<proto::inspection_sync::LeaseResult, http::Error> {
+        request: &proto::inspection::LeaseRequest,
+    ) -> Result<proto::inspection::LeaseResult, http::Error> {
         let url = self.insp_mem_url("/itm/lease");
         let body = request.encode_to_vec();
 
         let response = self.post_proto(&url, body)?;
         let body = response.body().collect::<Vec<u8>>();
 
-        proto::inspection_sync::LeaseResult::decode(body.as_slice()).map_err(|e| {
+        proto::inspection::LeaseResult::decode(body.as_slice()).map_err(|e| {
             log!(error, "❌ Failed to decode LeaseResult protobuf: {:?}", e);
             http::Error::Unknown
         })
@@ -626,15 +626,15 @@ impl<'a> DdcClient<'a> {
     /// POST /itm/submit - Submit completed assignment table (protobuf)
     pub fn submit_assignments_table(
         &self,
-        request: &proto::inspection_sync::PostAssignmentTableRequest,
-    ) -> Result<proto::inspection_sync::PostAssignmentTableResponse, http::Error> {
+        request: &proto::inspection::PostAssignmentTableRequest,
+    ) -> Result<proto::inspection::PostAssignmentTableResponse, http::Error> {
         let url = self.insp_mem_url("/itm/submit");
         let body = request.encode_to_vec();
 
         let response = self.post_proto(&url, body)?;
         let body = response.body().collect::<Vec<u8>>();
 
-        proto::inspection_sync::PostAssignmentTableResponse::decode(body.as_slice()).map_err(
+        proto::inspection::PostAssignmentTableResponse::decode(body.as_slice()).map_err(
             |e| {
                 log!(
                     error,
@@ -650,13 +650,13 @@ impl<'a> DdcClient<'a> {
     pub fn get_assignments_table(
         &self,
         era: EhdEra,
-    ) -> Result<proto::inspection_sync::GetAssignmentTableResponse, http::Error> {
+    ) -> Result<proto::inspection::GetAssignmentTableResponse, http::Error> {
         let url = self.insp_mem_url(&format!("/itm/table?eraId={}", era));
 
         let response = self.get(&url, Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
 
-        proto::inspection_sync::GetAssignmentTableResponse::decode(body.as_slice()).map_err(
+        proto::inspection::GetAssignmentTableResponse::decode(body.as_slice()).map_err(
             |e| {
                 log!(
                     error,
@@ -671,15 +671,15 @@ impl<'a> DdcClient<'a> {
     /// POST /itm/path - Submit inspection path results (protobuf)
     pub fn submit_inspection_result(
         &self,
-        request: &proto::inspection_sync::PostInspectionResultRequest,
-    ) -> Result<proto::inspection_sync::PostInspectionResultResponse, http::Error> {
+        request: &proto::inspection::PostInspectionResultRequest,
+    ) -> Result<proto::inspection::PostInspectionResultResponse, http::Error> {
         let url = self.insp_mem_url("/itm/path");
         let body = request.encode_to_vec();
 
         let response = self.post_proto(&url, body)?;
         let body = response.body().collect::<Vec<u8>>();
 
-        proto::inspection_sync::PostInspectionResultResponse::decode(body.as_slice()).map_err(
+        proto::inspection::PostInspectionResultResponse::decode(body.as_slice()).map_err(
             |e| {
                 log!(
                     error,
@@ -695,13 +695,13 @@ impl<'a> DdcClient<'a> {
     pub fn get_inspection_state(
         &self,
         era: EhdEra,
-    ) -> Result<proto::inspection_sync::InspectionState, http::Error> {
+    ) -> Result<proto::inspection::InspectionState, http::Error> {
         let url = self.insp_mem_url(&format!("/itm/state?eraId={}", era));
 
         let response = self.get(&url, Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
 
-        proto::inspection_sync::InspectionState::decode(body.as_slice()).map_err(|e| {
+        proto::inspection::InspectionState::decode(body.as_slice()).map_err(|e| {
             log!(
                 error,
                 "❌ Failed to decode InspectionState protobuf: {:?}",
@@ -715,13 +715,13 @@ impl<'a> DdcClient<'a> {
     pub fn get_inspection_receipt(
         &self,
         era: EhdEra,
-    ) -> Result<proto::inspection_sync::InspectionReceipt, http::Error> {
+    ) -> Result<proto::inspection::InspectionReceipt, http::Error> {
         let url = self.insp_mem_url(&format!("/itm/receipt?eraId={}", era));
 
         let response = self.get(&url, Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
 
-        proto::inspection_sync::InspectionReceipt::decode(body.as_slice()).map_err(|e| {
+        proto::inspection::InspectionReceipt::decode(body.as_slice()).map_err(|e| {
             log!(
                 error,
                 "❌ Failed to decode InspectionReceipt protobuf: {:?}",
@@ -735,13 +735,13 @@ impl<'a> DdcClient<'a> {
     pub fn get_quorum_info(
         &self,
         era: EhdEra,
-    ) -> Result<proto::inspection_sync::InspSyncQuorumInfo, http::Error> {
+    ) -> Result<proto::inspection::InspSyncQuorumInfo, http::Error> {
         let url = format!("{}/itm/quorum?eraId={}", self.base_url, era);
 
         let response = self.get(&url, Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
 
-        proto::inspection_sync::InspSyncQuorumInfo::decode(body.as_slice()).map_err(|e| {
+        proto::inspection::InspSyncQuorumInfo::decode(body.as_slice()).map_err(|e| {
             log!(
                 error,
                 "❌ Failed to decode InspSyncQuorumInfo protobuf: {:?}",
@@ -842,7 +842,7 @@ impl<'a> DdcClient<'a> {
 
     /// Send a POST request with protobuf-encoded body (Content-Type: application/protobuf)
     /// and expect a protobuf response (Accept: application/protobuf).
-    /// Used by inspection_sync client methods for the new etcd-based sync quorum API.
+    /// Used by inspection client methods for the new etcd-based sync quorum API.
     fn post_proto(
         &self,
         url: &str,

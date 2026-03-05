@@ -1058,7 +1058,7 @@ pub fn fetch_processed_eras_for_cluster<
     }
 }
 
-/// Fetch processed payment eras from global collector via /activity/payment-eras.
+/// Fetch processed payment eras from global collector via /activity/eras.
 ///
 /// Parameters:
 /// - `node_params`: Global collector node parameters
@@ -1213,10 +1213,10 @@ pub fn fetch_inspected_eras(
 }
 
 // ============================================================================
-// Inspection API Functions (inspection_sync protobuf types)
+// Inspection API Functions (inspection protobuf types)
 // ============================================================================
 // These functions use the new etcd-based sync quorum API with full protobuf
-// serialization. They correspond to the inspection_sync_router endpoints.
+// serialization. They correspond to the inspection_router endpoints.
 
 pub fn post_itm_lease<
     AccountId,
@@ -1225,8 +1225,8 @@ pub fn post_itm_lease<
     NM: NodeManager<AccountId>,
 >(
     cluster_id: &ClusterId,
-    request: &proto::inspection_sync::LeaseRequest,
-) -> Result<proto::inspection_sync::LeaseResult, ApiError> {
+    request: &proto::inspection::LeaseRequest,
+) -> Result<proto::inspection::LeaseResult, ApiError> {
     let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
     let host =
@@ -1258,8 +1258,8 @@ pub fn submit_assignments_table<
     NM: NodeManager<AccountId>,
 >(
     cluster_id: &ClusterId,
-    request: &proto::inspection_sync::PostAssignmentTableRequest,
-) -> Result<proto::inspection_sync::PostAssignmentTableResponse, ApiError> {
+    request: &proto::inspection::PostAssignmentTableRequest,
+) -> Result<proto::inspection::PostAssignmentTableResponse, ApiError> {
     let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
     let host =
@@ -1292,7 +1292,7 @@ pub fn get_assignments_table<
 >(
     cluster_id: &ClusterId,
     era: EhdEra,
-) -> Result<proto::inspection_sync::GetAssignmentTableResponse, ApiError> {
+) -> Result<proto::inspection::GetAssignmentTableResponse, ApiError> {
     let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
     let host =
@@ -1324,8 +1324,8 @@ pub fn submit_inspection_result<
     NM: NodeManager<AccountId>,
 >(
     cluster_id: &ClusterId,
-    request: &proto::inspection_sync::PostInspectionResultRequest,
-) -> Result<proto::inspection_sync::PostInspectionResultResponse, ApiError> {
+    request: &proto::inspection::PostInspectionResultRequest,
+) -> Result<proto::inspection::PostInspectionResultResponse, ApiError> {
     let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
     let host =
@@ -1358,7 +1358,7 @@ pub fn get_inspection_state<
 >(
     cluster_id: &ClusterId,
     era: EhdEra,
-) -> Result<proto::inspection_sync::InspectionState, ApiError> {
+) -> Result<proto::inspection::InspectionState, ApiError> {
     let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
     let host =
@@ -1391,7 +1391,7 @@ pub fn get_inspection_receipt<
 >(
     cluster_id: &ClusterId,
     era: EhdEra,
-) -> Result<proto::inspection_sync::InspectionReceipt, ApiError> {
+) -> Result<proto::inspection::InspectionReceipt, ApiError> {
     let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
     let host =
@@ -1424,7 +1424,7 @@ pub fn get_quorum_info<
 >(
     cluster_id: &ClusterId,
     era: EhdEra,
-) -> Result<proto::inspection_sync::InspSyncQuorumInfo, ApiError> {
+) -> Result<proto::inspection::InspSyncQuorumInfo, ApiError> {
     let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
     let host =

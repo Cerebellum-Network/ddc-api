@@ -18,10 +18,6 @@ pub mod proto {
 
     pub mod inspection {
         include!(concat!(env!("OUT_DIR"), "/inspection.rs"));
-    }
-
-    pub mod inspection_sync {
-        include!(concat!(env!("OUT_DIR"), "/inspection_sync.rs"));
 
         #[cfg(test)]
         mod tests {
@@ -507,10 +503,10 @@ pub mod proto {
         }
     }
 
-    pub use self::inspection_sync::InspectionReceipt;
-    pub use self::inspection_sync::InspPathException;
-    pub use self::inspection_sync::insp_path_exception;
-    pub type ProtoUnverifiedPath = inspection_sync::UnverifiedPath;
+    pub use self::inspection::InspectionReceipt;
+    pub use self::inspection::InspPathException;
+    pub use self::inspection::insp_path_exception;
+    pub type ProtoUnverifiedPath = inspection::UnverifiedPath;
 
 
     impl InspectionReceipt {
@@ -536,7 +532,7 @@ pub mod proto {
                 }
                 _ => Self {
                     kind: Some(insp_path_exception::Kind::MultipleExceptions(
-                        inspection_sync::MultipleExceptions {
+                        inspection::MultipleExceptions {
                             exceptions: sp_std::vec![self, other],
                         },
                     )),
@@ -545,7 +541,7 @@ pub mod proto {
         }
     }
 
-    impl inspection_sync::InspectionPath {
+    impl inspection::InspectionPath {
         /// Blake2b-256 hash of protobuf-serialized bytes, returned as raw 32-byte array.
         pub fn path_hash(&self) -> [u8; 32] {
             use blake2::digest::{consts::U32, Digest};
@@ -559,13 +555,13 @@ pub mod proto {
         }
     }
 
-    impl inspection_sync::InspectionPathResult {
+    impl inspection::InspectionPathResult {
         /// Creates a new `InspectionPathResult` with `result_hash` computed as
         /// Blake2b-256(path_hash_bytes || exception_bytes || source_collectors).
         pub fn new(
             path_hash: scale_info::prelude::string::String,
-            exception: Option<inspection_sync::InspPathException>,
-            source_collectors: sp_std::vec::Vec<inspection_sync::Provenance>,
+            exception: Option<inspection::InspPathException>,
+            source_collectors: sp_std::vec::Vec<inspection::Provenance>,
         ) -> Self {
             use blake2::digest::{consts::U32, Digest};
             use prost::Message;
