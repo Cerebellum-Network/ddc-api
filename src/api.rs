@@ -1241,7 +1241,7 @@ pub fn post_itm_lease<
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
         false,
-    );
+    ).with_dry_run(sync_node.dry_run);
 
     client
         .post_itm_lease(request)
@@ -1274,7 +1274,7 @@ pub fn submit_assignments_table<
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
         false,
-    );
+    ).with_dry_run(sync_node.dry_run);
 
     client
         .submit_assignments_table(request)
@@ -1307,7 +1307,7 @@ pub fn get_assignments_table<
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
         false,
-    );
+    ).with_dry_run(sync_node.dry_run);
 
     client
         .get_assignments_table(era)
@@ -1340,7 +1340,7 @@ pub fn submit_inspection_result<
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
         false,
-    );
+    ).with_dry_run(sync_node.dry_run);
 
     client
         .submit_inspection_result(request)
@@ -1373,7 +1373,7 @@ pub fn get_inspection_state<
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
         false,
-    );
+    ).with_dry_run(sync_node.dry_run);
 
     client
         .get_inspection_state(era)
@@ -1406,7 +1406,7 @@ pub fn get_inspection_receipt<
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
         false,
-    );
+    ).with_dry_run(sync_node.dry_run);
 
     client
         .get_inspection_receipt(era)

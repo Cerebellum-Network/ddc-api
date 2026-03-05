@@ -17,6 +17,7 @@ pub struct DdcClient<'a> {
     timeout: Duration,
     retries: u32,
     verify_sig: bool,
+    dry_run: bool,
 }
 
 macro_rules! fetch_and_parse_json {
@@ -148,6 +149,25 @@ impl<'a> DdcClient<'a> {
             timeout,
             retries,
             verify_sig,
+            dry_run: false,
+        }
+    }
+
+    pub fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
+        self
+    }
+
+    fn insp_mem_url(&self, path: &str) -> String {
+        let url = format!("{}{}", self.base_url, path);
+        if self.dry_run {
+            if url.contains('?') {
+                format!("{}&dryRun=true", url)
+            } else {
+                format!("{}?dryRun=true", url)
+            }
+        } else {
+            url
         }
     }
 
@@ -591,7 +611,7 @@ impl<'a> DdcClient<'a> {
         &self,
         request: &proto::inspection_sync::LeaseRequest,
     ) -> Result<proto::inspection_sync::LeaseResult, http::Error> {
-        let url = format!("{}/itm/lease", self.base_url);
+        let url = self.insp_mem_url("/itm/lease");
         let body = request.encode_to_vec();
 
         let response = self.post_proto(&url, body)?;
@@ -608,7 +628,7 @@ impl<'a> DdcClient<'a> {
         &self,
         request: &proto::inspection_sync::PostAssignmentTableRequest,
     ) -> Result<proto::inspection_sync::PostAssignmentTableResponse, http::Error> {
-        let url = format!("{}/itm/submit", self.base_url);
+        let url = self.insp_mem_url("/itm/submit");
         let body = request.encode_to_vec();
 
         let response = self.post_proto(&url, body)?;
@@ -631,7 +651,7 @@ impl<'a> DdcClient<'a> {
         &self,
         era: EhdEra,
     ) -> Result<proto::inspection_sync::GetAssignmentTableResponse, http::Error> {
-        let url = format!("{}/itm/table?eraId={}", self.base_url, era);
+        let url = self.insp_mem_url(&format!("/itm/table?eraId={}", era));
 
         let response = self.get(&url, Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
@@ -653,7 +673,7 @@ impl<'a> DdcClient<'a> {
         &self,
         request: &proto::inspection_sync::PostInspectionResultRequest,
     ) -> Result<proto::inspection_sync::PostInspectionResultResponse, http::Error> {
-        let url = format!("{}/itm/path", self.base_url);
+        let url = self.insp_mem_url("/itm/path");
         let body = request.encode_to_vec();
 
         let response = self.post_proto(&url, body)?;
@@ -676,7 +696,7 @@ impl<'a> DdcClient<'a> {
         &self,
         era: EhdEra,
     ) -> Result<proto::inspection_sync::InspectionState, http::Error> {
-        let url = format!("{}/itm/state?eraId={}", self.base_url, era);
+        let url = self.insp_mem_url(&format!("/itm/state?eraId={}", era));
 
         let response = self.get(&url, Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
@@ -696,7 +716,7 @@ impl<'a> DdcClient<'a> {
         &self,
         era: EhdEra,
     ) -> Result<proto::inspection_sync::InspectionReceipt, http::Error> {
-        let url = format!("{}/itm/summary?eraId={}", self.base_url, era);
+        let url = self.insp_mem_url(&format!("/itm/summary?eraId={}", era));
 
         let response = self.get(&url, Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
