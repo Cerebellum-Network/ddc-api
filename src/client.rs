@@ -177,7 +177,7 @@ impl<'a> DdcClient<'a> {
         prev_token: Option<BucketId>,
         limit: Option<u32>,
     ) -> Result<ApiResponse<proto::activity_tree::BucketAggregatesResponse>, http::Error> {
-        let mut url = format!("{}/activity/buckets?eraId={}", self.base_url, era_id);
+        let mut url = format!("{}/activity/buckets?tcaId={}", self.base_url, era_id);
         if let Some(prev_token) = prev_token {
             url = format!("{}&prevToken={}", url, prev_token);
         }
@@ -206,7 +206,7 @@ impl<'a> DdcClient<'a> {
         bucket_id: BucketId,
     ) -> Result<ApiResponse<proto::activity_tree::BucketAggregatesResponse>, http::Error> {
         let mut url = format!(
-            "{}/activity/buckets/{}?eraId={}",
+            "{}/activity/buckets/{}?tcaId={}",
             self.base_url, bucket_id, era_id
         );
 
@@ -231,7 +231,7 @@ impl<'a> DdcClient<'a> {
         node_key: NodePubKey,
     ) -> Result<ApiResponse<proto::activity_tree::NodeAggregatesResponse>, http::Error> {
         let mut url = format!(
-            "{}/activity/nodes/{}?eraId={}",
+            "{}/activity/nodes/{}?tcaId={}",
             self.base_url,
             <NodePubKey as Into<String>>::into(node_key),
             era_id
@@ -260,7 +260,7 @@ impl<'a> DdcClient<'a> {
         merkle_tree_node_id: Vec<u64>,
     ) -> Result<ApiResponse<proto::activity::ChallengeResponse>, http::Error> {
         let mut url = format!(
-            "{}/activity/buckets/{}/challenge?eraId={}&nodeId={}&merkleTreeNodeId={}",
+            "{}/activity/buckets/{}/challenge?tcaId={}&nodeId={}&merkleTreeNodeId={}",
             self.base_url,
             bucket_id,
             era_id,
@@ -290,7 +290,7 @@ impl<'a> DdcClient<'a> {
         merkle_tree_node_id: Vec<u64>,
     ) -> Result<ApiResponse<proto::activity::ChallengeResponse>, http::Error> {
         let mut url = format!(
-            "{}/activity/nodes/{}/challenge?eraId={}&merkleTreeNodeId={}",
+            "{}/activity/nodes/{}/challenge?tcaId={}&merkleTreeNodeId={}",
             self.base_url,
             node_id,
             era_id,
@@ -535,7 +535,7 @@ impl<'a> DdcClient<'a> {
         levels: u16,
     ) -> Result<ApiResponse<proto::activity_tree::ActivityTreeTraversalResponse>, http::Error> {
         let mut url = format!(
-            "{}/activity/nodes/{}/traverse?eraId={}&merkleTreeNodeId={}&levels={}",
+            "{}/activity/nodes/{}/traverse?tcaId={}&merkleTreeNodeId={}&levels={}",
             self.base_url,
             <NodePubKey as Into<String>>::into(node_key),
             tca_id,
@@ -567,7 +567,7 @@ impl<'a> DdcClient<'a> {
         levels: u16,
     ) -> Result<ApiResponse<proto::activity_tree::ActivityTreeTraversalResponse>, http::Error> {
         let mut url = format!(
-            "{}/activity/buckets/{}/traverse?eraId={}&nodeId={}&merkleTreeNodeId={}&levels={}",
+            "{}/activity/buckets/{}/traverse?tcaId={}&nodeId={}&merkleTreeNodeId={}&levels={}",
             self.base_url,
             bucket_id,
             tca_id,
