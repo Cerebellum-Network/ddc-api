@@ -199,6 +199,7 @@ pub mod proto {
                 let req = PostInspectionResultRequest {
                     era_id: 42,
                     inspector_key: "0xabc123".into(),
+                    inspector_signature: String::new(),
                     paths_results: vec![
                         InspectionPathResult {
                             path_hash: "0x01".into(),
@@ -325,6 +326,8 @@ pub mod proto {
                         }),
                     }],
                     quorum_unreached_paths: vec!["0x04".into()],
+                    assignments_hash: String::new(),
+                    state_hash: String::new(),
                     generated_at: 1700000000,
                     complete: true,
                     archived_cid: vec![],

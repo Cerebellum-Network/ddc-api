@@ -711,12 +711,12 @@ impl<'a> DdcClient<'a> {
         })
     }
 
-    /// GET /itm/summary - Retrieve inspection receipt (protobuf)
+    /// GET /itm/receipt - Retrieve inspection receipt (protobuf)
     pub fn get_inspection_receipt(
         &self,
         era: EhdEra,
     ) -> Result<proto::inspection_sync::InspectionReceipt, http::Error> {
-        let url = self.insp_mem_url(&format!("/itm/summary?eraId={}", era));
+        let url = self.insp_mem_url(&format!("/itm/receipt?eraId={}", era));
 
         let response = self.get(&url, Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();

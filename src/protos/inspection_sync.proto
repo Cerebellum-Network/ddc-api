@@ -231,7 +231,7 @@ message InspectionPathStatus {
 }
 
 // ============================================================================
-// Inspection Receipt (GET /itm/summary)
+// Inspection Receipt (GET /itm/receipt)
 // ============================================================================
 
 message InspectionReceipt {
@@ -241,12 +241,14 @@ message InspectionReceipt {
   repeated string verified_paths = 4;              // 0x-hex encoded path hashes
   repeated UnverifiedPath unverified_paths = 5;
   repeated string quorum_unreached_paths = 6;      // 0x-hex encoded path hashes
+  string assignments_hash = 7;                     // 0x-hex Blake2b-256 of proto-serialized AssignmentTable
+  string state_hash = 8;                           // 0x-hex Blake2b-256 of proto-serialized InspectionState
 
   // Archival metadata
-  int64 generated_at = 7;         // Unix timestamp
-  bytes archived_cid = 8;
-  int64 archived_at = 9;
-  ArchivalStatus archival_status = 10;
+  int64 generated_at = 9;         // Unix timestamp
+  bytes archived_cid = 10;
+  int64 archived_at = 11;
+  ArchivalStatus archival_status = 12;
 }
 
 message UnverifiedPath {
