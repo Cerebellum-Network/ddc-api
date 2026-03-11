@@ -46,7 +46,14 @@ std = [
   "sp-core/std",
   "sp-std/std",
   "sp-runtime/std",
+  "sp-io/std",
   "sp-application-crypto/std",
+  "frame-support/std",
+  "frame-system/std",
+  "log/std",
+  "serde/std",
+  "serde_json/std",
+  "serde_with/std",
   "ddc-primitives/std",
 ]
 runtime-benchmarks = [
