@@ -2,173 +2,352 @@ syntax = "proto3";
 
 package inspection;
 
-// GET  /itm/table  -- returns the table or era "not found" / "not yet processed" / "waiting" / "building".
+// ============================================================================
+// Inspection Sync Quorum - Protocol Buffer Definitions
+// ============================================================================
+// This file defines all data structures for the etcd-based sync quorum
+// that provides shared memory coordination for inspectors running in OCW.
+//
+// Version: 2.0.0 (Protobuf Migration)
+// Origin: ddc-node/pb/inspection.proto (Go implementation)
+// ============================================================================
 
-message ItmTable {
-  string json_string = 1;
+// ============================================================================
+// Core Enums
+// ============================================================================
+
+enum LeaseStatus {
+  LEASE_STATUS_UNSPECIFIED = 0;
+  LEASE_STATUS_ACQUIRED = 1;
+  LEASE_STATUS_HELD_BY_OTHER = 2;
+  LEASE_STATUS_ERROR = 3;
+}
+
+enum InspectionPathStatusEnum {
+  INSPECTION_PATH_STATUS_UNSPECIFIED = 0;
+  INSPECTION_PATH_STATUS_PENDING = 1;
+  INSPECTION_PATH_STATUS_IRF_REACHED = 2;
+  INSPECTION_PATH_STATUS_IRF_UNREACHED = 3;
+}
+
+enum ArchivalStatus {
+  ARCHIVAL_STATUS_UNSPECIFIED = 0;
+  ARCHIVAL_STATUS_PENDING = 1;
+  ARCHIVAL_STATUS_IN_PROGRESS = 2;
+  ARCHIVAL_STATUS_COMPLETE = 3;
+  ARCHIVAL_STATUS_FAILED = 4;
+}
+
+enum GetAssignmentTableStatus {
+  GET_ASSIGNMENT_TABLE_STATUS_UNSPECIFIED = 0;
+  GET_ASSIGNMENT_TABLE_STATUS_FOUND = 1;
+  GET_ASSIGNMENT_TABLE_STATUS_NOT_FOUND = 2;
+  GET_ASSIGNMENT_TABLE_STATUS_BUILDING = 3;
+}
+
+enum PostAssignmentTableStatus {
+  POST_ASSIGNMENT_TABLE_STATUS_UNSPECIFIED = 0;
+  POST_ASSIGNMENT_TABLE_STATUS_ACCEPTED = 1;
+  POST_ASSIGNMENT_TABLE_STATUS_REJECTED = 2;
+}
+
+enum PostInspectionResultStatus {
+  POST_INSPECTION_RESULT_STATUS_UNSPECIFIED = 0;
+  POST_INSPECTION_RESULT_STATUS_ACCEPTED = 1;
+  POST_INSPECTION_RESULT_STATUS_PARTIAL = 2;
+  POST_INSPECTION_RESULT_STATUS_REJECTED = 3;
+}
+
+// ============================================================================
+// Lease Management (POST /itm/lease)
+// ============================================================================
+
+message LeaseRequest {
+  uint32 era_id = 1;
+  string inspector_key = 2;  // Public key of inspector's task manager
+  int64 ttl_seconds = 3;      // Lease time-to-live
+}
+
+message LeaseResult {
+  LeaseStatus status = 1;
+  uint32 era_id = 2;
+  string inspector_key = 3;
+  string lease_id = 4;
+  int64 expires_at = 5;       // Unix timestamp
+  string current_holder = 6;  // Populated if status == HELD_BY_OTHER
+  string error_message = 7;   // Populated if status == ERROR
+}
+
+// ============================================================================
+// Assignment Table (POST /itm/submit, GET /itm/table)
+// ============================================================================
+
+message PostAssignmentTableRequest {
+  uint32 era_id = 1;
   string inspector_key = 2;
+  AssignmentTable table = 3;
 }
 
-message ItmTableEraNotFound {
-  string error = 1;
+message PostAssignmentTableResponse {
+  PostAssignmentTableStatus status = 1;
+  uint32 era_id = 2;
+  int64 submitted_at = 3;      // Unix timestamp
+  string error_code = 4;       // Populated if status == REJECTED
+  string error_message = 5;    // Populated if status == REJECTED
 }
 
-message ItmTableEraDataCorrupted {
-  string corrupted_data = 1;
+message AssignmentTable {
+  string cluster_id = 1;       // 0x-hex encoded ClusterId
+  uint32 era = 2;
+  uint32 irf = 3;  // Inspection Redundancy Factor
+  map<string, InspectionPath> paths = 4;          // path_hash (hex string) -> InspectionPath
+  map<string, InspectorAssignments> assignments = 5;  // path_hash (hex string) -> assignments
+  uint64 collective_seed = 6;  // From multi-party commitment (salts from inspectors)
+  string builder = 7;          // Inspector's task manager that built the table
+  int64 submitted_at = 8;      // Unix timestamp
+
+  // Archival metadata (managed by system during archival to DDC cluster)
+  bytes archived_cid = 9;
+  int64 archived_at = 10;
+  ArchivalStatus archival_status = 11;
 }
 
-message ItmTableEraNotYetProcessed {
-  string current_status = 1;
+enum InspectionPathType {
+  INSPECTION_PATH_TYPE_UNSPECIFIED = 0;
+  INSPECTION_PATH_TYPE_NODE_AR = 1;
+  INSPECTION_PATH_TYPE_BUCKET_AR = 2;
 }
 
-message ItmTableWaiting {
+message NodeARPath {
+  string node_key = 1;             // Data node being inspected (0x-hex encoded NodePubKey)
+  repeated uint64 leaves_ids = 2;  // Merkle tree leaf IDs in NodeAggregate tree
+  uint32 tca_id = 3;               // Time capsule era (specific to NodeAR inspection)
 }
 
-message ItmTableBuilding {
-  string inspector_key = 1;
-  int64 remaining_millis = 2;
+message BucketARPath {
+  uint64 bucket_id = 1;            // Bucket being inspected
+  repeated uint64 leaves_pos = 2;  // Merkle tree leaf positions in BucketAggregate tree
+  uint32 tca_id = 3;               // Time capsule era (specific to BucketAR inspection)
 }
 
-message EndpointItmTable {
-  uint32 eid = 1;
-  oneof variant {
-    ItmTable table = 2;
-    ItmTableEraNotFound era_not_found = 3;
-    ItmTableEraDataCorrupted era_data_corrupted = 4;
-    ItmTableEraNotYetProcessed era_not_yet_processed = 5;
-    ItmTableWaiting table_waiting = 6;
-    ItmTableBuilding table_building = 7;
+// TODO: Consider embedding cumulative TCA usage (bytes cumulative_usage) directly
+// into InspectionPath or NodeARPath/BucketARPath. This would let payouts access
+// usage data for quorum-unreached paths without re-fetching from TCA endpoints,
+// and simplify exception building by making usage available at path construction time.
+// Trade-off: increases assignment table size for all paths.
+message InspectionPath {
+  InspectionPathType path_type = 1;        // NodeAR or BucketAR
+  repeated string collectors = 2;          // 0x-hex encoded collector node keys
+  oneof path_data {
+    NodeARPath node_ar = 3;
+    BucketARPath bucket_ar = 4;
   }
 }
 
-// POST /itm/lease  -- claims the requestor is the Inspector node that will submit the ITM table, in time.
-
-message ItmLeaseAcquired {
-  string inspector_key = 1;
+message InspectorAssignments {
+  repeated string main_inspectors = 1;   // First IRF inspectors (start immediately)
+  repeated string backup_inspectors = 2; // Backup inspectors (delayed start)
 }
 
-message ItmLeaseAlreadyInProgress {
-  string lease_holder_inspector_key = 1;
-  int64 lease_remaining_millis = 2;
+message GetAssignmentTableResponse {
+  GetAssignmentTableStatus status = 1;
+  uint32 era_id = 2;
+  AssignmentTable table = 3;       // Populated if status == FOUND
+  string lease_holder = 4;         // Populated if status == BUILDING
+  int64 lease_expires_at = 5;      // Populated if status == BUILDING
 }
 
-message ItmLeaseTableAlreadyAvailable {
-  string inspector_key = 1;
+// ============================================================================
+// Path Receipts & State (POST /itm/path, GET /itm/state)
+// ============================================================================
+
+message PostInspectionResultRequest {
+  uint32 era_id = 1;
+  string inspector_key = 2;                    // 0x-hex encoded inspector public key
+  string inspector_signature = 3;              // 0x-hex encoded Sr25519 signature over sorted result hashes
+  repeated InspectionPathResult paths_results = 4;
 }
 
-message ItmLeaseEraNotFound {
-  string error = 1;
+message Provenance {
+  string collector_key = 1;        // 0x-hex encoded collector node public key
+  bytes response_signature = 2;    // Collector's signature over the challenge response
 }
 
-message ItmLeaseEraFailedToUpdate {
-  string error = 1;
+message UnverifiedUsage {
+  bytes usage = 1;                 // Protobuf-encoded ActivityNode
+  Provenance source_collector = 2; // Collector that provided the usage data
 }
 
-message ItmLeaseEraDataCorrupted {
-  string corrupted_data = 1;
+message InspectionPathResult {
+  string path_hash = 1;            // 0x-hex encoded Blake2b-256 path hash
+  string result_hash = 2;          // 0x-hex encoded result hash
+  optional InspPathException exception = 3;  // Fraud evidence; absent = path verified/approved
+  repeated Provenance source_collectors = 4;
 }
 
-message ItmLeaseEraNotYetProcessed {
-  string current_status = 1;
+message PostInspectionResultResponse {
+  PostInspectionResultStatus status = 1;
+  int32 accepted_count = 2;
+  int32 rejected_count = 3;
+  repeated string quorum_reached_paths = 4;  // Path hashes that reached IRF quorum
+  repeated RejectedInspectionPath rejected_paths = 5;
 }
 
-message EndpointItmLease {
-  uint32 eid = 1;
-  oneof variant {
-    ItmLeaseAcquired acquired = 2;
-    ItmLeaseAlreadyInProgress already_in_progress = 3;
-    ItmLeaseTableAlreadyAvailable table_already_available = 4;
-    ItmLeaseEraNotFound era_not_found = 5;
-    ItmLeaseEraDataCorrupted era_data_corrupted = 6;
-    ItmLeaseEraFailedToUpdate era_failed_to_update = 7;
-    ItmLeaseEraNotYetProcessed era_not_yet_processed = 8;
+enum RejectionReason {
+  REJECTION_REASON_UNSPECIFIED = 0;
+  REJECTION_REASON_DUPLICATE = 1;
+  REJECTION_REASON_NOT_ASSIGNED = 2;
+  REJECTION_REASON_INVALID_PATH = 3;
+  REJECTION_REASON_ALREADY_FINALIZED = 4;
+}
+
+message RejectedInspectionPath {
+  string path_hash = 1;           // 0x-hex encoded Blake2b-256 path hash
+  RejectionReason reason = 2;
+}
+
+message InspectionState {
+  uint32 era_id = 1;
+  uint32 irf = 2;                 // Inspection Redundancy Factor (from AssignmentTable)
+  int32 total_paths = 3;
+  int32 verified_paths = 4;       // Quorum reached, no exception
+  int32 unverified_paths = 5;     // Quorum reached, with exception
+  int32 pending_paths = 6;        // Still waiting for quorum
+  map<string, InspectionPathStatus> paths = 7;  // path_hash (hex string) -> status
+
+  // Archival metadata
+  int64 updated_at = 8;           // Unix timestamp
+  bytes archived_cid = 9;
+  int64 archived_at = 10;
+  ArchivalStatus archival_status = 11;
+}
+
+message InspectionPathStatus {
+  InspectionPathStatusEnum status = 1;
+  string result_hash = 2;                      // 0x-hex encoded winning hash (if quorum reached)
+  InspPathException exception = 3;             // Fraud evidence; absent = path verified/approved
+  map<string, int32> submissions = 4;          // hash (hex string) -> inspector count
+  repeated string inspectors = 5;              // Inspectors who already submitted
+  repeated string remaining_inspectors = 6;    // Assigned inspectors who haven't submitted yet
+}
+
+// ============================================================================
+// Inspection Receipt (GET /itm/receipt)
+// ============================================================================
+
+message InspectionReceipt {
+  uint32 era_id = 1;
+  string cluster_id = 2;                           // 0x-hex encoded ClusterId
+  bool complete = 3;
+  repeated string verified_paths = 4;              // 0x-hex encoded path hashes
+  repeated UnverifiedPath unverified_paths = 5;
+  repeated string quorum_unreached_paths = 6;      // 0x-hex encoded path hashes
+  string assignments_hash = 7;                     // 0x-hex Blake2b-256 of proto-serialized AssignmentTable
+  string state_hash = 8;                           // 0x-hex Blake2b-256 of proto-serialized InspectionState
+
+  // Archival metadata
+  int64 generated_at = 9;         // Unix timestamp
+  bytes archived_cid = 10;
+  int64 archived_at = 11;
+  ArchivalStatus archival_status = 12;
+}
+
+message UnverifiedPath {
+  string path_hash = 1;            // 0x-hex encoded Blake2b-256 path hash
+  InspPathException exception = 2; // Fraud evidence
+}
+
+message InspPathException {
+  oneof kind {
+    MultipleExceptions multiple_exceptions = 1;
+    NodeARsSigUnverified node_ars_sig_unverified = 2;
+    BucketARsSigUnverified bucket_ars_sig_unverified = 3;
+    NodeARsUnavailable node_ars_unavailable = 4;
+    BucketARsUnavailable bucket_ars_unavailable = 5;
+    NodeAggregateMalformed node_aggregate_malformed = 6;
+    BucketAggregateMalformed bucket_aggregate_malformed = 7;
+    NodeTCAUsageUnavailable node_tca_usage_unavailable = 8;
+    BucketTCAUsageUnavailable bucket_tca_usage_unavailable = 9;
   }
 }
 
-// POST /itm/submit -- submits the table, if it is from the right Inspector, within the Lease.
-
-message ItmSubmitSuccess {
-  string inspector_key = 1;
+message MultipleExceptions {
+  repeated InspPathException exceptions = 1;
 }
 
-message ItmSubmitTooLate {
-  int64 now_millis = 1;
-  optional int64 lease_acquired_millis = 2;
-  optional int64 late_by_millis = 3;
+message NodeARsSigUnverified {
+  string node_key = 1;            // 0x-hex encoded NodePubKey
+  uint32 tca_id = 2;
+  repeated uint64 bad_leaves_ids = 3;
+  UnverifiedUsage unverified_usage = 4;
 }
 
-message ItmSubmitEraNotFound {
-  string error = 1;
+message BucketARsSigUnverified {
+  uint64 bucket_id = 1;
+  string node_key = 2;            // 0x-hex encoded NodePubKey
+  uint32 tca_id = 3;
+  repeated uint64 bad_leaves_ids = 4;
+  UnverifiedUsage unverified_usage = 5;
 }
 
-message ItmSubmitEraDataCorrupted {
-  string corrupted_data = 1;
+message NodeARsUnavailable {
+  string node_key = 1;            // 0x-hex encoded NodePubKey
+  uint32 tca_id = 2;
+  repeated uint64 leaves_ids = 3;
+  UnverifiedUsage unverified_usage = 4;
 }
 
-message ItmSubmitWrongInspector {
-  string expected = 1;
-  string actual = 2;
+message BucketARsUnavailable {
+  uint64 bucket_id = 1;
+  string node_key = 2;            // 0x-hex encoded NodePubKey
+  uint32 tca_id = 3;
+  repeated uint64 leaves_ids = 4;
+  UnverifiedUsage unverified_usage = 5;
 }
 
-message ItmSubmitFailedToUpdate {
-  string error = 1;
+message NodeAggregateMalformed {
+  string node_key = 1;            // 0x-hex encoded NodePubKey
+  uint32 tca_id = 2;
+  UnverifiedUsage unverified_usage = 3;
 }
 
-message EndpointItmSubmit {
-  uint32 eid = 1;
-  oneof variant {
-    ItmSubmitSuccess success = 2;
-    ItmSubmitTooLate too_late = 3;
-    ItmSubmitEraNotFound era_not_found = 4;
-    ItmSubmitEraDataCorrupted era_data_corrupted = 5;
-    ItmSubmitWrongInspector wrong_inspector = 6;
-    ItmSubmitFailedToUpdate failed_to_update = 7;
-  }
+message BucketAggregateMalformed {
+  uint64 bucket_id = 1;
+  uint32 tca_id = 2;
+  UnverifiedUsage unverified_usage = 3;
 }
 
-message PostPathSuccess {
-  string inspector = 1;
-  uint32 eid = 2;  // Era ID.
-  bool era_finalized = 3;
+message NodeTCAUsageUnavailable {
+  string node_key = 1;            // 0x-hex encoded NodePubKey
+  uint32 tca_id = 2;
+  UnverifiedUsage accessible_usage = 3;
 }
 
-message PostPathError {
-  string error_message = 101;
+message BucketTCAUsageUnavailable {
+  uint64 bucket_id = 1;
+  string node_key = 2;            // 0x-hex encoded NodePubKey
+  uint32 tca_id = 3;
+  UnverifiedUsage accessible_usage = 4;
 }
 
-message EndpointItmPostPath {
-  oneof variant {
-    PostPathSuccess success = 1;
-    PostPathError error = 2;
-  }
+// ============================================================================
+// Quorum Discovery (GET /itm/quorum)
+// ============================================================================
+
+message InspSyncQuorumInfo {
+  uint32 era_id = 1;
+  repeated InspSyncQuorumMember quorum_members = 2;
+  int32 quorum_size = 3;
+  int32 healthy_members = 4;
+  bytes election_seed = 5;
+  int64 formation_time = 6;      // Unix timestamp
+  string single_endpoint = 7;    // Populated if mode == SINGLE (not used in this version)
 }
 
-message GetPathsStateSuccess {
-  uint32 eid = 1;
-  bool era_finalized = 2;
-  uint32 paths_total = 3;
-  uint32 paths_irf_satisfied = 4;
-  repeated PathInspReceipts paths_receipts = 5;
-}
-
-message GetPathsStateError {
-  string error_message = 101;
-}
-
-message EndpointItmGetPathsState {
-  oneof variant {
-    GetPathsStateSuccess success = 1;
-    GetPathsStateError error = 2;
-  }
-}
-
-message PathInspReceipts {
-  string path_id = 1;
-  repeated PathInspReceipt receipts = 2;
-  repeated string remaining_inspectors = 3;
-}
-
-message PathInspReceipt {
-  string hash = 1;
-  uint32 counter = 2;
+message InspSyncQuorumMember {
+  string node_key = 1;
+  string http_endpoint = 2;
+  string etcd_client_url = 3;
+  bool is_leader = 4;
+  bool is_healthy = 5;
 }
