@@ -1,5 +1,6 @@
 #![allow(clippy::from_over_into)]
 
+// TODO: Remove this once migration to Protobuf is fully completed, as JSON is deprecated
 use codec::{Decode, Encode};
 use ddc_primitives::{NodePubKey, TcaEra};
 use scale_info::prelude::string::String;
@@ -42,10 +43,10 @@ pub struct SignedJsonResponse<T> {
 pub struct EHDEra {
     pub id: u32,
     pub status: String,
-    pub era_start: Option<TcaEra>,
-    pub era_end: Option<TcaEra>,
-    pub time_start: Option<i64>,
-    pub time_end: Option<i64>,
+    pub era_start: TcaEra,
+    pub era_end: TcaEra,
+    pub time_start: i64,
+    pub time_end: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Hash, Encode, Decode)]

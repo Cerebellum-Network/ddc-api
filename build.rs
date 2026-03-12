@@ -107,6 +107,7 @@ fn main() -> Result<()> {
             format!("{proto_dir}/signature/signature.proto"),
             format!("{proto_dir}/auth/token.proto"),
             format!("{proto_dir}/activity/record.proto"),
+            format!("{proto_dir}/activity/tree/common.proto"),
             format!("{proto_dir}/activity/tree/node.proto"),
             format!("{proto_dir}/activity/tree/bucket.proto"),
             format!("{proto_dir}/activity/tree/tca.proto"),
