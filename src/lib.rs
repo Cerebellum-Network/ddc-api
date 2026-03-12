@@ -517,7 +517,7 @@ pub mod proto {
     pub use self::inspection::InspectionReceipt;
     pub use self::inspection::InspPathException;
     pub use self::inspection::insp_path_exception;
-    pub type ProtoUnverifiedPath = inspection::UnverifiedPath;
+    pub use self::inspection::UnverifiedPath;
 
 
     impl InspectionReceipt {
