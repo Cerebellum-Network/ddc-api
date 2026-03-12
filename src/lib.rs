@@ -12,8 +12,19 @@ pub mod proto {
         include!(concat!(env!("OUT_DIR"), "/signature.rs"));
     }
 
+    pub mod auth {
+        include!(concat!(env!("OUT_DIR"), "/auth.rs"));
+    }
+
     pub mod activity {
         include!(concat!(env!("OUT_DIR"), "/activity.rs"));
+
+        // Backward compatibility: AuthToken, Payload, Operation moved to proto::auth
+        pub use super::auth::{AuthToken, Payload, Operation};
+    }
+
+    pub mod era {
+        include!(concat!(env!("OUT_DIR"), "/era.rs"));
     }
 
     pub mod inspection {
