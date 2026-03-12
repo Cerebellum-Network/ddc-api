@@ -11,6 +11,14 @@ fn main() -> Result<()> {
         "#[derive(Eq, PartialOrd, Ord)]",
     );
     prost_build.type_attribute(
+        "activity_tree.EhdCustomerBucketAggregate",
+        "#[derive(Eq, PartialOrd, Ord)]",
+    );
+    prost_build.type_attribute(
+        "activity_tree.EhdTreeNodeCustomerBucketAggregate",
+        "#[derive(Eq, PartialOrd, Ord)]",
+    );
+    prost_build.type_attribute(
         "activity_tree.EhdTreeNodeCustomerAggregate",
         "#[derive(Eq, PartialOrd, Ord)]",
     );
