@@ -102,6 +102,14 @@ fn main() -> Result<()> {
         "activity_tree.EhdPayload",
         "#[derive(Eq, PartialOrd)]",
     );
+    prost_build.type_attribute(
+        "inspection.VerifiedUsage",
+        "#[derive(Eq, PartialOrd, Ord)]",
+    );
+    prost_build.type_attribute(
+        "inspection.EraVerifiedUsage",
+        "#[derive(Eq, PartialOrd, Ord)]",
+    );
     // Use BTreeMap instead of HashMap for map fields in inspection
     // (required for no_std compatibility since HashMap is not available)
     prost_build.btree_map(&[
