@@ -1,11 +1,21 @@
 use std::io::Result;
 
 fn main() -> Result<()> {
+    let proto_dir = "third_party/ddc-proto/proto";
+
     let mut prost_build = prost_build::Config::new();
     prost_build.protoc_arg("--experimental_allow_proto3_optional");
 
     prost_build.type_attribute(
         "activity_tree.EhdTreeTraversedNode",
+        "#[derive(Eq, PartialOrd, Ord)]",
+    );
+    prost_build.type_attribute(
+        "activity_tree.EhdCustomerBucketAggregate",
+        "#[derive(Eq, PartialOrd, Ord)]",
+    );
+    prost_build.type_attribute(
+        "activity_tree.EhdTreeNodeCustomerBucketAggregate",
         "#[derive(Eq, PartialOrd, Ord)]",
     );
     prost_build.type_attribute(
@@ -92,6 +102,14 @@ fn main() -> Result<()> {
         "activity_tree.EhdPayload",
         "#[derive(Eq, PartialOrd)]",
     );
+    prost_build.type_attribute(
+        "inspection.VerifiedUsage",
+        "#[derive(Eq, PartialOrd, Ord)]",
+    );
+    prost_build.type_attribute(
+        "inspection.EraVerifiedUsage",
+        "#[derive(Eq, PartialOrd, Ord)]",
+    );
     // Use BTreeMap instead of HashMap for map fields in inspection
     // (required for no_std compatibility since HashMap is not available)
     prost_build.btree_map(&[
@@ -102,12 +120,20 @@ fn main() -> Result<()> {
 
     prost_build.compile_protos(
         &[
-            "src/protos/signature.proto",
-            "src/protos/activity.proto",
-            "src/protos/inspection.proto",
-            "src/protos/activity_tree.proto",
+            format!("{proto_dir}/signature/signature.proto"),
+            format!("{proto_dir}/auth/token.proto"),
+            format!("{proto_dir}/activity/record.proto"),
+            format!("{proto_dir}/activity/tree/common.proto"),
+            format!("{proto_dir}/activity/tree/node.proto"),
+            format!("{proto_dir}/activity/tree/bucket.proto"),
+            format!("{proto_dir}/activity/tree/tca.proto"),
+            format!("{proto_dir}/activity/tree/phd.proto"),
+            format!("{proto_dir}/activity/tree/ehd.proto"),
+            format!("{proto_dir}/inspection/inspection.proto"),
+            format!("{proto_dir}/inspection/challenge.proto"),
+            format!("{proto_dir}/era/era.proto"),
         ],
-        &["src/"],
+        &[proto_dir],
     )?;
     Ok(())
 }

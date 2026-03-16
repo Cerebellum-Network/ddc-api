@@ -12,8 +12,19 @@ pub mod proto {
         include!(concat!(env!("OUT_DIR"), "/signature.rs"));
     }
 
+    pub mod auth {
+        include!(concat!(env!("OUT_DIR"), "/auth.rs"));
+    }
+
     pub mod activity {
         include!(concat!(env!("OUT_DIR"), "/activity.rs"));
+
+        // Backward compatibility: AuthToken, Payload, Operation moved to proto::auth
+        pub use super::auth::{AuthToken, Payload, Operation};
+    }
+
+    pub mod era {
+        include!(concat!(env!("OUT_DIR"), "/era.rs"));
     }
 
     pub mod inspection {
@@ -506,7 +517,7 @@ pub mod proto {
     pub use self::inspection::InspectionReceipt;
     pub use self::inspection::InspPathException;
     pub use self::inspection::insp_path_exception;
-    pub type ProtoUnverifiedPath = inspection::UnverifiedPath;
+    pub use self::inspection::UnverifiedPath;
 
 
     impl InspectionReceipt {

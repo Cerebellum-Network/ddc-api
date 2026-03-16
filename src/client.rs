@@ -258,7 +258,7 @@ impl<'a> DdcClient<'a> {
         bucket_id: BucketId,
         node_id: &str,
         merkle_tree_node_id: Vec<u64>,
-    ) -> Result<ApiResponse<proto::activity::ChallengeResponse>, http::Error> {
+    ) -> Result<ApiResponse<proto::inspection::ChallengeResponse>, http::Error> {
         let mut url = format!(
             "{}/activity/buckets/{}/challenge?tcaId={}&nodeId={}&merkleTreeNodeId={}",
             self.base_url,
@@ -271,8 +271,8 @@ impl<'a> DdcClient<'a> {
         let (response, signed_by) = fetch_and_parse_proto!(
             self,
             url,
-            proto::activity::ChallengeResponse,
-            proto::activity::ChallengeResponse
+            proto::inspection::ChallengeResponse,
+            proto::inspection::ChallengeResponse
         )?;
 
         let api_response = ApiResponse {
@@ -288,7 +288,7 @@ impl<'a> DdcClient<'a> {
         era_id: TcaEra,
         node_id: &str,
         merkle_tree_node_id: Vec<u64>,
-    ) -> Result<ApiResponse<proto::activity::ChallengeResponse>, http::Error> {
+    ) -> Result<ApiResponse<proto::inspection::ChallengeResponse>, http::Error> {
         let mut url = format!(
             "{}/activity/nodes/{}/challenge?tcaId={}&merkleTreeNodeId={}",
             self.base_url,
@@ -300,8 +300,8 @@ impl<'a> DdcClient<'a> {
         let (response, signed_by) = fetch_and_parse_proto!(
             self,
             url,
-            proto::activity::ChallengeResponse,
-            proto::activity::ChallengeResponse
+            proto::inspection::ChallengeResponse,
+            proto::inspection::ChallengeResponse
         )?;
 
         let api_response = ApiResponse {

@@ -356,7 +356,7 @@ pub fn fetch_bucket_challenge_response<
     bucket_id: BucketId,
     tree_node_ids: Vec<u64>,
     verify_sig: bool,
-) -> Result<ApiResponse<proto::activity::ChallengeResponse>, ApiError> {
+) -> Result<ApiResponse<proto::inspection::ChallengeResponse>, ApiError> {
     let (collector_key, collector_params) =
         get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
     let host =
@@ -410,7 +410,7 @@ pub fn fetch_node_challenge_response<
     node_key: NodePubKey,
     tree_node_ids: Vec<u64>,
     verify_sig: bool,
-) -> Result<ApiResponse<proto::activity::ChallengeResponse>, ApiError> {
+) -> Result<ApiResponse<proto::inspection::ChallengeResponse>, ApiError> {
     let (collector_key, collector_params) =
         get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
     let host =

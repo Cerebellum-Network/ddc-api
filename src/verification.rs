@@ -101,7 +101,7 @@ impl Verify for proto::activity::ActivityFulfillment {
     }
 }
 
-impl Verify for proto::activity::challenge_response::proof::Record {
+impl Verify for proto::inspection::challenge_response::proof::Record {
     type VerificationResult = bool;
 
     fn verify(&self) -> bool {
@@ -118,7 +118,7 @@ pub struct LeavesChallengeResult {
     pub unverified_leaves: Vec<u64>,
 }
 
-impl Verify for proto::activity::ChallengeResponse {
+impl Verify for proto::inspection::ChallengeResponse {
     type VerificationResult = LeavesChallengeResult;
 
     fn verify(&self) -> LeavesChallengeResult {
@@ -127,7 +127,7 @@ impl Verify for proto::activity::ChallengeResponse {
         for proof in self.proofs.iter() {
             for leaf in proof.leaves.iter() {
                 if let Some(
-                    proto::activity::challenge_response::proof::leaf::LeafVariant::Record(record),
+                    proto::inspection::challenge_response::proof::leaf::LeafVariant::Record(record),
                 ) = &leaf.leaf_variant
                 {
                     if !record.verify() {
@@ -348,7 +348,7 @@ mod tests {
         let challenge_response_serialized =
             include_bytes!("./test_data/challenge_response.pb").as_slice();
         let challenge_response =
-            proto::activity::ChallengeResponse::decode(challenge_response_serialized)
+            proto::inspection::ChallengeResponse::decode(challenge_response_serialized)
                 .expect("protobuf fixture decoding failed, fix the test data");
 
         let result = challenge_response.verify();
