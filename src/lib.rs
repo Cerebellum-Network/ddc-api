@@ -614,14 +614,14 @@ pub mod proto {
                     ActivityNode::default(),
                     |mut acc, provider| {
                         if let Some(usage) = &provider.provided_usage {
-                            acc.stored += usage.stored;
-                            acc.transferred += usage.transferred;
-                            acc.put_count += usage.put_count;
-                            acc.get_count += usage.get_count;
-                            acc.cpu_units += usage.cpu_units;
-                            acc.gpu_units += usage.gpu_units;
-                            acc.ram_units += usage.ram_units;
-                            acc.compute_count += usage.compute_count;
+                            acc.stored = acc.stored.saturating_add(usage.stored);
+                            acc.transferred = acc.transferred.saturating_add(usage.transferred);
+                            acc.put_count = acc.put_count.saturating_add(usage.put_count);
+                            acc.get_count = acc.get_count.saturating_add(usage.get_count);
+                            acc.cpu_units = acc.cpu_units.saturating_add(usage.cpu_units);
+                            acc.gpu_units = acc.gpu_units.saturating_add(usage.gpu_units);
+                            acc.ram_units = acc.ram_units.saturating_add(usage.ram_units);
+                            acc.compute_count = acc.compute_count.saturating_add(usage.compute_count);
                         }
                         acc
                     },
