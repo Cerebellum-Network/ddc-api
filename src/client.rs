@@ -4,7 +4,7 @@
 use api::{ApiResponse, SignedBy};
 use ddc_primitives::{BucketId, ClusterId, EHDId, EhdEra, NodePubKey, PHDId, TcaEra};
 use prost::Message;
-use scale_info::prelude::{collections::BTreeMap, format, string::String, vec::Vec};
+use scale_info::prelude::{format, string::String, vec::Vec};
 use sp_io::offchain::timestamp;
 use sp_runtime::offchain::{http, Duration};
 use sp_std::vec;
@@ -17,6 +17,7 @@ pub struct DdcClient<'a> {
     timeout: Duration,
     retries: u32,
     verify_sig: bool,
+    dry_run: bool,
 }
 
 macro_rules! fetch_and_parse_json {
@@ -148,6 +149,25 @@ impl<'a> DdcClient<'a> {
             timeout,
             retries,
             verify_sig,
+            dry_run: false,
+        }
+    }
+
+    pub fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
+        self
+    }
+
+    fn insp_mem_url(&self, path: &str) -> String {
+        let url = format!("{}{}", self.base_url, path);
+        if self.dry_run {
+            if url.contains('?') {
+                format!("{}&dryRun=true", url)
+            } else {
+                format!("{}?dryRun=true", url)
+            }
+        } else {
+            url
         }
     }
 
@@ -157,7 +177,7 @@ impl<'a> DdcClient<'a> {
         prev_token: Option<BucketId>,
         limit: Option<u32>,
     ) -> Result<ApiResponse<proto::activity_tree::BucketAggregatesResponse>, http::Error> {
-        let mut url = format!("{}/activity/buckets?eraId={}", self.base_url, era_id);
+        let mut url = format!("{}/activity/buckets?tcaId={}", self.base_url, era_id);
         if let Some(prev_token) = prev_token {
             url = format!("{}&prevToken={}", url, prev_token);
         }
@@ -180,15 +200,67 @@ impl<'a> DdcClient<'a> {
         Ok(api_response)
     }
 
+    pub fn bucket_aggregate(
+        &self,
+        era_id: TcaEra,
+        bucket_id: BucketId,
+    ) -> Result<ApiResponse<proto::activity_tree::BucketAggregatesResponse>, http::Error> {
+        let mut url = format!(
+            "{}/activity/buckets/{}?tcaId={}",
+            self.base_url, bucket_id, era_id
+        );
+
+        let (response, signed_by) = fetch_and_parse_proto!(
+            self,
+            url,
+            proto::activity_tree::BucketAggregatesResponse,
+            proto::activity_tree::BucketAggregatesResponse
+        )?;
+
+        let api_response = ApiResponse {
+            response,
+            signed_by,
+        };
+
+        Ok(api_response)
+    }
+
+    pub fn node_aggregate(
+        &self,
+        era_id: TcaEra,
+        node_key: NodePubKey,
+    ) -> Result<ApiResponse<proto::activity_tree::NodeAggregatesResponse>, http::Error> {
+        let mut url = format!(
+            "{}/activity/nodes/{}?tcaId={}",
+            self.base_url,
+            <NodePubKey as Into<String>>::into(node_key),
+            era_id
+        );
+
+        let (response, signed_by) = fetch_and_parse_proto!(
+            self,
+            url,
+            proto::activity_tree::NodeAggregatesResponse,
+            proto::activity_tree::NodeAggregatesResponse
+        )?;
+
+        let api_response = ApiResponse {
+            response,
+            signed_by,
+        };
+
+        Ok(api_response)
+    }
+
     pub fn challenge_bucket_sub_aggregate(
         &self,
         era_id: TcaEra,
         bucket_id: BucketId,
         node_id: &str,
         merkle_tree_node_id: Vec<u64>,
-    ) -> Result<ApiResponse<proto::activity::ChallengeResponse>, http::Error> {
+    ) -> Result<ApiResponse<proto::inspection::ChallengeResponse>, http::Error> {
         let mut url = format!(
-            "{}/activity/buckets/{}/challenge?eraId={}&nodeId={}&merkleTreeNodeId={}",
+            "{}/activity/buckets/{}/challenge?tcaId={}&nodeId={}&merkleTreeNodeId={}",
             self.base_url,
             bucket_id,
             era_id,
@@ -199,8 +271,8 @@ impl<'a> DdcClient<'a> {
         let (response, signed_by) = fetch_and_parse_proto!(
             self,
             url,
-            proto::activity::ChallengeResponse,
-            proto::activity::ChallengeResponse
+            proto::inspection::ChallengeResponse,
+            proto::inspection::ChallengeResponse
         )?;
 
         let api_response = ApiResponse {
@@ -216,9 +288,9 @@ impl<'a> DdcClient<'a> {
         era_id: TcaEra,
         node_id: &str,
         merkle_tree_node_id: Vec<u64>,
-    ) -> Result<ApiResponse<proto::activity::ChallengeResponse>, http::Error> {
+    ) -> Result<ApiResponse<proto::inspection::ChallengeResponse>, http::Error> {
         let mut url = format!(
-            "{}/activity/nodes/{}/challenge?eraId={}&merkleTreeNodeId={}",
+            "{}/activity/nodes/{}/challenge?tcaId={}&merkleTreeNodeId={}",
             self.base_url,
             node_id,
             era_id,
@@ -228,8 +300,8 @@ impl<'a> DdcClient<'a> {
         let (response, signed_by) = fetch_and_parse_proto!(
             self,
             url,
-            proto::activity::ChallengeResponse,
-            proto::activity::ChallengeResponse
+            proto::inspection::ChallengeResponse,
+            proto::inspection::ChallengeResponse
         )?;
 
         let api_response = ApiResponse {
@@ -240,12 +312,12 @@ impl<'a> DdcClient<'a> {
         Ok(api_response)
     }
 
-    pub fn eras(
+    pub fn tcas(
         &self,
         prev: Option<EhdEra>,
         limit: Option<u32>,
     ) -> Result<ApiResponse<Vec<json::AggregationEraResponse>>, http::Error> {
-        let mut url = format!("{}/activity/eras", self.base_url);
+        let mut url = format!("{}/activity/tcas", self.base_url);
         if let Some(prev) = prev {
             url = format!("{}?prevToken={}", url, prev);
         }
@@ -272,12 +344,12 @@ impl<'a> DdcClient<'a> {
         Ok(api_response)
     }
 
-    pub fn activity_eras(
+    pub fn eras(
         &self,
         prev: Option<EhdEra>,
         limit: Option<u32>,
     ) -> Result<ApiResponse<Vec<json::EHDEra>>, http::Error> {
-        let mut url = format!("{}/activity/payment-eras", self.base_url);
+        let mut url = format!("{}/activity/eras", self.base_url);
         if let Some(prev) = prev {
             url = format!("{}?prevToken={}", url, prev);
         }
@@ -304,9 +376,8 @@ impl<'a> DdcClient<'a> {
         &self,
         prev: Option<EhdEra>,
         limit: Option<u32>,
-        dry_run: bool,
     ) -> Result<ApiResponse<Vec<json::EHDEra>>, http::Error> {
-        let mut url = format!("{}/itm/inspected-eras", self.base_url);
+        let mut url = format!("{}/activity/inspected-eras", self.base_url);
         if let Some(prev) = prev {
             url = format!("{}?prevToken={}", url, prev);
         }
@@ -317,34 +388,19 @@ impl<'a> DdcClient<'a> {
                 url = format!("{}?limit={}", url, limit);
             }
         }
-        
-        if dry_run {
-            if url.contains('?') {
-                url = format!("{}&dryRun=true", url);
-            } else {
-                url = format!("{}?dryRun=true", url);
-            }
-        }
 
         let (response, signed_by) =
             fetch_and_parse_json!(self, url, Vec<json::EHDEra>, Vec<json::EHDEra>)?;
 
-        let api_response = ApiResponse {
-            response,
-            signed_by,
-        };
-
-        Ok(api_response)
+        Ok(ApiResponse { response, signed_by })
     }
-
 
     pub fn processed_eras(
         &self,
         prev: Option<EhdEra>,
         limit: Option<u32>,
-        dry_run: bool,
     ) -> Result<ApiResponse<Vec<json::EHDEra>>, http::Error> {
-        let mut url = format!("{}/itm/processed-eras", self.base_url);
+        let mut url = format!("{}/activity/processed-eras", self.base_url);
         if let Some(prev) = prev {
             url = format!("{}?prevToken={}", url, prev);
         }
@@ -355,24 +411,57 @@ impl<'a> DdcClient<'a> {
                 url = format!("{}?limit={}", url, limit);
             }
         }
-        
-        if dry_run {
+
+        let (response, signed_by) =
+            fetch_and_parse_json!(self, url, Vec<json::EHDEra>, Vec<json::EHDEra>)?;
+
+        Ok(ApiResponse { response, signed_by })
+    }
+
+    pub fn dry_run_inspected_eras(
+        &self,
+        prev: Option<EhdEra>,
+        limit: Option<u32>,
+    ) -> Result<ApiResponse<Vec<json::EHDEra>>, http::Error> {
+        let mut url = format!("{}/itm/dry-run/inspected-eras", self.base_url);
+        if let Some(prev) = prev {
+            url = format!("{}?prevToken={}", url, prev);
+        }
+        if let Some(limit) = limit {
             if url.contains('?') {
-                url = format!("{}&dryRun=true", url);
+                url = format!("{}&limit={}", url, limit);
             } else {
-                url = format!("{}?dryRun=true", url);
+                url = format!("{}?limit={}", url, limit);
             }
         }
 
         let (response, signed_by) =
             fetch_and_parse_json!(self, url, Vec<json::EHDEra>, Vec<json::EHDEra>)?;
 
-        let api_response = ApiResponse {
-            response,
-            signed_by,
-        };
+        Ok(ApiResponse { response, signed_by })
+    }
 
-        Ok(api_response)
+    pub fn dry_run_processed_eras(
+        &self,
+        prev: Option<EhdEra>,
+        limit: Option<u32>,
+    ) -> Result<ApiResponse<Vec<json::EHDEra>>, http::Error> {
+        let mut url = format!("{}/itm/dry-run/processed-eras", self.base_url);
+        if let Some(prev) = prev {
+            url = format!("{}?prevToken={}", url, prev);
+        }
+        if let Some(limit) = limit {
+            if url.contains('?') {
+                url = format!("{}&limit={}", url, limit);
+            } else {
+                url = format!("{}?limit={}", url, limit);
+            }
+        }
+
+        let (response, signed_by) =
+            fetch_and_parse_json!(self, url, Vec<json::EHDEra>, Vec<json::EHDEra>)?;
+
+        Ok(ApiResponse { response, signed_by })
     }
 
     pub fn traverse_era_historical_document(
@@ -446,7 +535,7 @@ impl<'a> DdcClient<'a> {
         levels: u16,
     ) -> Result<ApiResponse<proto::activity_tree::ActivityTreeTraversalResponse>, http::Error> {
         let mut url = format!(
-            "{}/activity/nodes/{}/traverse?eraId={}&merkleTreeNodeId={}&levels={}",
+            "{}/activity/nodes/{}/traverse?tcaId={}&merkleTreeNodeId={}&levels={}",
             self.base_url,
             <NodePubKey as Into<String>>::into(node_key),
             tca_id,
@@ -478,7 +567,7 @@ impl<'a> DdcClient<'a> {
         levels: u16,
     ) -> Result<ApiResponse<proto::activity_tree::ActivityTreeTraversalResponse>, http::Error> {
         let mut url = format!(
-            "{}/activity/buckets/{}/traverse?eraId={}&nodeId={}&merkleTreeNodeId={}&levels={}",
+            "{}/activity/buckets/{}/traverse?tcaId={}&nodeId={}&merkleTreeNodeId={}&levels={}",
             self.base_url,
             bucket_id,
             tca_id,
@@ -510,76 +599,156 @@ impl<'a> DdcClient<'a> {
             .join(",")
     }
 
+
+    // ========================================================================
+    // Inspection Client Methods (inspection protobuf types)
+    // ========================================================================
+    // These methods use the new etcd-based sync quorum API with full protobuf
+    // serialization for both request and response bodies.
+
+    /// POST /itm/lease - Acquire exclusive lease for building assignment table (protobuf)
+    pub fn post_itm_lease(
+        &self,
+        request: &proto::inspection::LeaseRequest,
+    ) -> Result<proto::inspection::LeaseResult, http::Error> {
+        let url = self.insp_mem_url("/itm/lease");
+        let body = request.encode_to_vec();
+
+        let response = self.post_proto(&url, body)?;
+        let body = response.body().collect::<Vec<u8>>();
+
+        proto::inspection::LeaseResult::decode(body.as_slice()).map_err(|e| {
+            log!(error, "❌ Failed to decode LeaseResult protobuf: {:?}", e);
+            http::Error::Unknown
+        })
+    }
+
+    /// POST /itm/submit - Submit completed assignment table (protobuf)
+    pub fn submit_assignments_table(
+        &self,
+        request: &proto::inspection::PostAssignmentTableRequest,
+    ) -> Result<proto::inspection::PostAssignmentTableResponse, http::Error> {
+        let url = self.insp_mem_url("/itm/submit");
+        let body = request.encode_to_vec();
+
+        let response = self.post_proto(&url, body)?;
+        let body = response.body().collect::<Vec<u8>>();
+
+        proto::inspection::PostAssignmentTableResponse::decode(body.as_slice()).map_err(
+            |e| {
+                log!(
+                    error,
+                    "❌ Failed to decode PostAssignmentTableResponse protobuf: {:?}",
+                    e
+                );
+                http::Error::Unknown
+            },
+        )
+    }
+
+    /// GET /itm/table - Retrieve assignment table (protobuf)
+    pub fn get_assignments_table(
+        &self,
+        era: EhdEra,
+    ) -> Result<proto::inspection::GetAssignmentTableResponse, http::Error> {
+        let url = self.insp_mem_url(&format!("/itm/table?eraId={}", era));
+
+        let response = self.get(&url, Accept::Protobuf)?;
+        let body = response.body().collect::<Vec<u8>>();
+
+        proto::inspection::GetAssignmentTableResponse::decode(body.as_slice()).map_err(
+            |e| {
+                log!(
+                    error,
+                    "❌ Failed to decode GetAssignmentTableResponse protobuf: {:?}",
+                    e
+                );
+                http::Error::Unknown
+            },
+        )
+    }
+
+    /// POST /itm/path - Submit inspection path results (protobuf)
+    pub fn submit_inspection_result(
+        &self,
+        request: &proto::inspection::PostInspectionResultRequest,
+    ) -> Result<proto::inspection::PostInspectionResultResponse, http::Error> {
+        let url = self.insp_mem_url("/itm/path");
+        let body = request.encode_to_vec();
+
+        let response = self.post_proto(&url, body)?;
+        let body = response.body().collect::<Vec<u8>>();
+
+        proto::inspection::PostInspectionResultResponse::decode(body.as_slice()).map_err(
+            |e| {
+                log!(
+                    error,
+                    "❌ Failed to decode PostInspectionResultResponse protobuf: {:?}",
+                    e
+                );
+                http::Error::Unknown
+            },
+        )
+    }
+
+    /// GET /itm/state - Retrieve inspection state (protobuf)
     pub fn get_inspection_state(
         &self,
         era: EhdEra,
-        dry_run: bool,
-    ) -> Result<proto::inspection::EndpointItmGetPathsState, http::Error> {
-        let mut url = format!("{}/itm/state?eraId={}", self.base_url, era);
-        
-        if dry_run {
-            url = format!("{}&dryRun=true", url);
-        }
+    ) -> Result<proto::inspection::InspectionState, http::Error> {
+        let url = self.insp_mem_url(&format!("/itm/state?eraId={}", era));
+
         let response = self.get(&url, Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
-        let proto_response = proto::inspection::EndpointItmGetPathsState::decode(body.as_slice())
-            .map_err(|e| {
-            log!(error, "❌ Decode ITM Path Report protobuf error: {:?}", e);
+
+        proto::inspection::InspectionState::decode(body.as_slice()).map_err(|e| {
+            log!(
+                error,
+                "❌ Failed to decode InspectionState protobuf: {:?}",
+                e
+            );
             http::Error::Unknown
-        })?;
-
-        Ok(proto_response)
+        })
     }
 
-    pub fn submit_inspection_report(
-        &self,
-        report_json_str: String,
-        dry_run: bool,
-    ) -> Result<proto::inspection::EndpointItmPostPath, http::Error> {
-        let mut url = format!("{}/itm/path", self.base_url);
-        
-        if dry_run {
-            url = format!("{}?dryRun=true", url);
-        }
-        let body = report_json_str;
-
-        let response = self.post(&url, body.into(), Accept::Protobuf)?;
-        let body = response.body().collect::<Vec<u8>>();
-
-        let proto_response = proto::inspection::EndpointItmPostPath::decode(body.as_slice())
-            .map_err(|_| http::Error::Unknown)?;
-        Ok(proto_response)
-    }
-
-    pub fn fetch_inspection_exceptions(
+    /// GET /itm/receipt - Retrieve inspection receipt (protobuf)
+    pub fn get_inspection_receipt(
         &self,
         era: EhdEra,
-        dry_run: bool,
-    ) -> Result<BTreeMap<String, BTreeMap<String, json::InspPathException>>, http::Error> {
-        let mut url = format!("{}/itm/exception?eraId={}", self.base_url, era);
-        
-        if dry_run {
-            url = format!("{}&dryRun=true", url);
-        }
-        let (response, _) = fetch_and_parse_json!(
-            self,
-            url,
-            BTreeMap<String, BTreeMap<String, json::InspPathException>>,
-            BTreeMap<String, BTreeMap<String, json::InspPathException>>
-        )?;
+    ) -> Result<proto::inspection::InspectionReceipt, http::Error> {
+        let url = self.insp_mem_url(&format!("/itm/receipt?eraId={}", era));
 
-        Ok(response)
+        let response = self.get(&url, Accept::Protobuf)?;
+        let body = response.body().collect::<Vec<u8>>();
+
+        proto::inspection::InspectionReceipt::decode(body.as_slice()).map_err(|e| {
+            log!(
+                error,
+                "❌ Failed to decode InspectionReceipt protobuf: {:?}",
+                e
+            );
+            http::Error::Unknown
+        })
     }
 
-    pub fn get_inspection_summary(&self, era: EhdEra, dry_run: bool) -> Result<json::InspSummary, http::Error> {
-        let mut url = format!("{}/itm/summary?eraId={}", self.base_url, era);
-        
-        if dry_run {
-            url = format!("{}&dryRun=true", url);
-        }
-        let (response, _) = fetch_and_parse_json!(self, url, json::InspSummary, json::InspSummary)?;
+    /// GET /itm/quorum - Retrieve quorum information (protobuf)
+    pub fn get_quorum_info(
+        &self,
+        era: EhdEra,
+    ) -> Result<proto::inspection::InspSyncQuorumInfo, http::Error> {
+        let url = format!("{}/itm/quorum?eraId={}", self.base_url, era);
 
-        Ok(response)
+        let response = self.get(&url, Accept::Protobuf)?;
+        let body = response.body().collect::<Vec<u8>>();
+
+        proto::inspection::InspSyncQuorumInfo::decode(body.as_slice()).map_err(|e| {
+            log!(
+                error,
+                "❌ Failed to decode InspSyncQuorumInfo protobuf: {:?}",
+                e
+            );
+            http::Error::Unknown
+        })
     }
 
     pub fn get_grouping_collectors(&self) -> Result<json::GCollectorsResponse, http::Error> {
@@ -592,77 +761,6 @@ impl<'a> DdcClient<'a> {
         )?;
 
         Ok(response)
-    }
-
-    pub fn submit_assignments_table(
-        &self,
-        era: EhdEra,
-        table_json_str: String, /* todo(yahortsaryk): add .proto definition for
-                                 * `InspAssignmentsTable` type */
-        inspector_hex: String,
-        dry_run: bool,
-    ) -> Result<proto::inspection::EndpointItmSubmit, http::Error> {
-        let mut url = format!(
-            "{}/itm/submit?eraId={}&inspectorKey={}",
-            self.base_url, era, inspector_hex
-        );
-        
-        if dry_run {
-            url = format!("{}&dryRun=true", url);
-        }
-        let body = table_json_str;
-
-        let response = self.post(&url, body.into(), Accept::Protobuf)?;
-        let body = response.body().collect::<Vec<u8>>();
-
-        let proto_response = proto::inspection::EndpointItmSubmit::decode(body.as_slice())
-            .map_err(|_| http::Error::Unknown)?;
-        Ok(proto_response)
-    }
-
-    pub fn get_assignments_table(
-        &self,
-        era: EhdEra,
-        dry_run: bool,
-    ) -> Result<proto::inspection::EndpointItmTable, http::Error> {
-        let mut url = format!("{}/itm/table?eraId={}", self.base_url, era);
-        
-        if dry_run {
-            url = format!("{}&dryRun=true", url);
-        }
-        let response = self.get(&url, Accept::Protobuf)?;
-        let body = response.body().collect::<Vec<u8>>();
-
-        let proto_response = proto::inspection::EndpointItmTable::decode(body.as_slice())
-            .map_err(|_| http::Error::Unknown)?;
-        Ok(proto_response)
-    }
-
-    pub fn post_itm_lease(
-        &self,
-        era: EhdEra,
-        inspector_hex: String,
-        dry_run: bool,
-    ) -> Result<proto::inspection::EndpointItmLease, http::Error> {
-        let mut url = format!(
-            "{}/itm/lease?eraId={}&inspectorKey={}",
-            self.base_url, era, inspector_hex
-        );
-        
-        if dry_run {
-            url = format!("{}&dryRun=true", url);
-        }
-
-        let json = serde_json::json!({ "inspector_key": inspector_hex });
-        let body = serde_json::to_string(&json).expect("Assignments table to be encoded");
-
-        let response = self.post(&url, body.into(), Accept::Protobuf)?;
-        let body = response.body().collect::<Vec<u8>>();
-
-        let proto_response = proto::inspection::EndpointItmLease::decode(body.as_slice())
-            .map_err(|_| http::Error::Unknown)?;
-
-        Ok(proto_response)
     }
 
     fn get(&self, url: &str, accept: Accept) -> Result<http::Response, http::Error> {
@@ -738,6 +836,90 @@ impl<'a> DdcClient<'a> {
         }
 
         log!(trace, "HTTP GET request to {:?} completed", url,);
+
+        Ok(response)
+    }
+
+    /// Send a POST request with protobuf-encoded body (Content-Type: application/protobuf)
+    /// and expect a protobuf response (Accept: application/protobuf).
+    /// Used by inspection client methods for the new etcd-based sync quorum API.
+    fn post_proto(
+        &self,
+        url: &str,
+        request_body: Vec<u8>,
+    ) -> Result<http::Response, http::Error> {
+        let mut maybe_response = None;
+
+        let deadline = timestamp().add(self.timeout);
+        let mut error = None;
+
+        for i in 0..self.retries {
+            log!(
+                trace,
+                "Sending HTTP POST (protobuf) request to {:?}, attempt: {:?}",
+                url,
+                i + 1
+            );
+            let request = http::Request::post(url, vec![request_body.clone()])
+                .add_header("content-type", "application/protobuf")
+                .add_header("Accept", "application/protobuf");
+
+            let pending = request
+                .deadline(deadline)
+                .body(vec![request_body.clone()])
+                .send()
+                .map_err(|_| http::Error::IoError)?;
+
+            match pending.try_wait(deadline) {
+                Ok(Ok(r)) => {
+                    maybe_response = Some(r);
+                    error = None;
+                    break;
+                }
+                Ok(Err(_)) | Err(_) => {
+                    error = Some(http::Error::DeadlineReached);
+                    continue;
+                }
+            }
+        }
+
+        if let Some(e) = error {
+            log!(
+                error,
+                "❌ HTTP POST (protobuf) client error for url {:?}, error {:?}",
+                url,
+                e
+            );
+            return Err(e);
+        }
+
+        let response = match maybe_response {
+            Some(r) => r,
+            None => {
+                log!(
+                    error,
+                    "❌ HTTP POST (protobuf) client error for url {:?}, no response",
+                    url
+                );
+                return Err(http::Error::Unknown);
+            }
+        };
+
+        if response.code >= 500 {
+            log!(
+                error,
+                "❌ HTTP POST (protobuf) client error for url {:?}, status code is {:?}",
+                url,
+                response.code
+            );
+            return Err(http::Error::Unknown);
+        }
+
+        log!(
+            trace,
+            "HTTP POST (protobuf) request to {:?} completed",
+            url,
+        );
 
         Ok(response)
     }

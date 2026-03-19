@@ -11,7 +11,7 @@ use scale_info::{
 };
 use serde::{Deserialize, Serialize};
 use sp_runtime::offchain::{http, Duration};
-use sp_std::{collections::btree_map::BTreeMap, prelude::*};
+use sp_std::prelude::*;
 use ddc_primitives::StorageNodeMode;
 
 use crate::{
@@ -72,6 +72,11 @@ pub enum ApiError {
     FailedToFetchBucketAggregates {
         cluster_id: ClusterId,
         tca_id: TcaEra,
+    },
+    FailedToFetchNodeAggregate {
+        cluster_id: ClusterId,
+        tca_id: TcaEra,
+        node_key: NodePubKey,
     },
     FailedToFetchTraversedEHD {
         cluster_id: ClusterId,
@@ -351,7 +356,7 @@ pub fn fetch_bucket_challenge_response<
     bucket_id: BucketId,
     tree_node_ids: Vec<u64>,
     verify_sig: bool,
-) -> Result<ApiResponse<proto::activity::ChallengeResponse>, ApiError> {
+) -> Result<ApiResponse<proto::inspection::ChallengeResponse>, ApiError> {
     let (collector_key, collector_params) =
         get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
     let host =
@@ -405,7 +410,7 @@ pub fn fetch_node_challenge_response<
     node_key: NodePubKey,
     tree_node_ids: Vec<u64>,
     verify_sig: bool,
-) -> Result<ApiResponse<proto::activity::ChallengeResponse>, ApiError> {
+) -> Result<ApiResponse<proto::inspection::ChallengeResponse>, ApiError> {
     let (collector_key, collector_params) =
         get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
     let host =
@@ -460,7 +465,7 @@ pub fn fetch_bucket_aggregates<
     cluster_id: &ClusterId,
     tca_id: TcaEra,
     collector_key: NodePubKey,
-) -> Result<Vec<proto::activity_tree::BucketAggregate>, ApiError> {
+) -> Result<(Vec<proto::activity_tree::BucketAggregate>, Vec<u8>), ApiError> {
     let (_, collector_params) =
         get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key.clone())?;
     let host =
@@ -475,11 +480,12 @@ pub fn fetch_bucket_aggregates<
         &base_url,
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
-        false,
+        true,
     );
 
     let mut buckets_aggregates: Vec<proto::activity_tree::BucketAggregate> = Vec::new();
     let mut prev_token = None;
+    let mut last_sig: Vec<u8> = Vec::new();
 
     loop {
         let api_response = client
@@ -493,6 +499,10 @@ pub fn fetch_bucket_aggregates<
                 tca_id,
             })?;
 
+        if let Some(signed_by) = &api_response.signed_by {
+            last_sig = signed_by.signature.clone();
+        }
+
         let response = api_response.response;
         let response_len = response.buckets.len();
 
@@ -505,7 +515,106 @@ pub fn fetch_bucket_aggregates<
         }
     }
 
-    Ok(buckets_aggregates)
+    Ok((buckets_aggregates, last_sig))
+}
+
+pub fn fetch_bucket_aggregate<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
+    cluster_id: &ClusterId,
+    tca_id: TcaEra,
+    collector_key: NodePubKey,
+    bucket_id: BucketId,
+) -> Result<(Option<proto::activity_tree::BucketAggregate>, Vec<u8>), ApiError> {
+    let (_, collector_params) =
+        get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key.clone())?;
+    let host =
+        str::from_utf8(&collector_params.host).map_err(|_| ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: collector_key,
+            host: collector_params.host.clone(),
+        })?;
+
+    let base_url = format!("http://{}:{}", host, collector_params.http_port);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+        true,
+    );
+
+    let api_response = client
+        .bucket_aggregate(tca_id, bucket_id)
+        .map_err(|_| ApiError::FailedToFetchBucketAggregates {
+            cluster_id: *cluster_id,
+            tca_id,
+        })?;
+
+    let sig = api_response
+        .signed_by
+        .map(|signed_by| signed_by.signature)
+        .unwrap_or_default();
+
+    let aggregate = api_response
+        .response
+        .buckets
+        .into_iter()
+        .find(|a| a.bucket_id == bucket_id as u64);
+
+    Ok((aggregate, sig))
+}
+
+pub fn fetch_node_aggregate<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
+    cluster_id: &ClusterId,
+    tca_id: TcaEra,
+    collector_key: NodePubKey,
+    node_key: NodePubKey,
+) -> Result<(Option<proto::activity_tree::NodeAggregate>, Vec<u8>), ApiError> {
+    let (_, collector_params) =
+        get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key.clone())?;
+    let host =
+        str::from_utf8(&collector_params.host).map_err(|_| ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: collector_key,
+            host: collector_params.host.clone(),
+        })?;
+
+    let base_url = format!("http://{}:{}", host, collector_params.http_port);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+        true,
+    );
+
+    let api_response = client
+        .node_aggregate(tca_id, node_key.clone())
+        .map_err(|_| ApiError::FailedToFetchNodeAggregate {
+            cluster_id: *cluster_id,
+            tca_id,
+            node_key: node_key.clone(),
+        })?;
+
+    let sig = api_response
+        .signed_by
+        .map(|signed_by| signed_by.signature)
+        .unwrap_or_default();
+
+    let node_aggregate = api_response
+        .response
+        .nodes
+        .into_iter()
+        .next();
+
+    Ok((node_aggregate, sig))
 }
 
 /// Traverse PHD record.
@@ -814,6 +923,87 @@ pub fn get_phd_root<
     })
 }
 
+/// Fetch node TCA merkle root node.
+///
+/// Parameters:
+/// - `cluster_id`: Cluster Id
+/// - `tca_id`: TCA era
+/// - `collector_key`: Collector node key
+/// - `node_key`: Node key
+pub fn get_node_tca_root<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
+    cluster_id: &ClusterId,
+    tca_id: TcaEra,
+    collector_key: NodePubKey,
+    node_key: NodePubKey,
+) -> Result<ApiResponse<proto::activity_tree::ActivityTreeTraversedNode>, ApiError> {
+    let api_response = fetch_traversed_node_aggregate::<AccountId, BlockNumber, CM, NM>(
+        cluster_id, tca_id, collector_key, node_key.clone(), 1, 1, true,
+    )?;
+
+    let first_node = api_response.response.nodes
+        .into_iter()
+        .next()
+        .ok_or(ApiError::FailedToFetchTraversedNodeAggregate {
+            cluster_id: *cluster_id,
+            tca_id,
+            node_key: node_key.clone(),
+            tree_node_id: 1,
+            tree_levels_count: 1,
+        })?;
+
+    Ok(ApiResponse {
+        response: first_node,
+        signed_by: api_response.signed_by,
+    })
+}
+
+/// Fetch bucket TCA merkle root node.
+///
+/// Parameters:
+/// - `cluster_id`: Cluster Id
+/// - `tca_id`: TCA era
+/// - `collector_key`: Collector node key
+/// - `bucket_id`: Bucket Id
+/// - `node_key`: Node key
+pub fn get_bucket_tca_root<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
+    cluster_id: &ClusterId,
+    tca_id: TcaEra,
+    collector_key: NodePubKey,
+    bucket_id: BucketId,
+    node_key: NodePubKey,
+) -> Result<ApiResponse<proto::activity_tree::ActivityTreeTraversedNode>, ApiError> {
+    let api_response = fetch_traversed_bucket_sub_aggregate::<AccountId, BlockNumber, CM, NM>(
+        cluster_id, tca_id, collector_key, bucket_id, node_key.clone(), 1, 1, true,
+    )?;
+
+    let first_node = api_response.response.nodes
+        .into_iter()
+        .next()
+        .ok_or(ApiError::FailedToFetchTraversedBucketSubAggregate {
+            cluster_id: *cluster_id,
+            tca_id,
+            bucket_id,
+            node_key: node_key.clone(),
+            tree_node_id: 1,
+            tree_levels_count: 1,
+        })?;
+
+    Ok(ApiResponse {
+        response: first_node,
+        signed_by: api_response.signed_by,
+    })
+}
+
 /// Fetch processed EHD eras.
 ///
 /// Parameters:
@@ -833,7 +1023,6 @@ pub fn fetch_processed_eras_for_cluster<
     let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
     if sync_node.dry_run {
-        // note(yahortsaryk): to prevent interference between production DDC network and stage DDC network during dry-run, we fetch processed eras from pre-configured Sync Node.
         let host =
         str::from_utf8(&sync_node.params.host).map_err(|_| ApiError::NodeHostParseError {
             cluster_id: *cluster_id,
@@ -845,17 +1034,16 @@ pub fn fetch_processed_eras_for_cluster<
             &base_url,
             Duration::from_millis(RESPONSE_TIMEOUT),
             MAX_RETRIES_COUNT,
-            false, // no response signature verification for now
+            false,
         );
 
-        let api_response = client.processed_eras(prev, limit, sync_node.dry_run).map_err(|_| ApiError::FailedToFetchProcessedEras {
+        let api_response = client.dry_run_processed_eras(prev, limit).map_err(|_| ApiError::FailedToFetchProcessedEras {
             cluster_id: *cluster_id,
         })?;
 
         Ok(api_response.response)
 
     } else {
-        // note(yahortsaryk): processed eras always have corresponding EHD stored at global collector side, not sync node side. Global Collectors and Sync Node can be different quorums of nodes.
         let (_, g_collector_params) = get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|_| {
             ApiError::FailedToFetchGCollectors {
                 cluster_id: *cluster_id,
@@ -870,10 +1058,10 @@ pub fn fetch_processed_eras_for_cluster<
     }
 }
 
-/// Fetch processed payment era era
+/// Fetch processed payment eras from global collector via /activity/eras.
 ///
 /// Parameters:
-/// - `node_params`: Sync node parameters
+/// - `node_params`: Global collector node parameters
 pub fn fetch_processed_eras(
     node_params: &StorageNodeParams,
     prev: Option<EhdEra>,
@@ -888,12 +1076,8 @@ pub fn fetch_processed_eras(
         false,
     );
 
-    let api_response = client.activity_eras(prev, limit)?;
-    Ok(api_response
-        .response
-        .into_iter()
-        .filter(|e| e.status == "EHD_PROCESSED")
-        .collect::<Vec<_>>())
+    let api_response = client.processed_eras(prev, limit)?;
+    Ok(api_response.response)
 }
 
 /// Fetch inspected EHD eras.
@@ -918,11 +1102,35 @@ pub fn fetch_inspected_eras_for_cluster<
             }
         })?;
 
-    fetch_inspected_eras(&sync_node.params, prev, limit, sync_node.dry_run).map_err(|_| {
-        ApiError::FailedToFetchInspectedEras {
-            cluster_id: *cluster_id,
-        }
-    })
+    if sync_node.dry_run {
+        let host =
+            str::from_utf8(&sync_node.params.host).map_err(|_| ApiError::NodeHostParseError {
+                cluster_id: *cluster_id,
+                node_key: sync_node.key.clone(),
+                host: sync_node.params.host.clone(),
+            })?;
+        let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
+        let client = DdcClient::new(
+            &base_url,
+            Duration::from_millis(RESPONSE_TIMEOUT),
+            MAX_RETRIES_COUNT,
+            false,
+        );
+
+        let api_response = client.dry_run_inspected_eras(prev, limit).map_err(|_| {
+            ApiError::FailedToFetchInspectedEras {
+                cluster_id: *cluster_id,
+            }
+        })?;
+
+        Ok(api_response.response)
+    } else {
+        fetch_inspected_eras(&sync_node.params, prev, limit).map_err(|_| {
+            ApiError::FailedToFetchInspectedEras {
+                cluster_id: *cluster_id,
+            }
+        })
+    }
 }
 
 /// Fetch processed payment era era
@@ -981,7 +1189,7 @@ pub fn fetch_processed_era<
         .cloned()
 }
 
-/// Fetch inspected EHD eras.
+/// Fetch inspected EHD eras from sync node via /activity/inspected-eras.
 ///
 /// Parameters:
 /// - `node_params`: Sync node parameters
@@ -990,7 +1198,6 @@ pub fn fetch_inspected_eras(
     node_params: &StorageNodeParams,
     prev: Option<EhdEra>,
     limit: Option<u32>,
-    dry_run: bool,
 ) -> Result<Vec<json::EHDEra>, http::Error> {
     let host = str::from_utf8(&node_params.host).map_err(|_| http::Error::Unknown)?;
     let base_url = format!("http://{}:{}", host, node_params.http_port);
@@ -1001,29 +1208,26 @@ pub fn fetch_inspected_eras(
         false,
     );
 
-    let api_response = client.inspected_eras(prev, limit, dry_run)?;
-    Ok(api_response
-        .response
-        .into_iter()
-        .filter(|e| e.status == "EHD_INSPECTED")
-        .collect::<Vec<_>>())
+    let api_response = client.inspected_eras(prev, limit)?;
+    Ok(api_response.response)
 }
 
-pub fn fetch_inspection_exceptions<
+// ============================================================================
+// Inspection API Functions (inspection protobuf types)
+// ============================================================================
+// These functions use the new etcd-based sync quorum API with full protobuf
+// serialization. They correspond to the inspection_router endpoints.
+
+pub fn post_itm_lease<
     AccountId,
     BlockNumber,
     CM: ClusterManager<AccountId, BlockNumber>,
     NM: NodeManager<AccountId>,
 >(
     cluster_id: &ClusterId,
-    era: EhdEra,
-) -> Result<BTreeMap<String, BTreeMap<String, json::InspPathException>>, ApiError> {
-    let sync_node =
-        get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|_| {
-            ApiError::FailedToFetchSyncNodes {
-                cluster_id: *cluster_id,
-            }
-        })?;
+    request: &proto::inspection::LeaseRequest,
+) -> Result<proto::inspection::LeaseResult, ApiError> {
+    let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
     let host =
         str::from_utf8(&sync_node.params.host).map_err(|_| ApiError::NodeHostParseError {
@@ -1036,79 +1240,11 @@ pub fn fetch_inspection_exceptions<
         &base_url,
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
-        false, // no response signature verification for now
-    );
+        false,
+    ).with_dry_run(sync_node.dry_run);
 
     client
-        .fetch_inspection_exceptions(era, sync_node.dry_run)
-        .map_err(|_| ApiError::FailedToFetchPathsExceptions {
-            cluster_id: *cluster_id,
-            era,
-        })
-}
-
-pub fn get_inspection_state<
-    AccountId,
-    BlockNumber,
-    CM: ClusterManager<AccountId, BlockNumber>,
-    NM: NodeManager<AccountId>,
->(
-    cluster_id: &ClusterId,
-    era: EhdEra,
-) -> Result<proto::inspection::EndpointItmGetPathsState, ApiError> {
-    let sync_node =
-        get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
-
-    let host =
-        str::from_utf8(&sync_node.params.host).map_err(|_| ApiError::NodeHostParseError {
-            cluster_id: *cluster_id,
-            node_key: sync_node.key.clone(),
-            host: sync_node.params.host.clone(),
-        })?;
-    let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        false, // no response signature verification for now
-    );
-
-    client
-        .get_inspection_state(era, sync_node.dry_run)
-        .map_err(|_| ApiError::HttpClientError {
-            cluster_id: *cluster_id,
-            host: sync_node.params.host.clone(),
-        })
-}
-
-pub fn submit_inspection_report<
-    AccountId,
-    BlockNumber,
-    CM: ClusterManager<AccountId, BlockNumber>,
-    NM: NodeManager<AccountId>,
->(
-    cluster_id: &ClusterId,
-    report_json_str: String, // todo(yahortsaryk): add .proto definition for `InspEraReport` type
-) -> Result<proto::inspection::EndpointItmPostPath, ApiError> {
-    let sync_node =
-        get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
-
-    let host =
-        str::from_utf8(&sync_node.params.host).map_err(|_| ApiError::NodeHostParseError {
-            cluster_id: *cluster_id,
-            node_key: sync_node.key.clone(),
-            host: sync_node.params.host.clone(),
-        })?;
-    let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        false, // no response signature verification for now
-    );
-
-    client
-        .submit_inspection_report(report_json_str, sync_node.dry_run)
+        .post_itm_lease(request)
         .map_err(|_| ApiError::HttpClientError {
             cluster_id: *cluster_id,
             host: sync_node.params.host.clone(),
@@ -1122,13 +1258,9 @@ pub fn submit_assignments_table<
     NM: NodeManager<AccountId>,
 >(
     cluster_id: &ClusterId,
-    era: EhdEra,
-    table_json_str: String, /* todo(yahortsaryk): add .proto definition for
-                             * `InspAssignmentsTable` type */
-    inspector_hex: String,
-) -> Result<proto::inspection::EndpointItmSubmit, ApiError> {
-    let sync_node =
-        get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+    request: &proto::inspection::PostAssignmentTableRequest,
+) -> Result<proto::inspection::PostAssignmentTableResponse, ApiError> {
+    let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
     let host =
         str::from_utf8(&sync_node.params.host).map_err(|_| ApiError::NodeHostParseError {
@@ -1141,11 +1273,11 @@ pub fn submit_assignments_table<
         &base_url,
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
-        false, // no response signature verification for now
-    );
+        false,
+    ).with_dry_run(sync_node.dry_run);
 
     client
-        .submit_assignments_table(era, table_json_str, inspector_hex, sync_node.dry_run)
+        .submit_assignments_table(request)
         .map_err(|_| ApiError::HttpClientError {
             cluster_id: *cluster_id,
             host: sync_node.params.host.clone(),
@@ -1160,9 +1292,8 @@ pub fn get_assignments_table<
 >(
     cluster_id: &ClusterId,
     era: EhdEra,
-) -> Result<proto::inspection::EndpointItmTable, ApiError> {
-    let sync_node =
-        get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+) -> Result<proto::inspection::GetAssignmentTableResponse, ApiError> {
+    let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
     let host =
         str::from_utf8(&sync_node.params.host).map_err(|_| ApiError::NodeHostParseError {
@@ -1176,66 +1307,26 @@ pub fn get_assignments_table<
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
         false,
-    );
+    ).with_dry_run(sync_node.dry_run);
 
     client
-        .get_assignments_table(era, sync_node.dry_run)
+        .get_assignments_table(era)
         .map_err(|_| ApiError::HttpClientError {
             cluster_id: *cluster_id,
             host: sync_node.params.host.clone(),
         })
 }
 
-pub fn post_itm_lease<
+pub fn submit_inspection_result<
     AccountId,
     BlockNumber,
     CM: ClusterManager<AccountId, BlockNumber>,
     NM: NodeManager<AccountId>,
 >(
     cluster_id: &ClusterId,
-    era: EhdEra,
-    inspector_hex: String,
-) -> Result<proto::inspection::EndpointItmLease, ApiError> {
-    let sync_node =
-        get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
-
-    let host =
-        str::from_utf8(&sync_node.params.host).map_err(|_| ApiError::NodeHostParseError {
-            cluster_id: *cluster_id,
-            node_key: sync_node.key.clone(),
-            host: sync_node.params.host.clone(),
-        })?;
-    let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        false, // no response signature verification for now
-    );
-
-    client
-        .post_itm_lease(era, inspector_hex, sync_node.dry_run)
-        .map_err(|_| ApiError::HttpClientError {
-            cluster_id: *cluster_id,
-            host: sync_node.params.host.clone(),
-        })
-}
-
-pub fn get_inspection_summary<
-    AccountId,
-    BlockNumber,
-    CM: ClusterManager<AccountId, BlockNumber>,
-    NM: NodeManager<AccountId>,
->(
-    cluster_id: &ClusterId,
-    era: EhdEra,
-) -> Result<json::InspSummary, ApiError> {
-    let sync_node =
-        get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|_| {
-            ApiError::FailedToFetchSyncNodes {
-                cluster_id: *cluster_id,
-            }
-        })?;
+    request: &proto::inspection::PostInspectionResultRequest,
+) -> Result<proto::inspection::PostInspectionResultResponse, ApiError> {
+    let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
     let host =
         str::from_utf8(&sync_node.params.host).map_err(|_| ApiError::NodeHostParseError {
@@ -1249,12 +1340,111 @@ pub fn get_inspection_summary<
         Duration::from_millis(RESPONSE_TIMEOUT),
         MAX_RETRIES_COUNT,
         false,
-    );
+    ).with_dry_run(sync_node.dry_run);
 
     client
-        .get_inspection_summary(era, sync_node.dry_run)
+        .submit_inspection_result(request)
+        .map_err(|_| ApiError::HttpClientError {
+            cluster_id: *cluster_id,
+            host: sync_node.params.host.clone(),
+        })
+}
+
+pub fn get_inspection_state<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
+    cluster_id: &ClusterId,
+    era: EhdEra,
+) -> Result<proto::inspection::InspectionState, ApiError> {
+    let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+
+    let host =
+        str::from_utf8(&sync_node.params.host).map_err(|_| ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: sync_node.key.clone(),
+            host: sync_node.params.host.clone(),
+        })?;
+    let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+        false,
+    ).with_dry_run(sync_node.dry_run);
+
+    client
+        .get_inspection_state(era)
+        .map_err(|_| ApiError::HttpClientError {
+            cluster_id: *cluster_id,
+            host: sync_node.params.host.clone(),
+        })
+}
+
+pub fn get_inspection_receipt<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
+    cluster_id: &ClusterId,
+    era: EhdEra,
+) -> Result<proto::inspection::InspectionReceipt, ApiError> {
+    let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+
+    let host =
+        str::from_utf8(&sync_node.params.host).map_err(|_| ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: sync_node.key.clone(),
+            host: sync_node.params.host.clone(),
+        })?;
+    let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+        false,
+    ).with_dry_run(sync_node.dry_run);
+
+    client
+        .get_inspection_receipt(era)
         .map_err(|_| ApiError::FailedToFetchInspSummary {
             cluster_id: *cluster_id,
             era,
+        })
+}
+
+pub fn get_quorum_info<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
+    cluster_id: &ClusterId,
+    era: EhdEra,
+) -> Result<proto::inspection::InspSyncQuorumInfo, ApiError> {
+    let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+
+    let host =
+        str::from_utf8(&sync_node.params.host).map_err(|_| ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: sync_node.key.clone(),
+            host: sync_node.params.host.clone(),
+        })?;
+    let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+        false,
+    );
+
+    client
+        .get_quorum_info(era)
+        .map_err(|_| ApiError::HttpClientError {
+            cluster_id: *cluster_id,
+            host: sync_node.params.host.clone(),
         })
 }
