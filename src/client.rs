@@ -788,7 +788,8 @@ impl<'a> DdcClient<'a> {
 
             let pending = match request.send() {
                 Ok(p) => p,
-                Err(_) => {
+                Err(e) => {
+                    log!(error, "❌ HTTP GET send failed for url {:?}: {:?}", url, e);
                     error = Some(http::Error::IoError);
                     continue;
                 }
@@ -800,7 +801,12 @@ impl<'a> DdcClient<'a> {
                     error = None;
                     break;
                 }
-                Ok(Err(_)) | Err(_) => {
+                Ok(Err(e)) => {
+                    log!(error, "❌ HTTP GET response error for url {:?}: {:?}", url, e);
+                    error = Some(http::Error::DeadlineReached);
+                    continue;
+                }
+                Err(_) => {
                     error = Some(http::Error::DeadlineReached);
                     continue;
                 }
@@ -872,7 +878,10 @@ impl<'a> DdcClient<'a> {
                 .deadline(deadline)
                 .body(vec![request_body.clone()])
                 .send()
-                .map_err(|_| http::Error::IoError)?;
+                .map_err(|e| {
+                    log!(error, "❌ HTTP POST (protobuf) send failed for url {:?}: {:?}", url, e);
+                    http::Error::IoError
+                })?;
 
             match pending.try_wait(deadline) {
                 Ok(Ok(r)) => {
@@ -880,7 +889,12 @@ impl<'a> DdcClient<'a> {
                     error = None;
                     break;
                 }
-                Ok(Err(_)) | Err(_) => {
+                Ok(Err(e)) => {
+                    log!(error, "❌ HTTP POST (protobuf) response error for url {:?}: {:?}", url, e);
+                    error = Some(http::Error::DeadlineReached);
+                    continue;
+                }
+                Err(_) => {
                     error = Some(http::Error::DeadlineReached);
                     continue;
                 }
@@ -958,7 +972,10 @@ impl<'a> DdcClient<'a> {
                 .deadline(deadline)
                 .body(vec![request_body.clone()])
                 .send()
-                .map_err(|_| http::Error::IoError)?;
+                .map_err(|e| {
+                    log!(error, "❌ HTTP POST send failed for url {:?}: {:?}", url, e);
+                    http::Error::IoError
+                })?;
 
             match pending.try_wait(deadline) {
                 Ok(Ok(r)) => {
@@ -966,7 +983,12 @@ impl<'a> DdcClient<'a> {
                     error = None;
                     break;
                 }
-                Ok(Err(_)) | Err(_) => {
+                Ok(Err(e)) => {
+                    log!(error, "❌ HTTP POST response error for url {:?}: {:?}", url, e);
+                    error = Some(http::Error::DeadlineReached);
+                    continue;
+                }
+                Err(_) => {
                     error = Some(http::Error::DeadlineReached);
                     continue;
                 }

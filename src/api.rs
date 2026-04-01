@@ -1136,7 +1136,10 @@ pub fn fetch_processed_eras(
     prev: Option<EhdEra>,
     limit: Option<u32>,
 ) -> Result<Vec<json::EHDEra>, http::Error> {
-    let host = str::from_utf8(&node_params.host).map_err(|_| http::Error::Unknown)?;
+    let host = str::from_utf8(&node_params.host).map_err(|e| {
+        log!(error, "❌ Failed to parse node host for processed eras: {:?}", e);
+        http::Error::Unknown
+    })?;
     let base_url = format!("http://{}:{}", host, node_params.http_port);
     let client = DdcClient::new(
         &base_url,
@@ -1274,7 +1277,10 @@ pub fn fetch_inspected_eras(
     prev: Option<EhdEra>,
     limit: Option<u32>,
 ) -> Result<Vec<json::EHDEra>, http::Error> {
-    let host = str::from_utf8(&node_params.host).map_err(|_| http::Error::Unknown)?;
+    let host = str::from_utf8(&node_params.host).map_err(|e| {
+        log!(error, "❌ Failed to parse node host for inspected eras: {:?}", e);
+        http::Error::Unknown
+    })?;
     let base_url = format!("http://{}:{}", host, node_params.http_port);
     let client = DdcClient::new(
         &base_url,
