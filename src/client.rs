@@ -635,6 +635,14 @@ impl<'a> DdcClient<'a> {
         let url = self.insp_mem_url("/itm/submit");
         let body = request.encode_to_vec();
 
+        log!(
+            trace,
+            "submit_assignments_table: encoded body = {} bytes, paths = {}, assignments = {}",
+            body.len(),
+            request.table.as_ref().map(|t| t.paths.len()).unwrap_or(0),
+            request.table.as_ref().map(|t| t.assignments.len()).unwrap_or(0)
+        );
+
         let response = self.post_proto(&url, body)?;
         let body = response.body().collect::<Vec<u8>>();
 
@@ -862,21 +870,20 @@ impl<'a> DdcClient<'a> {
 
         let deadline = timestamp().add(self.timeout);
         let mut error = None;
+        let body_size = request_body.len();
 
         for i in 0..self.retries {
             log!(
                 trace,
-                "Sending HTTP POST (protobuf) request to {:?}, attempt: {:?}",
+                "Sending HTTP POST (protobuf) request to {:?}, attempt: {:?}, body_size: {} bytes",
                 url,
-                i + 1
+                i + 1,
+                body_size
             );
-            let request = http::Request::post(url, vec![request_body.clone()])
+            let pending = http::Request::post(url, vec![request_body.clone()])
                 .add_header("content-type", "application/protobuf")
-                .add_header("Accept", "application/protobuf");
-
-            let pending = request
+                .add_header("Accept", "application/protobuf")
                 .deadline(deadline)
-                .body(vec![request_body.clone()])
                 .send()
                 .map_err(|e| {
                     log!(error, "❌ HTTP POST (protobuf) send failed for url {:?}: {:?}", url, e);
