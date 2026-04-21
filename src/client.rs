@@ -101,7 +101,10 @@ macro_rules! fetch_and_parse_proto {
 
         if $self.verify_sig {
             let proto_signed_response = proto::signature::SignedResponse::decode(body.as_slice())
-                .map_err(|_| http::Error::Unknown)?;
+                .map_err(|e| {
+                    log!(error, "❌ Failed to decode SignedResponse protobuf: {:?}", e);
+                    http::Error::Unknown
+                })?;
 
             if !proto_signed_response.verify() {
                 log!(
@@ -115,9 +118,8 @@ macro_rules! fetch_and_parse_proto {
 
             let proto_response: $signed_ty =
                 <$signed_ty>::decode(proto_signed_response.payload.as_slice())
-                    .map_err(|_| http::Error::Unknown)
                     .map_err(|e| {
-                        log::error!("❌ Failed to parse signed .proto: {:?}", e);
+                        log!(error, "❌ Failed to parse signed .proto: {:?}", e);
                         http::Error::Unknown
                     })?;
             let signed_by = proto_signed_response
@@ -126,12 +128,14 @@ macro_rules! fetch_and_parse_proto {
                     signer: v.signer,
                     signature: v.value,
                 })
-                .ok_or(http::Error::Unknown)?;
+                .ok_or_else(|| {
+                    log!(error, "❌ Missing signature in signed proto response");
+                    http::Error::Unknown
+                })?;
 
             Ok((proto_response, Some(signed_by)))
         } else {
             let proto_response: $unsigned_ty = <$unsigned_ty>::decode(body.as_slice())
-                .map_err(|_| http::Error::Unknown)
                 .map_err(|e| {
                     log!(error, "❌ Failed to parse unsigned .proto: {:?}", e);
                     http::Error::Unknown
@@ -631,6 +635,14 @@ impl<'a> DdcClient<'a> {
         let url = self.insp_mem_url("/itm/submit");
         let body = request.encode_to_vec();
 
+        log!(
+            trace,
+            "submit_assignments_table: encoded body = {} bytes, paths = {}, assignments = {}",
+            body.len(),
+            request.table.as_ref().map(|t| t.paths.len()).unwrap_or(0),
+            request.table.as_ref().map(|t| t.assignments.len()).unwrap_or(0)
+        );
+
         let response = self.post_proto(&url, body)?;
         let body = response.body().collect::<Vec<u8>>();
 
@@ -784,7 +796,8 @@ impl<'a> DdcClient<'a> {
 
             let pending = match request.send() {
                 Ok(p) => p,
-                Err(_) => {
+                Err(e) => {
+                    log!(error, "❌ HTTP GET send failed for url {:?}: {:?}", url, e);
                     error = Some(http::Error::IoError);
                     continue;
                 }
@@ -796,7 +809,12 @@ impl<'a> DdcClient<'a> {
                     error = None;
                     break;
                 }
-                Ok(Err(_)) | Err(_) => {
+                Ok(Err(e)) => {
+                    log!(error, "❌ HTTP GET response error for url {:?}: {:?}", url, e);
+                    error = Some(http::Error::DeadlineReached);
+                    continue;
+                }
+                Err(_) => {
                     error = Some(http::Error::DeadlineReached);
                     continue;
                 }
@@ -852,23 +870,25 @@ impl<'a> DdcClient<'a> {
 
         let deadline = timestamp().add(self.timeout);
         let mut error = None;
+        let body_size = request_body.len();
 
         for i in 0..self.retries {
             log!(
                 trace,
-                "Sending HTTP POST (protobuf) request to {:?}, attempt: {:?}",
+                "Sending HTTP POST (protobuf) request to {:?}, attempt: {:?}, body_size: {} bytes",
                 url,
-                i + 1
+                i + 1,
+                body_size
             );
-            let request = http::Request::post(url, vec![request_body.clone()])
+            let pending = http::Request::post(url, vec![request_body.clone()])
                 .add_header("content-type", "application/protobuf")
-                .add_header("Accept", "application/protobuf");
-
-            let pending = request
+                .add_header("Accept", "application/protobuf")
                 .deadline(deadline)
-                .body(vec![request_body.clone()])
                 .send()
-                .map_err(|_| http::Error::IoError)?;
+                .map_err(|e| {
+                    log!(error, "❌ HTTP POST (protobuf) send failed for url {:?}: {:?}", url, e);
+                    http::Error::IoError
+                })?;
 
             match pending.try_wait(deadline) {
                 Ok(Ok(r)) => {
@@ -876,7 +896,12 @@ impl<'a> DdcClient<'a> {
                     error = None;
                     break;
                 }
-                Ok(Err(_)) | Err(_) => {
+                Ok(Err(e)) => {
+                    log!(error, "❌ HTTP POST (protobuf) response error for url {:?}: {:?}", url, e);
+                    error = Some(http::Error::DeadlineReached);
+                    continue;
+                }
+                Err(_) => {
                     error = Some(http::Error::DeadlineReached);
                     continue;
                 }
@@ -954,7 +979,10 @@ impl<'a> DdcClient<'a> {
                 .deadline(deadline)
                 .body(vec![request_body.clone()])
                 .send()
-                .map_err(|_| http::Error::IoError)?;
+                .map_err(|e| {
+                    log!(error, "❌ HTTP POST send failed for url {:?}: {:?}", url, e);
+                    http::Error::IoError
+                })?;
 
             match pending.try_wait(deadline) {
                 Ok(Ok(r)) => {
@@ -962,7 +990,12 @@ impl<'a> DdcClient<'a> {
                     error = None;
                     break;
                 }
-                Ok(Err(_)) | Err(_) => {
+                Ok(Err(e)) => {
+                    log!(error, "❌ HTTP POST response error for url {:?}: {:?}", url, e);
+                    error = Some(http::Error::DeadlineReached);
+                    continue;
+                }
+                Err(_) => {
                     error = Some(http::Error::DeadlineReached);
                     continue;
                 }
