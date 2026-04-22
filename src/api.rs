@@ -812,6 +812,7 @@ pub fn fetch_records_range<
     record_id_lte: &[u8],
     cursor: Option<&[u8]>,
     limit: Option<u32>,
+    indexes: Option<&[u64]>,
 ) -> Result<ApiResponse<proto::activity::GetRecordsResponse>, ApiError> {
     let (node_key, node_params) =
         get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, node_key)?;
@@ -833,7 +834,7 @@ pub fn fetch_records_range<
     );
 
     client
-        .fetch_records_range(tca_id, bucket_id, record_id_gte, record_id_lte, cursor, limit)
+        .fetch_records_range(tca_id, bucket_id, record_id_gte, record_id_lte, cursor, limit, indexes)
         .map_err(|e| {
             log!(error,
                 "❌ Data node {:?} (cluster {:?}) unavailable while fetching records range. Host: {:?}, Error: {:?}",

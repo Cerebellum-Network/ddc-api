@@ -476,6 +476,7 @@ impl<'a> DdcClient<'a> {
         record_id_lte: &[u8],
         cursor: Option<&[u8]>,
         limit: Option<u32>,
+        indexes: Option<&[u64]>,
     ) -> Result<ApiResponse<proto::activity::GetRecordsResponse>, http::Error> {
         let mut url = format!(
             "{}/activity/records?tcaId={}&record_id_gte={}&record_id_lte={}",
@@ -487,11 +488,20 @@ impl<'a> DdcClient<'a> {
         if let Some(b) = bucket_id {
             url = format!("{}&bucket_id={}", url, b);
         }
-        if let Some(c) = cursor {
-            url = format!("{}&cursor={}", url, hex::encode(c));
-        }
-        if let Some(l) = limit {
-            url = format!("{}&limit={}", url, l);
+        if let Some(idx) = indexes {
+            let joined = idx
+                .iter()
+                .map(|i| i.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            url = format!("{}&indexes={}", url, joined);
+        } else {
+            if let Some(c) = cursor {
+                url = format!("{}&cursor={}", url, hex::encode(c));
+            }
+            if let Some(l) = limit {
+                url = format!("{}&limit={}", url, l);
+            }
         }
 
         let (response, signed_by) = fetch_and_parse_proto!(
