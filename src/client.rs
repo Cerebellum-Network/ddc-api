@@ -468,6 +468,42 @@ impl<'a> DdcClient<'a> {
         Ok(ApiResponse { response, signed_by })
     }
 
+    pub fn fetch_records_range(
+        &self,
+        tca_id: TcaEra,
+        bucket_id: Option<BucketId>,
+        record_id_gte: &[u8],
+        record_id_lte: &[u8],
+        cursor: Option<&[u8]>,
+        limit: Option<u32>,
+    ) -> Result<ApiResponse<proto::activity::GetRecordsResponse>, http::Error> {
+        let mut url = format!(
+            "{}/activity/records?tcaId={}&record_id_gte={}&record_id_lte={}",
+            self.base_url,
+            tca_id,
+            hex::encode(record_id_gte),
+            hex::encode(record_id_lte),
+        );
+        if let Some(b) = bucket_id {
+            url = format!("{}&bucket_id={}", url, b);
+        }
+        if let Some(c) = cursor {
+            url = format!("{}&cursor={}", url, hex::encode(c));
+        }
+        if let Some(l) = limit {
+            url = format!("{}&limit={}", url, l);
+        }
+
+        let (response, signed_by) = fetch_and_parse_proto!(
+            self,
+            url,
+            proto::activity::GetRecordsResponse,
+            proto::activity::GetRecordsResponse
+        )?;
+
+        Ok(ApiResponse { response, signed_by })
+    }
+
     pub fn traverse_era_historical_document(
         &self,
         era: EhdEra,

@@ -129,6 +129,11 @@ pub enum ApiError {
     FailedToFetchInspectionDryRunParams {
         cluster_id: ClusterId,
     },
+    FailedToFetchRecordsRange {
+        cluster_id: ClusterId,
+        tca_id: TcaEra,
+        node_key: NodePubKey,
+    },
 }
 
 #[derive(
@@ -781,6 +786,68 @@ pub fn fetch_traversed_node_aggregate<
     })?;
 
     Ok(traversed_node_aggregate)
+}
+
+/// Fetch activity records in a RecordId range directly from a Data Node.
+///
+/// Parameters:
+/// - `cluster_id`: cluster id (used to resolve the node's host)
+/// - `tca_id`: TCA era
+/// - `node_key`: Data Node public key — determines which node serves the request
+/// - `bucket_id`: optional bucket scope (cross-bucket scan if None)
+/// - `record_id_gte` / `record_id_lte`: inclusive recordId range bounds
+/// - `cursor`: optional resume token from a previous page's next_cursor
+/// - `limit`: optional cap; the Data Node enforces its own max
+pub fn fetch_records_range<
+    AccountId,
+    BlockNumber,
+    CM: ClusterManager<AccountId, BlockNumber>,
+    NM: NodeManager<AccountId>,
+>(
+    cluster_id: &ClusterId,
+    tca_id: TcaEra,
+    node_key: NodePubKey,
+    bucket_id: Option<BucketId>,
+    record_id_gte: &[u8],
+    record_id_lte: &[u8],
+    cursor: Option<&[u8]>,
+    limit: Option<u32>,
+) -> Result<ApiResponse<proto::activity::GetRecordsResponse>, ApiError> {
+    let (node_key, node_params) =
+        get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, node_key)?;
+    let host = str::from_utf8(&node_params.host).map_err(|e| {
+        log!(error, "❌ Failed to parse node host for {:?} in cluster {:?}: {:?}", node_key, cluster_id, e);
+        ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: node_key.clone(),
+            host: node_params.host.clone(),
+        }
+    })?;
+
+    let base_url = format!("http://{}:{}", host, node_params.http_port);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+        true,
+    );
+
+    client
+        .fetch_records_range(tca_id, bucket_id, record_id_gte, record_id_lte, cursor, limit)
+        .map_err(|e| {
+            log!(error,
+                "❌ Data node {:?} (cluster {:?}) unavailable while fetching records range. Host: {:?}, Error: {:?}",
+                node_key,
+                cluster_id,
+                String::from_utf8_lossy(&node_params.host),
+                e
+            );
+            ApiError::FailedToFetchRecordsRange {
+                cluster_id: *cluster_id,
+                tca_id,
+                node_key: node_key.clone(),
+            }
+        })
 }
 
 pub fn fetch_traversed_bucket_sub_aggregate<
