@@ -629,16 +629,10 @@ pub mod proto {
             }
         }
 
-        impl PhdTreeTraversedNode {
-            pub fn get_collector_key(&self) -> Option<NodePubKey> {
-                if self.collector_id.len() == 32 {
-                    let arr: [u8; 32] = self.collector_id.as_slice().try_into().ok()?;
-                    Some(NodePubKey::StoragePubKey(sp_runtime::AccountId32::from(arr)))
-                } else {
-                    None
-                }
-            }
-        }
+        // PhdTreeTraversedNode::get_collector_key removed along with the collector_id
+        // field: the serving Collector's identity is now conveyed via the SignedResponse
+        // envelope's signer. Callers in ddc-verification (T094) will migrate to reading
+        // the signer from the HTTP response wrapper instead.
 
         impl PhdNodeAggregateGroup {
             pub fn get_node_key(&self) -> Option<NodePubKey> {

@@ -59,6 +59,10 @@ fn main() -> Result<()> {
         "#[derive(Eq, PartialOrd, Ord)]",
     );
     prost_build.type_attribute(
+        "activity_tree.BucketSubAggregateMetadata",
+        "#[derive(Eq, PartialOrd, Ord)]",
+    );
+    prost_build.type_attribute(
         "activity_tree.BucketAggregate",
         "#[derive(Eq, PartialOrd, Ord)]",
     );
@@ -129,6 +133,7 @@ fn main() -> Result<()> {
             format!("{proto_dir}/activity/tree/tca.proto"),
             format!("{proto_dir}/activity/tree/phd.proto"),
             format!("{proto_dir}/activity/tree/ehd.proto"),
+            format!("{proto_dir}/activity/api.proto"),
             format!("{proto_dir}/inspection/inspection.proto"),
             format!("{proto_dir}/inspection/challenge.proto"),
             format!("{proto_dir}/era/era.proto"),
