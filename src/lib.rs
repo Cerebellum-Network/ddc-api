@@ -21,6 +21,12 @@ pub mod proto {
 
         // Backward compatibility: AuthToken, Payload, Operation moved to proto::auth
         pub use super::auth::{AuthToken, Payload, Operation};
+
+        impl ActivityTreeTraversedNode {
+            pub fn get_activity(&self) -> Option<super::activity_tree::ActivityNode> {
+                self.activity.clone()
+            }
+        }
     }
 
     pub mod era {
@@ -678,10 +684,5 @@ pub mod proto {
             }
         }
 
-        impl ActivityTreeTraversedNode {
-            pub fn get_activity(&self) -> Option<ActivityNode> {
-                self.activity.clone()
-            }
-        }
     }
 }

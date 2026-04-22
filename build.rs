@@ -71,11 +71,11 @@ fn main() -> Result<()> {
         "#[derive(Eq, PartialOrd, Ord)]",
     );
     prost_build.type_attribute(
-        "activity_tree.ActivityTreeTraversedNode",
+        "activity.ActivityTreeTraversedNode",
         "#[derive(Eq, PartialOrd, Ord)]",
     );
     prost_build.type_attribute(
-        "activity_tree.ActivityTreeTraversalResponse",
+        "activity.ActivityTreeTraversalResponse",
         "#[derive(Eq, PartialOrd, Ord)]",
     );
     prost_build.type_attribute(

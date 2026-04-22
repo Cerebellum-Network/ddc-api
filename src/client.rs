@@ -537,7 +537,7 @@ impl<'a> DdcClient<'a> {
         node_key: NodePubKey,
         merkle_tree_node_id: u64,
         levels: u16,
-    ) -> Result<ApiResponse<proto::activity_tree::ActivityTreeTraversalResponse>, http::Error> {
+    ) -> Result<ApiResponse<proto::activity::ActivityTreeTraversalResponse>, http::Error> {
         let mut url = format!(
             "{}/activity/nodes/{}/traverse?tcaId={}&merkleTreeNodeId={}&levels={}",
             self.base_url,
@@ -550,8 +550,8 @@ impl<'a> DdcClient<'a> {
         let (response, signed_by) = fetch_and_parse_proto!(
             self,
             url,
-            proto::activity_tree::ActivityTreeTraversalResponse,
-            proto::activity_tree::ActivityTreeTraversalResponse
+            proto::activity::ActivityTreeTraversalResponse,
+            proto::activity::ActivityTreeTraversalResponse
         )?;
 
         let api_response = ApiResponse {
@@ -569,7 +569,7 @@ impl<'a> DdcClient<'a> {
         node_key: NodePubKey,
         merkle_tree_node_id: u64,
         levels: u16,
-    ) -> Result<ApiResponse<proto::activity_tree::ActivityTreeTraversalResponse>, http::Error> {
+    ) -> Result<ApiResponse<proto::activity::ActivityTreeTraversalResponse>, http::Error> {
         let mut url = format!(
             "{}/activity/buckets/{}/traverse?tcaId={}&nodeId={}&merkleTreeNodeId={}&levels={}",
             self.base_url,
@@ -583,8 +583,8 @@ impl<'a> DdcClient<'a> {
         let (response, signed_by) = fetch_and_parse_proto!(
             self,
             url,
-            proto::activity_tree::ActivityTreeTraversalResponse,
-            proto::activity_tree::ActivityTreeTraversalResponse
+            proto::activity::ActivityTreeTraversalResponse,
+            proto::activity::ActivityTreeTraversalResponse
         )?;
 
         let api_response = ApiResponse {

@@ -738,7 +738,7 @@ pub fn fetch_traversed_node_aggregate<
     tree_node_id: u64,
     tree_levels_count: u16,
     verify_sig: bool,
-) -> Result<ApiResponse<proto::activity_tree::ActivityTreeTraversalResponse>, ApiError> {
+) -> Result<ApiResponse<proto::activity::ActivityTreeTraversalResponse>, ApiError> {
     let (collector_key, collector_params) =
         get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
     let host =
@@ -798,7 +798,7 @@ pub fn fetch_traversed_bucket_sub_aggregate<
     tree_node_id: u64,
     tree_levels_count: u16,
     verify_sig: bool,
-) -> Result<ApiResponse<proto::activity_tree::ActivityTreeTraversalResponse>, ApiError> {
+) -> Result<ApiResponse<proto::activity::ActivityTreeTraversalResponse>, ApiError> {
     let (collector_key, collector_params) =
         get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
     let host =
@@ -1001,7 +1001,7 @@ pub fn get_node_tca_root<
     tca_id: TcaEra,
     collector_key: NodePubKey,
     node_key: NodePubKey,
-) -> Result<ApiResponse<proto::activity_tree::ActivityTreeTraversedNode>, ApiError> {
+) -> Result<ApiResponse<proto::activity::ActivityTreeTraversedNode>, ApiError> {
     let api_response = fetch_traversed_node_aggregate::<AccountId, BlockNumber, CM, NM>(
         cluster_id, tca_id, collector_key, node_key.clone(), 1, 1, true,
     )?;
@@ -1042,7 +1042,7 @@ pub fn get_bucket_tca_root<
     collector_key: NodePubKey,
     bucket_id: BucketId,
     node_key: NodePubKey,
-) -> Result<ApiResponse<proto::activity_tree::ActivityTreeTraversedNode>, ApiError> {
+) -> Result<ApiResponse<proto::activity::ActivityTreeTraversedNode>, ApiError> {
     let api_response = fetch_traversed_bucket_sub_aggregate::<AccountId, BlockNumber, CM, NM>(
         cluster_id, tca_id, collector_key, bucket_id, node_key.clone(), 1, 1, true,
     )?;
