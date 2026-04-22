@@ -629,10 +629,17 @@ pub mod proto {
             }
         }
 
-        // PhdTreeTraversedNode::get_collector_key removed along with the collector_id
-        // field: the serving Collector's identity is now conveyed via the SignedResponse
-        // envelope's signer. Callers in ddc-verification (T094) will migrate to reading
-        // the signer from the HTTP response wrapper instead.
+        impl PhdTreeTraversedNode {
+            // TODO(T094): the collector_id field was removed from PhdTreeTraversedNode;
+            // the serving Collector's identity is now read from the SignedResponse
+            // envelope, not from the message body. Until the call sites in
+            // insp_task_manager.rs are migrated to consume the envelope's signer,
+            // this stub keeps the public API shape and returns None so existing
+            // `let Some(...) else { ... }` branches take the short-circuit path.
+            pub fn get_collector_key(&self) -> Option<NodePubKey> {
+                None
+            }
+        }
 
         impl PhdNodeAggregateGroup {
             pub fn get_node_key(&self) -> Option<NodePubKey> {
