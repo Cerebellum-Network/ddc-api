@@ -2,7 +2,7 @@
 #![allow(clippy::from_over_into)]
 
 use api::{ApiResponse, SignedBy};
-use ddc_primitives::{BucketId, ClusterId, EHDId, EhdEra, NodePubKey, PHDId, TcaEra};
+use ddc_primitives::{BucketId, ClusterId, EhdEra, NodePubKey, TcaEra};
 use prost::Message;
 use scale_info::prelude::{format, string::String, vec::Vec};
 use sp_io::offchain::timestamp;
@@ -470,19 +470,13 @@ impl<'a> DdcClient<'a> {
 
     pub fn traverse_era_historical_document(
         &self,
-        cluster_id: ClusterId,
         era: EhdEra,
-        g_collector: NodePubKey,
         tree_node_id: u32,
         tree_levels_count: u32,
     ) -> Result<ApiResponse<proto::activity_tree::EhdTreeTraversalResponse>, http::Error> {
-        let ehd_id = EHDId(cluster_id, g_collector, era);
         let mut url = format!(
-            "{}/activity/ehds/{}/traverse?merkleTreeNodeId={}&levels={}",
-            self.base_url,
-            <EHDId as Into<String>>::into(ehd_id),
-            tree_node_id,
-            tree_levels_count
+            "{}/activity/ehds/traverse/{}?merkleTreeNodeId={}&levels={}",
+            self.base_url, era, tree_node_id, tree_levels_count
         );
 
         let (response, signed_by) = fetch_and_parse_proto!(
@@ -503,17 +497,12 @@ impl<'a> DdcClient<'a> {
     pub fn traverse_partial_historical_document(
         &self,
         era: EhdEra,
-        collector: NodePubKey,
         tree_node_id: u32,
         tree_levels_count: u32,
     ) -> Result<ApiResponse<proto::activity_tree::PhdTreeTraversalResponse>, http::Error> {
-        let phd_id = PHDId(collector, era);
         let mut url = format!(
-            "{}/activity/phds/{}/traverse?merkleTreeNodeId={}&levels={}",
-            self.base_url,
-            <PHDId as Into<String>>::into(phd_id),
-            tree_node_id,
-            tree_levels_count
+            "{}/activity/phds/traverse/{}?merkleTreeNodeId={}&levels={}",
+            self.base_url, era, tree_node_id, tree_levels_count
         );
 
         let (response, signed_by) = fetch_and_parse_proto!(

@@ -606,12 +606,12 @@ pub mod proto {
     pub mod activity_tree {
         include!(concat!(env!("OUT_DIR"), "/activity_tree.rs"));
 
-        use ddc_primitives::{NodePubKey, PHDId};
+        use ddc_primitives::NodePubKey;
 
         impl EhdTreeTraversedNode {
-            /// Returns parsed PHD IDs, filtering out any that fail to parse.
-            pub fn get_phds(&self) -> impl Iterator<Item = PHDId> + '_ {
-                self.phd_ids.iter().filter_map(|s| PHDId::try_from(s.clone()).ok())
+            /// Returns parsed PHD collector keys, filtering out any that fail to parse.
+            pub fn get_phd_collectors(&self) -> impl Iterator<Item = NodePubKey> + '_ {
+                self.phd_collectors.iter().filter_map(|s| NodePubKey::try_from(s.clone()).ok())
             }
 
             /// Returns cluster usage aggregated from all providers.

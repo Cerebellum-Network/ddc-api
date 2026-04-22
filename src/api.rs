@@ -703,7 +703,6 @@ pub fn fetch_traversed_partial_historical_document<
 
     let traversed_phd = client.traverse_partial_historical_document(
         era,
-        collector_key.clone(),
         tree_node_id,
         tree_levels_count,
     ).map_err(|e| {
@@ -890,9 +889,7 @@ pub fn fetch_traversed_era_historical_document<
     );
 
     let traversed_ehd = client.traverse_era_historical_document(
-        *cluster_id,
         era,
-        g_collector_key.clone(),
         tree_node_id,
         tree_levels_count,
     ).map_err(|e| {
