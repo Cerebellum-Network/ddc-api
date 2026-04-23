@@ -288,93 +288,73 @@ impl<'a> DdcClient<'a> {
 
     pub fn inspected_eras(
         &self,
-        prev: Option<EhdEra>,
+        cursor: Option<&[u8]>,
         limit: Option<u32>,
-    ) -> Result<ApiResponse<Vec<json::EHDEra>>, http::Error> {
-        let mut url = format!("{}/activity/inspected-eras", self.base_url);
-        if let Some(prev) = prev {
-            url = format!("{}?prevToken={}", url, prev);
-        }
-        if let Some(limit) = limit {
-            if url.contains('?') {
-                url = format!("{}&limit={}", url, limit);
-            } else {
-                url = format!("{}?limit={}", url, limit);
-            }
-        }
-
-        let (response, signed_by) =
-            fetch_and_parse_json!(self, url, Vec<json::EHDEra>, Vec<json::EHDEra>)?;
-
+    ) -> Result<ApiResponse<proto::activity::GetErasResponse>, http::Error> {
+        let mut url = build_list_url(&self.base_url, "/activity/inspected-eras", cursor, limit);
+        let (response, signed_by) = fetch_and_parse_proto!(
+            self,
+            url,
+            proto::activity::GetErasResponse,
+            proto::activity::GetErasResponse
+        )?;
         Ok(ApiResponse { response, signed_by })
     }
 
     pub fn processed_eras(
         &self,
-        prev: Option<EhdEra>,
+        cursor: Option<&[u8]>,
         limit: Option<u32>,
-    ) -> Result<ApiResponse<Vec<json::EHDEra>>, http::Error> {
-        let mut url = format!("{}/activity/processed-eras", self.base_url);
-        if let Some(prev) = prev {
-            url = format!("{}?prevToken={}", url, prev);
-        }
-        if let Some(limit) = limit {
-            if url.contains('?') {
-                url = format!("{}&limit={}", url, limit);
-            } else {
-                url = format!("{}?limit={}", url, limit);
-            }
-        }
+    ) -> Result<ApiResponse<proto::activity::GetErasResponse>, http::Error> {
+        let mut url = build_list_url(&self.base_url, "/activity/processed-eras", cursor, limit);
+        let (response, signed_by) = fetch_and_parse_proto!(
+            self,
+            url,
+            proto::activity::GetErasResponse,
+            proto::activity::GetErasResponse
+        )?;
+        Ok(ApiResponse { response, signed_by })
+    }
 
+    pub fn get_tca(
+        &self,
+        tca_id: TcaEra,
+    ) -> Result<ApiResponse<proto::era::Tca>, http::Error> {
+        let mut url = format!("{}/activity/tcas/{}", self.base_url, tca_id);
         let (response, signed_by) =
-            fetch_and_parse_json!(self, url, Vec<json::EHDEra>, Vec<json::EHDEra>)?;
-
+            fetch_and_parse_proto!(self, url, proto::era::Tca, proto::era::Tca)?;
         Ok(ApiResponse { response, signed_by })
     }
 
     pub fn dry_run_inspected_eras(
         &self,
-        prev: Option<EhdEra>,
+        cursor: Option<&[u8]>,
         limit: Option<u32>,
-    ) -> Result<ApiResponse<Vec<json::EHDEra>>, http::Error> {
-        let mut url = format!("{}/itm/dry-run/inspected-eras", self.base_url);
-        if let Some(prev) = prev {
-            url = format!("{}?prevToken={}", url, prev);
-        }
-        if let Some(limit) = limit {
-            if url.contains('?') {
-                url = format!("{}&limit={}", url, limit);
-            } else {
-                url = format!("{}?limit={}", url, limit);
-            }
-        }
-
-        let (response, signed_by) =
-            fetch_and_parse_json!(self, url, Vec<json::EHDEra>, Vec<json::EHDEra>)?;
-
+    ) -> Result<ApiResponse<proto::activity::GetErasResponse>, http::Error> {
+        let mut url =
+            build_list_url(&self.base_url, "/itm/dry-run/inspected-eras", cursor, limit);
+        let (response, signed_by) = fetch_and_parse_proto!(
+            self,
+            url,
+            proto::activity::GetErasResponse,
+            proto::activity::GetErasResponse
+        )?;
         Ok(ApiResponse { response, signed_by })
     }
 
     pub fn dry_run_processed_eras(
         &self,
-        prev: Option<EhdEra>,
+        cursor: Option<&[u8]>,
         limit: Option<u32>,
-    ) -> Result<ApiResponse<Vec<json::EHDEra>>, http::Error> {
-        let mut url = format!("{}/itm/dry-run/processed-eras", self.base_url);
-        if let Some(prev) = prev {
-            url = format!("{}?prevToken={}", url, prev);
-        }
-        if let Some(limit) = limit {
-            if url.contains('?') {
-                url = format!("{}&limit={}", url, limit);
-            } else {
-                url = format!("{}?limit={}", url, limit);
-            }
-        }
-
-        let (response, signed_by) =
-            fetch_and_parse_json!(self, url, Vec<json::EHDEra>, Vec<json::EHDEra>)?;
-
+    ) -> Result<ApiResponse<proto::activity::GetErasResponse>, http::Error> {
+        let mut url =
+            build_list_url(&self.base_url, "/itm/dry-run/processed-eras", cursor, limit);
+        let (response, signed_by) = fetch_and_parse_proto!(
+            self,
+            url,
+            proto::activity::GetErasResponse,
+            proto::activity::GetErasResponse
+        )?;
         Ok(ApiResponse { response, signed_by })
     }
 

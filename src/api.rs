@@ -1016,15 +1016,13 @@ pub fn fetch_processed_eras_for_cluster<
     NM: NodeManager<AccountId>,
 >(
     cluster_id: &ClusterId,
-    prev: Option<EhdEra>,
+    cursor: Option<&[u8]>,
     limit: Option<u32>,
-) -> Result<Vec<json::EHDEra>, ApiError> {
-
+) -> Result<proto::activity::GetErasResponse, ApiError> {
     let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
     if sync_node.dry_run {
-        let host =
-        str::from_utf8(&sync_node.params.host).map_err(|e| {
+        let host = str::from_utf8(&sync_node.params.host).map_err(|e| {
             log!(error, "❌ Failed to parse sync node host for node {:?} in cluster {:?}: {:?}", sync_node.key, cluster_id, e);
             ApiError::NodeHostParseError {
                 cluster_id: *cluster_id,
@@ -1033,68 +1031,44 @@ pub fn fetch_processed_eras_for_cluster<
             }
         })?;
         let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
-        let client = DdcClient::new(
-            &base_url,
-            Duration::from_millis(RESPONSE_TIMEOUT),
-            MAX_RETRIES_COUNT,
-            false,
-        );
+        let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT, false);
 
-        let api_response = client.dry_run_processed_eras(prev, limit).map_err(|e| {
-            log!(error, "❌ Failed to fetch dry-run processed eras for cluster {:?}: {:?}", cluster_id, e);
-            ApiError::FailedToFetchProcessedEras {
-                cluster_id: *cluster_id,
-            }
-        })?;
-
-        Ok(api_response.response)
-
-    } else {
-        let (_, g_collector_params) = get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|e| {
-            log!(error, "❌ Failed to fetch G-Collector node for cluster {:?}: {:?}", cluster_id, e);
-            ApiError::FailedToFetchGCollectors {
-                cluster_id: *cluster_id,
-            }
-        })?;
-
-        fetch_processed_eras(&g_collector_params, prev, limit).map_err(|e| {
-            log!(error, "❌ Failed to fetch processed eras for cluster {:?}: {:?}", cluster_id, e);
-            ApiError::FailedToFetchProcessedEras {
-                cluster_id: *cluster_id,
-            }
-        })
+        return client
+            .dry_run_processed_eras(cursor, limit)
+            .map(|r| r.response)
+            .map_err(|e| {
+                log!(error, "❌ Failed to fetch dry-run processed eras for cluster {:?}: {:?}", cluster_id, e);
+                ApiError::FailedToFetchProcessedEras { cluster_id: *cluster_id }
+            });
     }
+
+    let (_, g_collector_params) =
+        get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|e| {
+            log!(error, "❌ Failed to fetch G-Collector node for cluster {:?}: {:?}", cluster_id, e);
+            ApiError::FailedToFetchGCollectors { cluster_id: *cluster_id }
+        })?;
+    fetch_processed_eras(&g_collector_params, cursor, limit).map_err(|e| {
+        log!(error, "❌ Failed to fetch processed eras for cluster {:?}: {:?}", cluster_id, e);
+        ApiError::FailedToFetchProcessedEras { cluster_id: *cluster_id }
+    })
 }
 
-/// Fetch processed payment eras from global collector via /activity/eras.
-///
-/// Parameters:
-/// - `node_params`: Global collector node parameters
+/// Fetch processed payment eras from global collector via /activity/processed-eras.
 pub fn fetch_processed_eras(
     node_params: &StorageNodeParams,
-    prev: Option<EhdEra>,
+    cursor: Option<&[u8]>,
     limit: Option<u32>,
-) -> Result<Vec<json::EHDEra>, http::Error> {
+) -> Result<proto::activity::GetErasResponse, http::Error> {
     let host = str::from_utf8(&node_params.host).map_err(|e| {
         log!(error, "❌ Failed to parse node host for processed eras: {:?}", e);
         http::Error::Unknown
     })?;
     let base_url = format!("http://{}:{}", host, node_params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        false,
-    );
-
-    let api_response = client.processed_eras(prev, limit)?;
-    Ok(api_response.response)
+    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT, false);
+    Ok(client.processed_eras(cursor, limit)?.response)
 }
 
-/// Fetch inspected EHD eras.
-///
-/// Parameters:
-/// - `node_params`: DAC node parameters
+/// Fetch inspected EHD eras from the sync node for a cluster.
 #[allow(dead_code)]
 pub fn fetch_inspected_eras_for_cluster<
     AccountId,
@@ -1103,57 +1077,42 @@ pub fn fetch_inspected_eras_for_cluster<
     NM: NodeManager<AccountId>,
 >(
     cluster_id: &ClusterId,
-    prev: Option<EhdEra>,
+    cursor: Option<&[u8]>,
     limit: Option<u32>,
-) -> Result<Vec<json::EHDEra>, ApiError> {
-    let sync_node =
-        get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|e| {
-            log!(error, "❌ Failed to fetch sync node for cluster {:?}: {:?}", cluster_id, e);
-            ApiError::FailedToFetchSyncNodes {
-                cluster_id: *cluster_id,
-            }
-        })?;
+) -> Result<proto::activity::GetErasResponse, ApiError> {
+    let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|e| {
+        log!(error, "❌ Failed to fetch sync node for cluster {:?}: {:?}", cluster_id, e);
+        ApiError::FailedToFetchSyncNodes { cluster_id: *cluster_id }
+    })?;
 
     if sync_node.dry_run {
-        let host =
-            str::from_utf8(&sync_node.params.host).map_err(|e| {
-                log!(error, "❌ Failed to parse sync node host for node {:?} in cluster {:?}: {:?}", sync_node.key, cluster_id, e);
-                ApiError::NodeHostParseError {
-                    cluster_id: *cluster_id,
-                    node_key: sync_node.key.clone(),
-                    host: sync_node.params.host.clone(),
-                }
-            })?;
-        let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
-        let client = DdcClient::new(
-            &base_url,
-            Duration::from_millis(RESPONSE_TIMEOUT),
-            MAX_RETRIES_COUNT,
-            false,
-        );
-
-        let api_response = client.dry_run_inspected_eras(prev, limit).map_err(|e| {
-            log!(error, "❌ Failed to fetch dry-run inspected eras for cluster {:?}: {:?}", cluster_id, e);
-            ApiError::FailedToFetchInspectedEras {
+        let host = str::from_utf8(&sync_node.params.host).map_err(|e| {
+            log!(error, "❌ Failed to parse sync node host for node {:?} in cluster {:?}: {:?}", sync_node.key, cluster_id, e);
+            ApiError::NodeHostParseError {
                 cluster_id: *cluster_id,
+                node_key: sync_node.key.clone(),
+                host: sync_node.params.host.clone(),
             }
         })?;
+        let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
+        let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT, false);
 
-        Ok(api_response.response)
-    } else {
-        fetch_inspected_eras(&sync_node.params, prev, limit).map_err(|e| {
-            log!(error, "❌ Failed to fetch inspected eras for cluster {:?}: {:?}", cluster_id, e);
-            ApiError::FailedToFetchInspectedEras {
-                cluster_id: *cluster_id,
-            }
-        })
+        return client
+            .dry_run_inspected_eras(cursor, limit)
+            .map(|r| r.response)
+            .map_err(|e| {
+                log!(error, "❌ Failed to fetch dry-run inspected eras for cluster {:?}: {:?}", cluster_id, e);
+                ApiError::FailedToFetchInspectedEras { cluster_id: *cluster_id }
+            });
     }
+
+    fetch_inspected_eras(&sync_node.params, cursor, limit).map_err(|e| {
+        log!(error, "❌ Failed to fetch inspected eras for cluster {:?}: {:?}", cluster_id, e);
+        ApiError::FailedToFetchInspectedEras { cluster_id: *cluster_id }
+    })
 }
 
-/// Fetch processed payment era era
-///
-/// Parameters:
-/// - `node_params`: Sync node parameters
+/// Fetch a single inspected era by id.
 pub fn fetch_inspected_era<
     AccountId,
     BlockNumber,
@@ -1162,26 +1121,20 @@ pub fn fetch_inspected_era<
 >(
     cluster_id: &ClusterId,
     era: EhdEra,
-) -> Result<json::EHDEra, ApiError> {
-    let ehd_eras = fetch_inspected_eras_for_cluster::<AccountId, BlockNumber, CM, NM>(
+) -> Result<proto::era::Era, ApiError> {
+    let after = era.saturating_sub(1).to_be_bytes().to_vec();
+    let page = fetch_inspected_eras_for_cluster::<AccountId, BlockNumber, CM, NM>(
         cluster_id,
-        Some(era - 1),
+        Some(&after),
         None,
     )?;
-    ehd_eras
-        .iter()
-        .find(|ehd| ehd.id == era)
-        .ok_or(ApiError::FailedToFetchEra {
-            cluster_id: *cluster_id,
-            era,
-        })
-        .cloned()
+    page.records
+        .into_iter()
+        .find(|e| e.id == era)
+        .ok_or(ApiError::FailedToFetchEra { cluster_id: *cluster_id, era })
 }
 
-/// Fetch processed payment era era
-///
-/// Parameters:
-/// - `node_params`: Sync node parameters
+/// Fetch a single processed era by id.
 pub fn fetch_processed_era<
     AccountId,
     BlockNumber,
@@ -1190,46 +1143,32 @@ pub fn fetch_processed_era<
 >(
     cluster_id: &ClusterId,
     era: EhdEra,
-    prev: Option<EhdEra>,
+    cursor: Option<&[u8]>,
     limit: Option<u32>,
-) -> Result<json::EHDEra, ApiError> {
-    let ehd_eras = fetch_processed_eras_for_cluster::<AccountId, BlockNumber, CM, NM>(
-        cluster_id, prev, limit,
+) -> Result<proto::era::Era, ApiError> {
+    let page = fetch_processed_eras_for_cluster::<AccountId, BlockNumber, CM, NM>(
+        cluster_id, cursor, limit,
     )?;
-    ehd_eras
-        .iter()
-        .find(|ehd| ehd.id == era)
-        .ok_or(ApiError::FailedToFetchEra {
-            cluster_id: *cluster_id,
-            era,
-        })
-        .cloned()
+    page.records
+        .into_iter()
+        .find(|e| e.id == era)
+        .ok_or(ApiError::FailedToFetchEra { cluster_id: *cluster_id, era })
 }
 
-/// Fetch inspected EHD eras from sync node via /activity/inspected-eras.
-///
-/// Parameters:
-/// - `node_params`: Sync node parameters
+/// Fetch inspected EHD eras from a sync node via /activity/inspected-eras.
 #[allow(dead_code)]
 pub fn fetch_inspected_eras(
     node_params: &StorageNodeParams,
-    prev: Option<EhdEra>,
+    cursor: Option<&[u8]>,
     limit: Option<u32>,
-) -> Result<Vec<json::EHDEra>, http::Error> {
+) -> Result<proto::activity::GetErasResponse, http::Error> {
     let host = str::from_utf8(&node_params.host).map_err(|e| {
         log!(error, "❌ Failed to parse node host for inspected eras: {:?}", e);
         http::Error::Unknown
     })?;
     let base_url = format!("http://{}:{}", host, node_params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        false,
-    );
-
-    let api_response = client.inspected_eras(prev, limit)?;
-    Ok(api_response.response)
+    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT, false);
+    Ok(client.inspected_eras(cursor, limit)?.response)
 }
 
 /// Fetch a single page of `/activity/tcas`. `cursor` is the opaque token

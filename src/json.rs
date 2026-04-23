@@ -8,22 +8,6 @@ use serde::{Deserialize, Serialize};
 use serde_with::{base64::Base64, serde_as, TryFromInto};
 use sp_std::prelude::*;
 
-/// DDC aggregation era
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Encode, Decode)]
-pub struct AggregationEraResponse {
-    pub id: TcaEra,
-    pub status: String,
-    pub start: i64,
-    pub end: i64,
-    pub processing_time: i64,
-    pub nodes_total: u32,
-    pub nodes_processed: u32,
-    pub records_processed: u32,
-    pub records_applied: u32,
-    pub records_discarded: u32,
-    pub attempt: u32,
-}
-
 /// Json response wrapped with a signature.
 #[serde_as]
 #[derive(
@@ -35,18 +19,6 @@ pub struct SignedJsonResponse<T> {
     pub signer: Vec<u8>,
     #[serde_as(as = "Base64")]
     pub signature: Vec<u8>,
-}
-
-#[derive(
-    Debug, Serialize, Deserialize, Clone, Hash, Encode, Decode, Ord, PartialOrd, PartialEq, Eq,
-)]
-pub struct EHDEra {
-    pub id: u32,
-    pub status: String,
-    pub era_start: TcaEra,
-    pub era_end: TcaEra,
-    pub time_start: i64,
-    pub time_end: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Hash, Encode, Decode)]
