@@ -101,50 +101,6 @@ impl Verify for proto::activity::ActivityFulfillment {
     }
 }
 
-impl Verify for proto::inspection::challenge_response::proof::Record {
-    type VerificationResult = bool;
-
-    fn verify(&self) -> bool {
-        if let Some(record) = &self.record {
-            return record.verify();
-        }
-
-        true
-    }
-}
-
-pub struct LeavesChallengeResult {
-    pub is_verified: bool,
-    pub unverified_leaves: Vec<u64>,
-}
-
-impl Verify for proto::inspection::ChallengeResponse {
-    type VerificationResult = LeavesChallengeResult;
-
-    fn verify(&self) -> LeavesChallengeResult {
-        let mut unverified_leaves = vec![];
-
-        for proof in self.proofs.iter() {
-            for leaf in proof.leaves.iter() {
-                if let Some(
-                    proto::inspection::challenge_response::proof::leaf::LeafVariant::Record(record),
-                ) = &leaf.leaf_variant
-                {
-                    if !record.verify() {
-                        unverified_leaves.push(proof.merkle_tree_node_id.into());
-                    }
-                }
-            }
-        }
-
-        let is_verified = unverified_leaves.is_empty();
-        LeavesChallengeResult {
-            is_verified,
-            unverified_leaves,
-        }
-    }
-}
-
 impl Verify for proto::signature::SignedResponse {
     type VerificationResult = bool;
 
@@ -342,16 +298,4 @@ mod tests {
         assert!(verify_record_signature(valid_signature_msg));
     }
 
-    #[ignore = "Compute usage is in progress"]
-    #[test]
-    fn verify_challenge_response_works() {
-        let challenge_response_serialized =
-            include_bytes!("./test_data/challenge_response.pb").as_slice();
-        let challenge_response =
-            proto::inspection::ChallengeResponse::decode(challenge_response_serialized)
-                .expect("protobuf fixture decoding failed, fix the test data");
-
-        let result = challenge_response.verify();
-        assert!(result.is_verified);
-    }
 }

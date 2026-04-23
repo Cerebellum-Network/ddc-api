@@ -135,7 +135,6 @@ fn main() -> Result<()> {
             format!("{proto_dir}/activity/tree/ehd.proto"),
             format!("{proto_dir}/activity/api.proto"),
             format!("{proto_dir}/inspection/inspection.proto"),
-            format!("{proto_dir}/inspection/challenge.proto"),
             format!("{proto_dir}/era/era.proto"),
         ],
         &[proto_dir],

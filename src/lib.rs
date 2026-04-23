@@ -96,8 +96,10 @@ pub mod proto {
                         collectors: vec!["0xc0c1".into(), "0xc2c3".into()],
                         path_data: Some(PathData::NodeAr(NodeArPath {
                             node_key: "0x0a0b".into(),
-                            leaves_ids: vec![1, 2, 3],
+                            leaves_pos: vec![1, 2, 3],
                             tca_id: 5,
+                            record_id_range_start: vec![],
+                            record_id_range_end: vec![],
                         })),
                     },
                 );
@@ -139,7 +141,7 @@ pub mod proto {
                 match &decoded.paths["path-001"].path_data {
                     Some(PathData::NodeAr(node_ar)) => {
                         assert_eq!(node_ar.node_key, "0x0a0b");
-                        assert_eq!(node_ar.leaves_ids, vec![1, 2, 3]);
+                        assert_eq!(node_ar.leaves_pos, vec![1, 2, 3]);
                         assert_eq!(node_ar.tca_id, 5);
                     }
                     _ => panic!("Expected NodeAr path_data"),

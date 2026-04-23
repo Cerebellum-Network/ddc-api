@@ -58,17 +58,6 @@ pub enum ApiError {
     FailedToFetchGCollectors {
         cluster_id: ClusterId,
     },
-    FailedToFetchBucketChallenge {
-        cluster_id: ClusterId,
-        tca_id: TcaEra,
-        bucket_id: BucketId,
-        node_key: NodePubKey,
-    },
-    FailedToFetchNodeChallenge {
-        cluster_id: ClusterId,
-        tca_id: TcaEra,
-        node_key: NodePubKey,
-    },
     FailedToFetchBucketAggregates {
         cluster_id: ClusterId,
         tca_id: TcaEra,
@@ -364,121 +353,6 @@ pub fn get_collector_node<
         })?;
 
     Ok((collector_key, collector_params))
-}
-
-pub fn fetch_bucket_challenge_response<
-    AccountId,
-    BlockNumber,
-    CM: ClusterManager<AccountId, BlockNumber>,
-    NM: NodeManager<AccountId>,
->(
-    cluster_id: &ClusterId,
-    tca_id: TcaEra,
-    collector_key: NodePubKey,
-    node_key: NodePubKey,
-    bucket_id: BucketId,
-    tree_node_ids: Vec<u64>,
-    verify_sig: bool,
-) -> Result<ApiResponse<proto::inspection::ChallengeResponse>, ApiError> {
-    let (collector_key, collector_params) =
-        get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
-    let host =
-        str::from_utf8(&collector_params.host).map_err(|e| {
-            log!(error, "❌ Failed to parse collector host for node {:?} in cluster {:?}: {:?}", collector_key, cluster_id, e);
-            ApiError::NodeHostParseError {
-                cluster_id: *cluster_id,
-                node_key: collector_key.clone(),
-                host: collector_params.host.clone(),
-            }
-        })?;
-
-    let base_url = format!("http://{}:{}", host, collector_params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        verify_sig,
-    );
-
-    match client.challenge_bucket_sub_aggregate(
-        tca_id,
-        bucket_id,
-        &Into::<String>::into(node_key.clone()),
-        tree_node_ids,
-    ) {
-        Ok(res) => Ok(res),
-        Err(e) => {
-            log!(error,
-                "❌ Collector from cluster {:?} is unavailable while challenging bucket sub-aggregate or responded unexpectedly. Key: {:?}, Host: {:?}, Error: {:?}",
-                cluster_id,
-                collector_key,
-                String::from_utf8_lossy(&collector_params.host),
-                e
-            );
-            Err(ApiError::FailedToFetchBucketChallenge {
-                cluster_id: *cluster_id,
-                tca_id,
-                bucket_id,
-                node_key: node_key.clone(),
-            })
-        }
-    }
-}
-
-pub fn fetch_node_challenge_response<
-    AccountId,
-    BlockNumber,
-    CM: ClusterManager<AccountId, BlockNumber>,
-    NM: NodeManager<AccountId>,
->(
-    cluster_id: &ClusterId,
-    tca_id: TcaEra,
-    collector_key: NodePubKey,
-    node_key: NodePubKey,
-    tree_node_ids: Vec<u64>,
-    verify_sig: bool,
-) -> Result<ApiResponse<proto::inspection::ChallengeResponse>, ApiError> {
-    let (collector_key, collector_params) =
-        get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
-    let host =
-        str::from_utf8(&collector_params.host).map_err(|e| {
-            log!(error, "❌ Failed to parse collector host for node {:?} in cluster {:?}: {:?}", collector_key, cluster_id, e);
-            ApiError::NodeHostParseError {
-                cluster_id: *cluster_id,
-                node_key: collector_key.clone(),
-                host: collector_params.host.clone(),
-            }
-        })?;
-
-    let base_url = format!("http://{}:{}", host, collector_params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        verify_sig,
-    );
-
-    match client.challenge_node_aggregate(
-        tca_id,
-        &Into::<String>::into(node_key.clone()),
-        tree_node_ids,
-    ) {
-        Ok(res) => Ok(res),
-        Err(e) => {
-            log!(error,
-                "❌ Collector from cluster {:?} is unavailable while challenging node aggregate or responded unexpectedly. Key: {:?}, Host: {:?}, Error: {:?}",
-                cluster_id,
-                collector_key,
-                String::from_utf8_lossy(&collector_params.host),
-                e
-            );
-            Err(ApiError::FailedToFetchNodeChallenge {
-                cluster_id: *cluster_id,
-                tca_id,
-                node_key: node_key,
-            })
-        }
-    }
 }
 
 /// Fetch customer usage.

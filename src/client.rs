@@ -256,66 +256,6 @@ impl<'a> DdcClient<'a> {
         Ok(api_response)
     }
 
-    pub fn challenge_bucket_sub_aggregate(
-        &self,
-        era_id: TcaEra,
-        bucket_id: BucketId,
-        node_id: &str,
-        merkle_tree_node_id: Vec<u64>,
-    ) -> Result<ApiResponse<proto::inspection::ChallengeResponse>, http::Error> {
-        let mut url = format!(
-            "{}/activity/buckets/{}/challenge?tcaId={}&nodeId={}&merkleTreeNodeId={}",
-            self.base_url,
-            bucket_id,
-            era_id,
-            node_id,
-            Self::merkle_tree_node_id_param(merkle_tree_node_id.as_slice()),
-        );
-
-        let (response, signed_by) = fetch_and_parse_proto!(
-            self,
-            url,
-            proto::inspection::ChallengeResponse,
-            proto::inspection::ChallengeResponse
-        )?;
-
-        let api_response = ApiResponse {
-            response,
-            signed_by,
-        };
-
-        Ok(api_response)
-    }
-
-    pub fn challenge_node_aggregate(
-        &self,
-        era_id: TcaEra,
-        node_id: &str,
-        merkle_tree_node_id: Vec<u64>,
-    ) -> Result<ApiResponse<proto::inspection::ChallengeResponse>, http::Error> {
-        let mut url = format!(
-            "{}/activity/nodes/{}/challenge?tcaId={}&merkleTreeNodeId={}",
-            self.base_url,
-            node_id,
-            era_id,
-            Self::merkle_tree_node_id_param(merkle_tree_node_id.as_slice()),
-        );
-
-        let (response, signed_by) = fetch_and_parse_proto!(
-            self,
-            url,
-            proto::inspection::ChallengeResponse,
-            proto::inspection::ChallengeResponse
-        )?;
-
-        let api_response = ApiResponse {
-            response,
-            signed_by,
-        };
-
-        Ok(api_response)
-    }
-
     pub fn tcas(
         &self,
         prev: Option<EhdEra>,
@@ -628,14 +568,6 @@ impl<'a> DdcClient<'a> {
         };
 
         Ok(api_response)
-    }
-
-    fn merkle_tree_node_id_param(merkle_tree_node_id: &[u64]) -> String {
-        merkle_tree_node_id
-            .iter()
-            .map(|x| format!("{}", x.clone()))
-            .collect::<Vec<_>>()
-            .join(",")
     }
 
 
