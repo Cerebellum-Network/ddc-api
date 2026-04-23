@@ -604,6 +604,10 @@ pub mod proto {
         }
     }
 
+    pub mod activity_wasm {
+        include!(concat!(env!("OUT_DIR"), "/activity_wasm.rs"));
+    }
+
     pub mod activity_tree {
         include!(concat!(env!("OUT_DIR"), "/activity_tree.rs"));
 
