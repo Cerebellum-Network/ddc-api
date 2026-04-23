@@ -1232,6 +1232,87 @@ pub fn fetch_inspected_eras(
     Ok(api_response.response)
 }
 
+/// Fetch a single page of `/activity/tcas`. `cursor` is the opaque token
+/// returned from the previous page (`None` for the first page). `limit`
+/// caps the number of records; the server also enforces its own max.
+pub fn fetch_tcas_page(
+    node_params: &StorageNodeParams,
+    cursor: Option<&[u8]>,
+    limit: Option<u32>,
+) -> Result<proto::activity::GetTcasResponse, http::Error> {
+    let host = str::from_utf8(&node_params.host).map_err(|e| {
+        log!(error, "❌ Failed to parse node host for TCAs: {:?}", e);
+        http::Error::Unknown
+    })?;
+    let base_url = format!("http://{}:{}", host, node_params.http_port);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+        false,
+    );
+    let api_response = client.tcas(cursor, limit)?;
+    Ok(api_response.response)
+}
+
+/// Walks `/activity/tcas` page by page until `next_cursor` is absent.
+/// Concatenates all records into a single Vec. Intended for callers that
+/// genuinely need a full enumeration; prefer fetch_tcas_page where the
+/// caller can persist a cursor across calls.
+pub fn fetch_tcas_all(
+    node_params: &StorageNodeParams,
+    page_limit: Option<u32>,
+) -> Result<Vec<proto::era::Tca>, http::Error> {
+    let mut out: Vec<proto::era::Tca> = Vec::new();
+    let mut cursor: Option<Vec<u8>> = None;
+    loop {
+        let page = fetch_tcas_page(node_params, cursor.as_deref(), page_limit)?;
+        out.extend(page.records.into_iter());
+        match page.next_cursor {
+            Some(c) if !c.is_empty() => cursor = Some(c),
+            _ => return Ok(out),
+        }
+    }
+}
+
+/// Same as fetch_tcas_page for `/activity/eras`.
+pub fn fetch_eras_page(
+    node_params: &StorageNodeParams,
+    cursor: Option<&[u8]>,
+    limit: Option<u32>,
+) -> Result<proto::activity::GetErasResponse, http::Error> {
+    let host = str::from_utf8(&node_params.host).map_err(|e| {
+        log!(error, "❌ Failed to parse node host for eras: {:?}", e);
+        http::Error::Unknown
+    })?;
+    let base_url = format!("http://{}:{}", host, node_params.http_port);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+        false,
+    );
+    let api_response = client.eras(cursor, limit)?;
+    Ok(api_response.response)
+}
+
+/// Walks `/activity/eras` page by page until `next_cursor` is absent.
+pub fn fetch_eras_all(
+    node_params: &StorageNodeParams,
+    page_limit: Option<u32>,
+) -> Result<Vec<proto::era::Era>, http::Error> {
+    let mut out: Vec<proto::era::Era> = Vec::new();
+    let mut cursor: Option<Vec<u8>> = None;
+    loop {
+        let page = fetch_eras_page(node_params, cursor.as_deref(), page_limit)?;
+        out.extend(page.records.into_iter());
+        match page.next_cursor {
+            Some(c) if !c.is_empty() => cursor = Some(c),
+            _ => return Ok(out),
+        }
+    }
+}
+
 // ============================================================================
 // Inspection API Functions (inspection protobuf types)
 // ============================================================================

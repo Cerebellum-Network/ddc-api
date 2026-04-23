@@ -258,62 +258,32 @@ impl<'a> DdcClient<'a> {
 
     pub fn tcas(
         &self,
-        prev: Option<EhdEra>,
+        cursor: Option<&[u8]>,
         limit: Option<u32>,
-    ) -> Result<ApiResponse<Vec<json::AggregationEraResponse>>, http::Error> {
-        let mut url = format!("{}/activity/tcas", self.base_url);
-        if let Some(prev) = prev {
-            url = format!("{}?prevToken={}", url, prev);
-        }
-        if let Some(limit) = limit {
-            if url.contains('?') {
-                url = format!("{}&limit={}", url, limit);
-            } else {
-                url = format!("{}?limit={}", url, limit);
-            }
-        }
-
-        let (response, signed_by) = fetch_and_parse_json!(
+    ) -> Result<ApiResponse<proto::activity::GetTcasResponse>, http::Error> {
+        let mut url = build_list_url(&self.base_url, "/activity/tcas", cursor, limit);
+        let (response, signed_by) = fetch_and_parse_proto!(
             self,
             url,
-            Vec<json::AggregationEraResponse>,
-            Vec<json::AggregationEraResponse>
+            proto::activity::GetTcasResponse,
+            proto::activity::GetTcasResponse
         )?;
-
-        let api_response = ApiResponse {
-            response,
-            signed_by,
-        };
-
-        Ok(api_response)
+        Ok(ApiResponse { response, signed_by })
     }
 
     pub fn eras(
         &self,
-        prev: Option<EhdEra>,
+        cursor: Option<&[u8]>,
         limit: Option<u32>,
-    ) -> Result<ApiResponse<Vec<json::EHDEra>>, http::Error> {
-        let mut url = format!("{}/activity/eras", self.base_url);
-        if let Some(prev) = prev {
-            url = format!("{}?prevToken={}", url, prev);
-        }
-        if let Some(limit) = limit {
-            if url.contains('?') {
-                url = format!("{}&limit={}", url, limit);
-            } else {
-                url = format!("{}?limit={}", url, limit);
-            }
-        }
-
-        let (response, signed_by) =
-            fetch_and_parse_json!(self, url, Vec<json::EHDEra>, Vec<json::EHDEra>)?;
-
-        let api_response = ApiResponse {
-            response,
-            signed_by,
-        };
-
-        Ok(api_response)
+    ) -> Result<ApiResponse<proto::activity::GetErasResponse>, http::Error> {
+        let mut url = build_list_url(&self.base_url, "/activity/eras", cursor, limit);
+        let (response, signed_by) = fetch_and_parse_proto!(
+            self,
+            url,
+            proto::activity::GetErasResponse,
+            proto::activity::GetErasResponse
+        )?;
+        Ok(ApiResponse { response, signed_by })
     }
 
     pub fn inspected_eras(
@@ -1010,4 +980,17 @@ impl<'a> DdcClient<'a> {
 enum Accept {
     Any,
     Protobuf,
+}
+
+fn build_list_url(base: &str, path: &str, cursor: Option<&[u8]>, limit: Option<u32>) -> String {
+    let mut url = format!("{}{}", base, path);
+    let mut first = true;
+    if let Some(c) = cursor {
+        url = format!("{}{}cursor={}", url, if first { "?" } else { "&" }, hex::encode(c));
+        first = false;
+    }
+    if let Some(l) = limit {
+        url = format!("{}{}limit={}", url, if first { "?" } else { "&" }, l);
+    }
+    url
 }
