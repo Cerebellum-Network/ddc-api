@@ -1,6 +1,4 @@
 use prost::Message;
-use scale_info::prelude::{vec, vec::Vec};
-use serde::Serialize;
 use sp_core::{
     ed25519::{Public as PublicEd25519, Signature as SignatureEd25519},
     sr25519::{Public as PublicSr25519, Signature as SignatureSr25519},
@@ -8,7 +6,6 @@ use sp_core::{
 use sp_io::crypto::{ed25519_verify, sr25519_verify};
 
 use super::*;
-use crate::json;
 
 pub trait Verify {
     type VerificationResult;
@@ -128,29 +125,6 @@ impl Verify for proto::signature::SignedResponse {
 
         let is_verified = ed25519_verify(&sig, self.payload.as_slice(), &pub_key);
         is_verified
-    }
-}
-
-impl<T: Serialize> Verify for json::SignedJsonResponse<T> {
-    type VerificationResult = bool;
-
-    fn verify(&self) -> bool {
-        let sig = match SignatureEd25519::try_from(self.signature.as_slice()) {
-            Ok(s) => s,
-            Err(_) => return false,
-        };
-
-        let payload = match serde_json::to_vec(&self.payload) {
-            Ok(p) => p,
-            Err(_) => return false,
-        };
-
-        let pub_key = match PublicEd25519::try_from(self.signer.as_slice()) {
-            Ok(p) => p,
-            Err(_) => return false,
-        };
-
-        ed25519_verify(&sig, payload.as_slice(), &pub_key)
     }
 }
 

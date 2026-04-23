@@ -16,7 +16,6 @@ use ddc_primitives::StorageNodeMode;
 
 use crate::{
     client::DdcClient,
-    json,
     proto::{self},
 };
 

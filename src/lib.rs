@@ -6,7 +6,6 @@ pub mod api;
 pub mod client;
 pub mod verification;
 
-pub mod json;
 pub mod proto {
     pub mod signature {
         include!(concat!(env!("OUT_DIR"), "/signature.rs"));

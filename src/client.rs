@@ -2,7 +2,7 @@
 #![allow(clippy::from_over_into)]
 
 use api::{ApiResponse, SignedBy};
-use ddc_primitives::{BucketId, ClusterId, EhdEra, NodePubKey, TcaEra};
+use ddc_primitives::{BucketId, EhdEra, NodePubKey, TcaEra};
 use prost::Message;
 use scale_info::prelude::{format, string::String, vec::Vec};
 use sp_io::offchain::timestamp;
@@ -10,7 +10,7 @@ use sp_runtime::offchain::{http, Duration};
 use sp_std::vec;
 
 use super::*;
-use crate::{json, log, verification::Verify};
+use crate::{log, verification::Verify};
 
 pub struct DdcClient<'a> {
     pub base_url: &'a str,
