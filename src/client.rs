@@ -16,143 +16,61 @@ pub struct DdcClient<'a> {
     pub base_url: &'a str,
     timeout: Duration,
     retries: u32,
-    verify_sig: bool,
     dry_run: bool,
 }
 
-macro_rules! fetch_and_parse_json {
-    (
-        // Self reference (the aggregator client)
-        $self:expr,
-        // URL string variable (mutable)
-        $url:expr,
-        // The type of the JSON response if not signed
-        $unsigned_ty:ty,
-        // The type of the JSON response if signed
-        $signed_ty:ty
-    ) => {{
-        if $self.verify_sig {
-            if $url.contains('?') {
-                $url = format!("{}&sign=true", $url);
-            } else {
-                $url = format!("{}?sign=true", $url);
-            }
-        }
-
-        let response = $self.get(&$url, Accept::Any)?;
-        let body = response.body().collect::<Vec<u8>>();
-
-        if $self.verify_sig {
-            let json_signed_response: json::SignedJsonResponse<$signed_ty> =
-                serde_json::from_slice(&body).map_err(|e| {
-                    log!(error, "❌ Failed to parse signed .json: {:?}", e);
-                    http::Error::Unknown
-                })?;
-
-            if !json_signed_response.verify() {
-                log!(
-                    error,
-                    "❌ Bad .json signature, req: {:?}, resp: {:?}",
-                    $url,
-                    json_signed_response
-                );
-                return Err(http::Error::Unknown);
-            }
-
-            let json_response = json_signed_response.payload;
-            let signed_by = SignedBy {
-                signer: json_signed_response.signer,
-                signature: json_signed_response.signature,
-            };
-
-            Ok((json_response, Some(signed_by)))
-        } else {
-            let json_response: $unsigned_ty = serde_json::from_slice(&body).map_err(|e| {
-                log!(error, "❌ Failed to parse unsigned .json: {:?}", e);
-                http::Error::Unknown
-            })?;
-
-            Ok((json_response, None))
-        }
-    }};
-}
-
+/// fetch_and_parse_proto fetches a proto-envelope response, verifies the
+/// signature, and returns the inner decoded message together with the signer
+/// information. Signing is unconditional — every server-side endpoint
+/// produces a SignedResponse envelope; a missing or invalid signature is a
+/// protocol error, not a configurable client behaviour.
 macro_rules! fetch_and_parse_proto {
-    (
-        // Self reference (the aggregator client)
-        $self:expr,
-        // URL string variable (mutable)
-        $url:expr,
-        // The type of the JSON response if not signed
-        $unsigned_ty:ty,
-        // The type of the JSON response if signed
-        $signed_ty:ty
-    ) => {{
-        if $self.verify_sig {
-            if $url.contains('?') {
-                $url = format!("{}&sign=true", $url);
-            } else {
-                $url = format!("{}?sign=true", $url);
-            }
-        }
-
+    ($self:expr, $url:expr, $response_ty:ty) => {{
         let response = $self.get(&$url, Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
 
-        if $self.verify_sig {
-            let proto_signed_response = proto::signature::SignedResponse::decode(body.as_slice())
-                .map_err(|e| {
-                    log!(error, "❌ Failed to decode SignedResponse protobuf: {:?}", e);
-                    http::Error::Unknown
-                })?;
+        let proto_signed_response =
+            proto::signature::SignedResponse::decode(body.as_slice()).map_err(|e| {
+                log!(error, "❌ Failed to decode SignedResponse protobuf: {:?}", e);
+                http::Error::Unknown
+            })?;
 
-            if !proto_signed_response.verify() {
-                log!(
-                    error,
-                    "❌ Bad .proto signature, req: {:?}, resp: {:?}",
-                    $url,
-                    proto_signed_response
-                );
-                return Err(http::Error::Unknown);
-            }
-
-            let proto_response: $signed_ty =
-                <$signed_ty>::decode(proto_signed_response.payload.as_slice())
-                    .map_err(|e| {
-                        log!(error, "❌ Failed to parse signed .proto: {:?}", e);
-                        http::Error::Unknown
-                    })?;
-            let signed_by = proto_signed_response
-                .signature
-                .map(|v| SignedBy {
-                    signer: v.signer,
-                    signature: v.value,
-                })
-                .ok_or_else(|| {
-                    log!(error, "❌ Missing signature in signed proto response");
-                    http::Error::Unknown
-                })?;
-
-            Ok((proto_response, Some(signed_by)))
-        } else {
-            let proto_response: $unsigned_ty = <$unsigned_ty>::decode(body.as_slice())
-                .map_err(|e| {
-                    log!(error, "❌ Failed to parse unsigned .proto: {:?}", e);
-                    http::Error::Unknown
-                })?;
-
-            Ok((proto_response, None))
+        if !proto_signed_response.verify() {
+            log!(
+                error,
+                "❌ Bad .proto signature, req: {:?}, resp: {:?}",
+                $url,
+                proto_signed_response
+            );
+            return Err(http::Error::Unknown);
         }
+
+        let proto_response: $response_ty =
+            <$response_ty>::decode(proto_signed_response.payload.as_slice()).map_err(|e| {
+                log!(error, "❌ Failed to parse signed .proto payload: {:?}", e);
+                http::Error::Unknown
+            })?;
+        let signed_by = proto_signed_response
+            .signature
+            .map(|v| SignedBy {
+                signer: v.signer,
+                signature: v.value,
+            })
+            .ok_or_else(|| {
+                log!(error, "❌ Missing signature in signed proto response");
+                http::Error::Unknown
+            })?;
+
+        Ok((proto_response, Some(signed_by)))
     }};
 }
 
 impl<'a> DdcClient<'a> {
-    pub fn new(base_url: &'a str, timeout: Duration, retries: u32, verify_sig: bool) -> Self {
+    pub fn new(base_url: &'a str, timeout: Duration, retries: u32) -> Self {
         Self {
             base_url,
             timeout,
             retries,
-            verify_sig,
             dry_run: false,
         }
     }
@@ -181,7 +99,7 @@ impl<'a> DdcClient<'a> {
         prev_token: Option<BucketId>,
         limit: Option<u32>,
     ) -> Result<ApiResponse<proto::activity_tree::BucketAggregatesResponse>, http::Error> {
-        let mut url = format!("{}/activity/buckets?tcaId={}", self.base_url, era_id);
+        let mut url = format!("{}/activity/v1/buckets?tcaId={}", self.base_url, era_id);
         if let Some(prev_token) = prev_token {
             url = format!("{}&prevToken={}", url, prev_token);
         }
@@ -189,12 +107,7 @@ impl<'a> DdcClient<'a> {
             url = format!("{}&limit={}", url, limit);
         }
 
-        let (response, signed_by) = fetch_and_parse_proto!(
-            self,
-            url,
-            proto::activity_tree::BucketAggregatesResponse,
-            proto::activity_tree::BucketAggregatesResponse
-        )?;
+        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity_tree::BucketAggregatesResponse)?;
 
         let api_response = ApiResponse {
             response,
@@ -210,16 +123,11 @@ impl<'a> DdcClient<'a> {
         bucket_id: BucketId,
     ) -> Result<ApiResponse<proto::activity_tree::BucketAggregatesResponse>, http::Error> {
         let mut url = format!(
-            "{}/activity/buckets/{}?tcaId={}",
+            "{}/activity/v1/buckets/{}?tcaId={}",
             self.base_url, bucket_id, era_id
         );
 
-        let (response, signed_by) = fetch_and_parse_proto!(
-            self,
-            url,
-            proto::activity_tree::BucketAggregatesResponse,
-            proto::activity_tree::BucketAggregatesResponse
-        )?;
+        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity_tree::BucketAggregatesResponse)?;
 
         let api_response = ApiResponse {
             response,
@@ -235,18 +143,13 @@ impl<'a> DdcClient<'a> {
         node_key: NodePubKey,
     ) -> Result<ApiResponse<proto::activity_tree::NodeAggregatesResponse>, http::Error> {
         let mut url = format!(
-            "{}/activity/nodes/{}?tcaId={}",
+            "{}/activity/v1/nodes/{}?tcaId={}",
             self.base_url,
             <NodePubKey as Into<String>>::into(node_key),
             era_id
         );
 
-        let (response, signed_by) = fetch_and_parse_proto!(
-            self,
-            url,
-            proto::activity_tree::NodeAggregatesResponse,
-            proto::activity_tree::NodeAggregatesResponse
-        )?;
+        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity_tree::NodeAggregatesResponse)?;
 
         let api_response = ApiResponse {
             response,
@@ -261,13 +164,8 @@ impl<'a> DdcClient<'a> {
         cursor: Option<&[u8]>,
         limit: Option<u32>,
     ) -> Result<ApiResponse<proto::activity::GetTcasResponse>, http::Error> {
-        let mut url = build_list_url(&self.base_url, "/activity/tcas", cursor, limit);
-        let (response, signed_by) = fetch_and_parse_proto!(
-            self,
-            url,
-            proto::activity::GetTcasResponse,
-            proto::activity::GetTcasResponse
-        )?;
+        let mut url = build_list_url(&self.base_url, "/activity/v1/tcas", cursor, limit);
+        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity::GetTcasResponse)?;
         Ok(ApiResponse { response, signed_by })
     }
 
@@ -276,13 +174,8 @@ impl<'a> DdcClient<'a> {
         cursor: Option<&[u8]>,
         limit: Option<u32>,
     ) -> Result<ApiResponse<proto::activity::GetErasResponse>, http::Error> {
-        let mut url = build_list_url(&self.base_url, "/activity/eras", cursor, limit);
-        let (response, signed_by) = fetch_and_parse_proto!(
-            self,
-            url,
-            proto::activity::GetErasResponse,
-            proto::activity::GetErasResponse
-        )?;
+        let mut url = build_list_url(&self.base_url, "/activity/v1/eras", cursor, limit);
+        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity::GetErasResponse)?;
         Ok(ApiResponse { response, signed_by })
     }
 
@@ -291,13 +184,8 @@ impl<'a> DdcClient<'a> {
         cursor: Option<&[u8]>,
         limit: Option<u32>,
     ) -> Result<ApiResponse<proto::activity::GetErasResponse>, http::Error> {
-        let mut url = build_list_url(&self.base_url, "/activity/inspected-eras", cursor, limit);
-        let (response, signed_by) = fetch_and_parse_proto!(
-            self,
-            url,
-            proto::activity::GetErasResponse,
-            proto::activity::GetErasResponse
-        )?;
+        let mut url = build_list_url(&self.base_url, "/activity/v1/inspected-eras", cursor, limit);
+        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity::GetErasResponse)?;
         Ok(ApiResponse { response, signed_by })
     }
 
@@ -306,13 +194,8 @@ impl<'a> DdcClient<'a> {
         cursor: Option<&[u8]>,
         limit: Option<u32>,
     ) -> Result<ApiResponse<proto::activity::GetErasResponse>, http::Error> {
-        let mut url = build_list_url(&self.base_url, "/activity/processed-eras", cursor, limit);
-        let (response, signed_by) = fetch_and_parse_proto!(
-            self,
-            url,
-            proto::activity::GetErasResponse,
-            proto::activity::GetErasResponse
-        )?;
+        let mut url = build_list_url(&self.base_url, "/activity/v1/processed-eras", cursor, limit);
+        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity::GetErasResponse)?;
         Ok(ApiResponse { response, signed_by })
     }
 
@@ -320,9 +203,9 @@ impl<'a> DdcClient<'a> {
         &self,
         tca_id: TcaEra,
     ) -> Result<ApiResponse<proto::era::Tca>, http::Error> {
-        let mut url = format!("{}/activity/tcas/{}", self.base_url, tca_id);
+        let mut url = format!("{}/activity/v1/tcas/{}", self.base_url, tca_id);
         let (response, signed_by) =
-            fetch_and_parse_proto!(self, url, proto::era::Tca, proto::era::Tca)?;
+            fetch_and_parse_proto!(self, url, proto::era::Tca)?;
         Ok(ApiResponse { response, signed_by })
     }
 
@@ -333,12 +216,7 @@ impl<'a> DdcClient<'a> {
     ) -> Result<ApiResponse<proto::activity::GetErasResponse>, http::Error> {
         let mut url =
             build_list_url(&self.base_url, "/itm/dry-run/inspected-eras", cursor, limit);
-        let (response, signed_by) = fetch_and_parse_proto!(
-            self,
-            url,
-            proto::activity::GetErasResponse,
-            proto::activity::GetErasResponse
-        )?;
+        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity::GetErasResponse)?;
         Ok(ApiResponse { response, signed_by })
     }
 
@@ -349,12 +227,7 @@ impl<'a> DdcClient<'a> {
     ) -> Result<ApiResponse<proto::activity::GetErasResponse>, http::Error> {
         let mut url =
             build_list_url(&self.base_url, "/itm/dry-run/processed-eras", cursor, limit);
-        let (response, signed_by) = fetch_and_parse_proto!(
-            self,
-            url,
-            proto::activity::GetErasResponse,
-            proto::activity::GetErasResponse
-        )?;
+        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity::GetErasResponse)?;
         Ok(ApiResponse { response, signed_by })
     }
 
@@ -369,7 +242,7 @@ impl<'a> DdcClient<'a> {
         indexes: Option<&[u64]>,
     ) -> Result<ApiResponse<proto::activity::GetRecordsResponse>, http::Error> {
         let mut url = format!(
-            "{}/activity/records?tcaId={}&record_id_gte={}&record_id_lte={}",
+            "{}/activity/v1/records?tcaId={}&record_id_gte={}&record_id_lte={}",
             self.base_url,
             tca_id,
             hex::encode(record_id_gte),
@@ -394,12 +267,7 @@ impl<'a> DdcClient<'a> {
             }
         }
 
-        let (response, signed_by) = fetch_and_parse_proto!(
-            self,
-            url,
-            proto::activity::GetRecordsResponse,
-            proto::activity::GetRecordsResponse
-        )?;
+        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity::GetRecordsResponse)?;
 
         Ok(ApiResponse { response, signed_by })
     }
@@ -411,16 +279,11 @@ impl<'a> DdcClient<'a> {
         tree_levels_count: u32,
     ) -> Result<ApiResponse<proto::activity_tree::EhdTreeTraversalResponse>, http::Error> {
         let mut url = format!(
-            "{}/activity/ehds/traverse/{}?merkleTreeNodeId={}&levels={}",
+            "{}/activity/v1/ehds/traverse/{}?merkleTreeNodeId={}&levels={}",
             self.base_url, era, tree_node_id, tree_levels_count
         );
 
-        let (response, signed_by) = fetch_and_parse_proto!(
-            self,
-            url,
-            proto::activity_tree::EhdTreeTraversalResponse,
-            proto::activity_tree::EhdTreeTraversalResponse
-        )?;
+        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity_tree::EhdTreeTraversalResponse)?;
 
         let api_response = ApiResponse {
             response,
@@ -437,16 +300,11 @@ impl<'a> DdcClient<'a> {
         tree_levels_count: u32,
     ) -> Result<ApiResponse<proto::activity_tree::PhdTreeTraversalResponse>, http::Error> {
         let mut url = format!(
-            "{}/activity/phds/traverse/{}?merkleTreeNodeId={}&levels={}",
+            "{}/activity/v1/phds/traverse/{}?merkleTreeNodeId={}&levels={}",
             self.base_url, era, tree_node_id, tree_levels_count
         );
 
-        let (response, signed_by) = fetch_and_parse_proto!(
-            self,
-            url,
-            proto::activity_tree::PhdTreeTraversalResponse,
-            proto::activity_tree::PhdTreeTraversalResponse
-        )?;
+        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity_tree::PhdTreeTraversalResponse)?;
 
         let api_response = ApiResponse {
             response,
@@ -464,7 +322,7 @@ impl<'a> DdcClient<'a> {
         levels: u16,
     ) -> Result<ApiResponse<proto::activity::ActivityTreeTraversalResponse>, http::Error> {
         let mut url = format!(
-            "{}/activity/nodes/{}/traverse?tcaId={}&merkleTreeNodeId={}&levels={}",
+            "{}/activity/v1/nodes/{}/traverse/{}?merkleTreeNodeId={}&levels={}",
             self.base_url,
             <NodePubKey as Into<String>>::into(node_key),
             tca_id,
@@ -472,12 +330,7 @@ impl<'a> DdcClient<'a> {
             levels,
         );
 
-        let (response, signed_by) = fetch_and_parse_proto!(
-            self,
-            url,
-            proto::activity::ActivityTreeTraversalResponse,
-            proto::activity::ActivityTreeTraversalResponse
-        )?;
+        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity::ActivityTreeTraversalResponse)?;
 
         let api_response = ApiResponse {
             response,
@@ -496,7 +349,7 @@ impl<'a> DdcClient<'a> {
         levels: u16,
     ) -> Result<ApiResponse<proto::activity::ActivityTreeTraversalResponse>, http::Error> {
         let mut url = format!(
-            "{}/activity/buckets/{}/traverse?tcaId={}&nodeId={}&merkleTreeNodeId={}&levels={}",
+            "{}/activity/v1/buckets/{}/traverse/{}?nodeId={}&merkleTreeNodeId={}&levels={}",
             self.base_url,
             bucket_id,
             tca_id,
@@ -505,12 +358,7 @@ impl<'a> DdcClient<'a> {
             levels,
         );
 
-        let (response, signed_by) = fetch_and_parse_proto!(
-            self,
-            url,
-            proto::activity::ActivityTreeTraversalResponse,
-            proto::activity::ActivityTreeTraversalResponse
-        )?;
+        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity::ActivityTreeTraversalResponse)?;
 
         let api_response = ApiResponse {
             response,
@@ -680,16 +528,13 @@ impl<'a> DdcClient<'a> {
         })
     }
 
-    pub fn get_grouping_collectors(&self) -> Result<json::GCollectorsResponse, http::Error> {
-        let mut url = format!("{}/activity/grouping-collectors", self.base_url);
-        let (response, _) = fetch_and_parse_json!(
-            self,
-            url,
-            json::GCollectorsResponse,
-            json::GCollectorsResponse
-        )?;
-
-        Ok(response)
+    pub fn get_grouping_collectors(
+        &self,
+    ) -> Result<ApiResponse<proto::activity::GroupingCollectorsResponse>, http::Error> {
+        let mut url = format!("{}/activity/v1/grouping-collectors", self.base_url);
+        let (response, signed_by) =
+            fetch_and_parse_proto!(self, url, proto::activity::GroupingCollectorsResponse)?;
+        Ok(ApiResponse { response, signed_by })
     }
 
     fn get(&self, url: &str, accept: Accept) -> Result<http::Response, http::Error> {

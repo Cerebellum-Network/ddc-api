@@ -267,14 +267,9 @@ pub fn get_grouping_collectors_keys(
         }
     })?;
     let base_url: String = format!("http://{}:{}", host, node_params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        false,
-    );
+    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
 
-    let response = client
+    let api_response = client
         .get_grouping_collectors()
         .map_err(|e| {
             log!(error, "❌ Failed to fetch grouping collectors from node {:?} in cluster {:?}: {:?}", node_key, cluster_id, e);
@@ -283,8 +278,18 @@ pub fn get_grouping_collectors_keys(
                 host: node_params.host.clone(),
             }
         })?;
-        
-    Ok(response.nodes_keys)
+
+    api_response
+        .response
+        .keys
+        .into_iter()
+        .map(|s| {
+            NodePubKey::try_from(s).map_err(|_| ApiError::HttpClientError {
+                cluster_id: *cluster_id,
+                host: node_params.host.clone(),
+            })
+        })
+        .collect()
 }
 
 
@@ -384,12 +389,7 @@ pub fn fetch_bucket_aggregates<
         })?;
 
     let base_url = format!("http://{}:{}", host, collector_params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        true,
-    );
+    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
 
     let mut buckets_aggregates: Vec<proto::activity_tree::BucketAggregate> = Vec::new();
     let mut prev_token = None;
@@ -453,12 +453,7 @@ pub fn fetch_bucket_aggregate<
         })?;
 
     let base_url = format!("http://{}:{}", host, collector_params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        true,
-    );
+    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
 
     let api_response = client
         .bucket_aggregate(tca_id, bucket_id)
@@ -508,12 +503,7 @@ pub fn fetch_node_aggregate<
         })?;
 
     let base_url = format!("http://{}:{}", host, collector_params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        true,
-    );
+    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
 
     let api_response = client
         .node_aggregate(tca_id, node_key.clone())
@@ -573,12 +563,7 @@ pub fn fetch_traversed_partial_historical_document<
         })?;
 
     let base_url = format!("http://{}:{}", host, collector_params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        false, // no response signature verification for now
-    );
+    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
 
     let traversed_phd = client.traverse_partial_historical_document(
         era,
@@ -615,7 +600,6 @@ pub fn fetch_traversed_node_aggregate<
     node_key: NodePubKey,
     tree_node_id: u64,
     tree_levels_count: u16,
-    verify_sig: bool,
 ) -> Result<ApiResponse<proto::activity::ActivityTreeTraversalResponse>, ApiError> {
     let (collector_key, collector_params) =
         get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
@@ -630,12 +614,7 @@ pub fn fetch_traversed_node_aggregate<
         })?;
 
     let base_url = format!("http://{}:{}", host, collector_params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        verify_sig,
-    );
+    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
 
     let traversed_node_aggregate = client.traverse_node_aggregate(
         tca_id,
@@ -700,12 +679,7 @@ pub fn fetch_records_range<
     })?;
 
     let base_url = format!("http://{}:{}", host, node_params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        true,
-    );
+    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
 
     client
         .fetch_records_range(tca_id, bucket_id, record_id_gte, record_id_lte, cursor, limit, indexes)
@@ -738,7 +712,6 @@ pub fn fetch_traversed_bucket_sub_aggregate<
     node_key: NodePubKey,
     tree_node_id: u64,
     tree_levels_count: u16,
-    verify_sig: bool,
 ) -> Result<ApiResponse<proto::activity::ActivityTreeTraversalResponse>, ApiError> {
     let (collector_key, collector_params) =
         get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
@@ -753,12 +726,7 @@ pub fn fetch_traversed_bucket_sub_aggregate<
         })?;
 
     let base_url = format!("http://{}:{}", host, collector_params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        verify_sig,
-    );
+    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
 
     let traversed_bucket_sub_aggregate = client.traverse_bucket_sub_aggregate(
         tca_id,
@@ -823,12 +791,7 @@ pub fn fetch_traversed_era_historical_document<
         })?;
 
     let base_url = format!("http://{}:{}", host, g_collector_params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        false, // no response signature verification for now
-    );
+    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
 
     let traversed_ehd = client.traverse_era_historical_document(
         era,
@@ -942,7 +905,7 @@ pub fn get_node_tca_root<
     node_key: NodePubKey,
 ) -> Result<ApiResponse<proto::activity::ActivityTreeTraversedNode>, ApiError> {
     let api_response = fetch_traversed_node_aggregate::<AccountId, BlockNumber, CM, NM>(
-        cluster_id, tca_id, collector_key, node_key.clone(), 1, 1, true,
+        cluster_id, tca_id, collector_key, node_key.clone(), 1, 1,
     )?;
 
     let first_node = api_response.response.nodes
@@ -983,7 +946,7 @@ pub fn get_bucket_tca_root<
     node_key: NodePubKey,
 ) -> Result<ApiResponse<proto::activity::ActivityTreeTraversedNode>, ApiError> {
     let api_response = fetch_traversed_bucket_sub_aggregate::<AccountId, BlockNumber, CM, NM>(
-        cluster_id, tca_id, collector_key, bucket_id, node_key.clone(), 1, 1, true,
+        cluster_id, tca_id, collector_key, bucket_id, node_key.clone(), 1, 1,
     )?;
 
     let first_node = api_response.response.nodes
@@ -1031,7 +994,7 @@ pub fn fetch_processed_eras_for_cluster<
             }
         })?;
         let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
-        let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT, false);
+        let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
 
         return client
             .dry_run_processed_eras(cursor, limit)
@@ -1064,7 +1027,7 @@ pub fn fetch_processed_eras(
         http::Error::Unknown
     })?;
     let base_url = format!("http://{}:{}", host, node_params.http_port);
-    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT, false);
+    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
     Ok(client.processed_eras(cursor, limit)?.response)
 }
 
@@ -1095,7 +1058,7 @@ pub fn fetch_inspected_eras_for_cluster<
             }
         })?;
         let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
-        let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT, false);
+        let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
 
         return client
             .dry_run_inspected_eras(cursor, limit)
@@ -1167,7 +1130,7 @@ pub fn fetch_inspected_eras(
         http::Error::Unknown
     })?;
     let base_url = format!("http://{}:{}", host, node_params.http_port);
-    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT, false);
+    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
     Ok(client.inspected_eras(cursor, limit)?.response)
 }
 
@@ -1184,12 +1147,7 @@ pub fn fetch_tcas_page(
         http::Error::Unknown
     })?;
     let base_url = format!("http://{}:{}", host, node_params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        false,
-    );
+    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
     let api_response = client.tcas(cursor, limit)?;
     Ok(api_response.response)
 }
@@ -1225,12 +1183,7 @@ pub fn fetch_eras_page(
         http::Error::Unknown
     })?;
     let base_url = format!("http://{}:{}", host, node_params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        false,
-    );
+    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
     let api_response = client.eras(cursor, limit)?;
     Ok(api_response.response)
 }
@@ -1279,12 +1232,7 @@ pub fn post_itm_lease<
             }
         })?;
     let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        false,
-    ).with_dry_run(sync_node.dry_run);
+    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT).with_dry_run(sync_node.dry_run);
 
     client
         .post_itm_lease(request)
@@ -1318,12 +1266,7 @@ pub fn submit_assignments_table<
             }
         })?;
     let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        false,
-    ).with_dry_run(sync_node.dry_run);
+    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT).with_dry_run(sync_node.dry_run);
 
     client
         .submit_assignments_table(request)
@@ -1357,12 +1300,7 @@ pub fn get_assignments_table<
             }
         })?;
     let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        false,
-    ).with_dry_run(sync_node.dry_run);
+    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT).with_dry_run(sync_node.dry_run);
 
     client
         .get_assignments_table(era)
@@ -1396,12 +1334,7 @@ pub fn submit_inspection_result<
             }
         })?;
     let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        false,
-    ).with_dry_run(sync_node.dry_run);
+    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT).with_dry_run(sync_node.dry_run);
 
     client
         .submit_inspection_result(request)
@@ -1435,12 +1368,7 @@ pub fn get_inspection_state<
             }
         })?;
     let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        false,
-    ).with_dry_run(sync_node.dry_run);
+    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT).with_dry_run(sync_node.dry_run);
 
     client
         .get_inspection_state(era)
@@ -1474,12 +1402,7 @@ pub fn get_inspection_receipt<
             }
         })?;
     let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        false,
-    ).with_dry_run(sync_node.dry_run);
+    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT).with_dry_run(sync_node.dry_run);
 
     client
         .get_inspection_receipt(era)
@@ -1513,12 +1436,7 @@ pub fn get_quorum_info<
             }
         })?;
     let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
-    let client = DdcClient::new(
-        &base_url,
-        Duration::from_millis(RESPONSE_TIMEOUT),
-        MAX_RETRIES_COUNT,
-        false,
-    );
+    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
 
     client
         .get_quorum_info(era)

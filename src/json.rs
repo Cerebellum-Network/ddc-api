@@ -1,11 +1,12 @@
 #![allow(clippy::from_over_into)]
 
-// TODO: Remove this once migration to Protobuf is fully completed, as JSON is deprecated
+// The signed JSON envelope kept here is the legacy typed-payload form. The
+// activity-API client no longer uses it — all signed responses are proto
+// envelopes now. Kept only because `verification::Verify` is generic over it.
 use codec::{Decode, Encode};
-use ddc_primitives::{NodePubKey, TcaEra};
 use scale_info::prelude::string::String;
 use serde::{Deserialize, Serialize};
-use serde_with::{base64::Base64, serde_as, TryFromInto};
+use serde_with::{base64::Base64, serde_as};
 use sp_std::prelude::*;
 
 /// Json response wrapped with a signature.
@@ -20,18 +21,3 @@ pub struct SignedJsonResponse<T> {
     #[serde_as(as = "Base64")]
     pub signature: Vec<u8>,
 }
-
-#[derive(Debug, Serialize, Deserialize, Clone, Hash, Encode, Decode)]
-pub struct IsGCollectorResponse {
-    #[serde(rename = "isGroupingCollector")]
-    pub is_g_collector: bool,
-}
-
-#[serde_as]
-#[derive(Debug, Serialize, Deserialize, Clone, Encode, Decode)]
-pub struct GCollectorsResponse {
-    #[serde(rename = "keys")]
-    #[serde_as(as = "Vec<TryFromInto<String>>")]
-    pub nodes_keys: Vec<NodePubKey>,
-}
-
