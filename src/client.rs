@@ -254,7 +254,7 @@ impl<'a> DdcClient<'a> {
         if let Some(idx) = indexes {
             let joined = idx
                 .iter()
-                .map(|i| i.to_string())
+                .map(|i| format!("{}", i))
                 .collect::<Vec<_>>()
                 .join(",");
             url = format!("{}&indexes={}", url, joined);
