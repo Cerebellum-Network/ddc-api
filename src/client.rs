@@ -215,7 +215,7 @@ impl<'a> DdcClient<'a> {
         limit: Option<u32>,
     ) -> Result<ApiResponse<proto::activity::GetErasResponse>, http::Error> {
         let mut url =
-            build_list_url(&self.base_url, "/itm/dry-run/inspected-eras", cursor, limit);
+            build_list_url(&self.base_url, "/v1/itm/dry-run/inspected-eras", cursor, limit);
         let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity::GetErasResponse)?;
         Ok(ApiResponse { response, signed_by })
     }
@@ -226,7 +226,7 @@ impl<'a> DdcClient<'a> {
         limit: Option<u32>,
     ) -> Result<ApiResponse<proto::activity::GetErasResponse>, http::Error> {
         let mut url =
-            build_list_url(&self.base_url, "/itm/dry-run/processed-eras", cursor, limit);
+            build_list_url(&self.base_url, "/v1/itm/dry-run/processed-eras", cursor, limit);
         let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity::GetErasResponse)?;
         Ok(ApiResponse { response, signed_by })
     }
@@ -380,7 +380,7 @@ impl<'a> DdcClient<'a> {
         &self,
         request: &proto::inspection::LeaseRequest,
     ) -> Result<proto::inspection::LeaseResult, http::Error> {
-        let url = self.insp_mem_url("/itm/lease");
+        let url = self.insp_mem_url("/v1/itm/lease");
         let body = request.encode_to_vec();
 
         let response = self.post_proto(&url, body)?;
@@ -397,15 +397,14 @@ impl<'a> DdcClient<'a> {
         &self,
         request: &proto::inspection::PostAssignmentTableRequest,
     ) -> Result<proto::inspection::PostAssignmentTableResponse, http::Error> {
-        let url = self.insp_mem_url("/itm/submit");
+        let url = self.insp_mem_url("/v1/itm/submit");
         let body = request.encode_to_vec();
 
         log!(
             trace,
-            "submit_assignments_table: encoded body = {} bytes, paths = {}, assignments = {}",
+            "submit_assignments_table: encoded body = {} bytes, paths = {}",
             body.len(),
             request.table.as_ref().map(|t| t.paths.len()).unwrap_or(0),
-            request.table.as_ref().map(|t| t.assignments.len()).unwrap_or(0)
         );
 
         let response = self.post_proto(&url, body)?;
@@ -428,7 +427,7 @@ impl<'a> DdcClient<'a> {
         &self,
         era: EhdEra,
     ) -> Result<proto::inspection::GetAssignmentTableResponse, http::Error> {
-        let url = self.insp_mem_url(&format!("/itm/table?eraId={}", era));
+        let url = self.insp_mem_url(&format!("/v1/itm/table?eraId={}", era));
 
         let response = self.get(&url, Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
@@ -450,7 +449,7 @@ impl<'a> DdcClient<'a> {
         &self,
         request: &proto::inspection::PostInspectionResultRequest,
     ) -> Result<proto::inspection::PostInspectionResultResponse, http::Error> {
-        let url = self.insp_mem_url("/itm/path");
+        let url = self.insp_mem_url("/v1/itm/path");
         let body = request.encode_to_vec();
 
         let response = self.post_proto(&url, body)?;
@@ -473,7 +472,7 @@ impl<'a> DdcClient<'a> {
         &self,
         era: EhdEra,
     ) -> Result<proto::inspection::InspectionState, http::Error> {
-        let url = self.insp_mem_url(&format!("/itm/state?eraId={}", era));
+        let url = self.insp_mem_url(&format!("/v1/itm/state?eraId={}", era));
 
         let response = self.get(&url, Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
@@ -493,7 +492,7 @@ impl<'a> DdcClient<'a> {
         &self,
         era: EhdEra,
     ) -> Result<proto::inspection::InspectionReceipt, http::Error> {
-        let url = self.insp_mem_url(&format!("/itm/receipt?eraId={}", era));
+        let url = self.insp_mem_url(&format!("/v1/itm/receipt?eraId={}", era));
 
         let response = self.get(&url, Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();

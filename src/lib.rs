@@ -575,31 +575,29 @@ pub mod proto {
 
     impl inspection::InspectionPathResult {
         /// Creates a new `InspectionPathResult` with `result_hash` computed as
-        /// Blake2b-256(path_hash_bytes || exception_bytes || source_collectors).
+        /// Blake2b-256(path_hash || exception_bytes || source_nodes).
         pub fn new(
-            path_hash: scale_info::prelude::string::String,
+            path_hash: sp_std::vec::Vec<u8>,
             exception: Option<inspection::InspPathException>,
-            source_collectors: sp_std::vec::Vec<inspection::Provenance>,
+            source_nodes: sp_std::vec::Vec<inspection::NodeProvenance>,
         ) -> Self {
             use blake2::digest::{consts::U32, Digest};
             use prost::Message;
-            let path_hash_bytes = hex::decode(path_hash.trim_start_matches("0x"))
-                .unwrap_or_default();
             let mut data = sp_std::vec::Vec::new();
-            data.extend_from_slice(&path_hash_bytes);
+            data.extend_from_slice(&path_hash);
             if let Some(ref exc) = exception {
                 data.extend_from_slice(&exc.encode_to_vec());
             }
-            for cr in &source_collectors {
-                data.extend_from_slice(cr.collector_key.as_bytes());
-                data.extend_from_slice(&cr.response_signature);
+            for node in &source_nodes {
+                data.extend_from_slice(&node.node_key);
+                data.extend_from_slice(&node.response_signature);
             }
             let hash: [u8; 32] = blake2::Blake2b::<U32>::digest(&data).into();
             Self {
                 path_hash,
-                result_hash: scale_info::prelude::format!("0x{}", hex::encode(hash)),
+                result_hash: hash.to_vec(),
                 exception,
-                source_collectors,
+                source_nodes,
             }
         }
     }
