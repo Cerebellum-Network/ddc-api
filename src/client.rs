@@ -29,9 +29,13 @@ macro_rules! fetch_and_parse_proto {
         let response = $self.get(&$url, Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
 
-        let proto_signed_response =
-            proto::signature::SignedResponse::decode(body.as_slice()).map_err(|e| {
-                log!(error, "❌ Failed to decode SignedResponse protobuf: {:?}", e);
+        let proto_signed_response = proto::signature::SignedResponse::decode(body.as_slice())
+            .map_err(|e| {
+                log!(
+                    error,
+                    "❌ Failed to decode SignedResponse protobuf: {:?}",
+                    e
+                );
                 http::Error::Unknown
             })?;
 
@@ -68,12 +72,14 @@ macro_rules! fetch_and_parse_proto {
 /// Decode a signed-envelope response body, verify the signature, and
 /// return the inner proto. Used by every /v1/itm/* call (both POST and GET)
 /// that receives a SignedResponse-wrapped body.
-fn decode_signed_proto<R: Message + Default>(
-    url: &str,
-    body: &[u8],
-) -> Result<R, http::Error> {
+fn decode_signed_proto<R: Message + Default>(url: &str, body: &[u8]) -> Result<R, http::Error> {
     let signed = proto::signature::SignedResponse::decode(body).map_err(|e| {
-        log!(error, "❌ Failed to decode SignedResponse from {:?}: {:?}", url, e);
+        log!(
+            error,
+            "❌ Failed to decode SignedResponse from {:?}: {:?}",
+            url,
+            e
+        );
         http::Error::Unknown
     })?;
     if !signed.verify() {
@@ -81,7 +87,12 @@ fn decode_signed_proto<R: Message + Default>(
         return Err(http::Error::Unknown);
     }
     R::decode(signed.payload.as_slice()).map_err(|e| {
-        log!(error, "❌ Failed to decode signed payload from {:?}: {:?}", url, e);
+        log!(
+            error,
+            "❌ Failed to decode signed payload from {:?}: {:?}",
+            url,
+            e
+        );
         http::Error::Unknown
     })
 }
@@ -128,7 +139,8 @@ impl<'a> DdcClient<'a> {
             url = format!("{}&limit={}", url, limit);
         }
 
-        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity_tree::BucketAggregatesResponse)?;
+        let (response, signed_by) =
+            fetch_and_parse_proto!(self, url, proto::activity_tree::BucketAggregatesResponse)?;
 
         let api_response = ApiResponse {
             response,
@@ -148,7 +160,8 @@ impl<'a> DdcClient<'a> {
             self.base_url, bucket_id, era_id
         );
 
-        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity_tree::BucketAggregatesResponse)?;
+        let (response, signed_by) =
+            fetch_and_parse_proto!(self, url, proto::activity_tree::BucketAggregatesResponse)?;
 
         let api_response = ApiResponse {
             response,
@@ -170,7 +183,8 @@ impl<'a> DdcClient<'a> {
             era_id
         );
 
-        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity_tree::NodeAggregatesResponse)?;
+        let (response, signed_by) =
+            fetch_and_parse_proto!(self, url, proto::activity_tree::NodeAggregatesResponse)?;
 
         let api_response = ApiResponse {
             response,
@@ -186,8 +200,12 @@ impl<'a> DdcClient<'a> {
         limit: Option<u32>,
     ) -> Result<ApiResponse<proto::activity::GetTcasResponse>, http::Error> {
         let mut url = build_list_url(&self.base_url, "/activity/v1/tcas", cursor, limit);
-        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity::GetTcasResponse)?;
-        Ok(ApiResponse { response, signed_by })
+        let (response, signed_by) =
+            fetch_and_parse_proto!(self, url, proto::activity::GetTcasResponse)?;
+        Ok(ApiResponse {
+            response,
+            signed_by,
+        })
     }
 
     pub fn eras(
@@ -196,8 +214,12 @@ impl<'a> DdcClient<'a> {
         limit: Option<u32>,
     ) -> Result<ApiResponse<proto::activity::GetErasResponse>, http::Error> {
         let mut url = build_list_url(&self.base_url, "/activity/v1/eras", cursor, limit);
-        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity::GetErasResponse)?;
-        Ok(ApiResponse { response, signed_by })
+        let (response, signed_by) =
+            fetch_and_parse_proto!(self, url, proto::activity::GetErasResponse)?;
+        Ok(ApiResponse {
+            response,
+            signed_by,
+        })
     }
 
     pub fn inspected_eras(
@@ -206,8 +228,12 @@ impl<'a> DdcClient<'a> {
         limit: Option<u32>,
     ) -> Result<ApiResponse<proto::activity::GetErasResponse>, http::Error> {
         let mut url = build_list_url(&self.base_url, "/activity/v1/inspected-eras", cursor, limit);
-        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity::GetErasResponse)?;
-        Ok(ApiResponse { response, signed_by })
+        let (response, signed_by) =
+            fetch_and_parse_proto!(self, url, proto::activity::GetErasResponse)?;
+        Ok(ApiResponse {
+            response,
+            signed_by,
+        })
     }
 
     pub fn processed_eras(
@@ -216,18 +242,21 @@ impl<'a> DdcClient<'a> {
         limit: Option<u32>,
     ) -> Result<ApiResponse<proto::activity::GetErasResponse>, http::Error> {
         let mut url = build_list_url(&self.base_url, "/activity/v1/processed-eras", cursor, limit);
-        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity::GetErasResponse)?;
-        Ok(ApiResponse { response, signed_by })
+        let (response, signed_by) =
+            fetch_and_parse_proto!(self, url, proto::activity::GetErasResponse)?;
+        Ok(ApiResponse {
+            response,
+            signed_by,
+        })
     }
 
-    pub fn get_tca(
-        &self,
-        tca_id: TcaEra,
-    ) -> Result<ApiResponse<proto::era::Tca>, http::Error> {
+    pub fn get_tca(&self, tca_id: TcaEra) -> Result<ApiResponse<proto::era::Tca>, http::Error> {
         let mut url = format!("{}/activity/v1/tcas/{}", self.base_url, tca_id);
-        let (response, signed_by) =
-            fetch_and_parse_proto!(self, url, proto::era::Tca)?;
-        Ok(ApiResponse { response, signed_by })
+        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::era::Tca)?;
+        Ok(ApiResponse {
+            response,
+            signed_by,
+        })
     }
 
     pub fn dry_run_inspected_eras(
@@ -235,10 +264,18 @@ impl<'a> DdcClient<'a> {
         cursor: Option<&[u8]>,
         limit: Option<u32>,
     ) -> Result<ApiResponse<proto::activity::GetErasResponse>, http::Error> {
-        let mut url =
-            build_list_url(&self.base_url, "/itm/v1/dry-run/inspected-eras", cursor, limit);
-        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity::GetErasResponse)?;
-        Ok(ApiResponse { response, signed_by })
+        let mut url = build_list_url(
+            &self.base_url,
+            "/itm/v1/dry-run/inspected-eras",
+            cursor,
+            limit,
+        );
+        let (response, signed_by) =
+            fetch_and_parse_proto!(self, url, proto::activity::GetErasResponse)?;
+        Ok(ApiResponse {
+            response,
+            signed_by,
+        })
     }
 
     pub fn dry_run_processed_eras(
@@ -246,10 +283,18 @@ impl<'a> DdcClient<'a> {
         cursor: Option<&[u8]>,
         limit: Option<u32>,
     ) -> Result<ApiResponse<proto::activity::GetErasResponse>, http::Error> {
-        let mut url =
-            build_list_url(&self.base_url, "/itm/v1/dry-run/processed-eras", cursor, limit);
-        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity::GetErasResponse)?;
-        Ok(ApiResponse { response, signed_by })
+        let mut url = build_list_url(
+            &self.base_url,
+            "/itm/v1/dry-run/processed-eras",
+            cursor,
+            limit,
+        );
+        let (response, signed_by) =
+            fetch_and_parse_proto!(self, url, proto::activity::GetErasResponse)?;
+        Ok(ApiResponse {
+            response,
+            signed_by,
+        })
     }
 
     pub fn fetch_records_range(
@@ -288,9 +333,13 @@ impl<'a> DdcClient<'a> {
             }
         }
 
-        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity::GetRecordsResponse)?;
+        let (response, signed_by) =
+            fetch_and_parse_proto!(self, url, proto::activity::GetRecordsResponse)?;
 
-        Ok(ApiResponse { response, signed_by })
+        Ok(ApiResponse {
+            response,
+            signed_by,
+        })
     }
 
     pub fn traverse_era_historical_document(
@@ -304,7 +353,8 @@ impl<'a> DdcClient<'a> {
             self.base_url, era, tree_node_id, tree_levels_count
         );
 
-        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity_tree::EhdTreeTraversalResponse)?;
+        let (response, signed_by) =
+            fetch_and_parse_proto!(self, url, proto::activity_tree::EhdTreeTraversalResponse)?;
 
         let api_response = ApiResponse {
             response,
@@ -325,7 +375,8 @@ impl<'a> DdcClient<'a> {
             self.base_url, era, tree_node_id, tree_levels_count
         );
 
-        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity_tree::PhdTreeTraversalResponse)?;
+        let (response, signed_by) =
+            fetch_and_parse_proto!(self, url, proto::activity_tree::PhdTreeTraversalResponse)?;
 
         let api_response = ApiResponse {
             response,
@@ -351,7 +402,8 @@ impl<'a> DdcClient<'a> {
             levels,
         );
 
-        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity::ActivityTreeTraversalResponse)?;
+        let (response, signed_by) =
+            fetch_and_parse_proto!(self, url, proto::activity::ActivityTreeTraversalResponse)?;
 
         let api_response = ApiResponse {
             response,
@@ -379,7 +431,8 @@ impl<'a> DdcClient<'a> {
             levels,
         );
 
-        let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::activity::ActivityTreeTraversalResponse)?;
+        let (response, signed_by) =
+            fetch_and_parse_proto!(self, url, proto::activity::ActivityTreeTraversalResponse)?;
 
         let api_response = ApiResponse {
             response,
@@ -388,7 +441,6 @@ impl<'a> DdcClient<'a> {
 
         Ok(api_response)
     }
-
 
     // ========================================================================
     // Inspection Client Methods (inspection protobuf types)
@@ -503,7 +555,10 @@ impl<'a> DdcClient<'a> {
         let mut url = format!("{}/activity/v1/grouping-collectors", self.base_url);
         let (response, signed_by) =
             fetch_and_parse_proto!(self, url, proto::activity::GroupingCollectorsResponse)?;
-        Ok(ApiResponse { response, signed_by })
+        Ok(ApiResponse {
+            response,
+            signed_by,
+        })
     }
 
     fn get(&self, url: &str, accept: Accept) -> Result<http::Response, http::Error> {
@@ -541,7 +596,12 @@ impl<'a> DdcClient<'a> {
                     break;
                 }
                 Ok(Err(e)) => {
-                    log!(error, "❌ HTTP GET response error for url {:?}: {:?}", url, e);
+                    log!(
+                        error,
+                        "❌ HTTP GET response error for url {:?}: {:?}",
+                        url,
+                        e
+                    );
                     error = Some(http::Error::DeadlineReached);
                     continue;
                 }
@@ -592,11 +652,7 @@ impl<'a> DdcClient<'a> {
     /// Send a POST request with protobuf-encoded body (Content-Type: application/protobuf)
     /// and expect a protobuf response (Accept: application/protobuf).
     /// Used by inspection client methods for the new etcd-based sync quorum API.
-    fn post_proto(
-        &self,
-        url: &str,
-        request_body: Vec<u8>,
-    ) -> Result<http::Response, http::Error> {
+    fn post_proto(&self, url: &str, request_body: Vec<u8>) -> Result<http::Response, http::Error> {
         let mut maybe_response = None;
 
         let deadline = timestamp().add(self.timeout);
@@ -617,7 +673,12 @@ impl<'a> DdcClient<'a> {
                 .deadline(deadline)
                 .send()
                 .map_err(|e| {
-                    log!(error, "❌ HTTP POST (protobuf) send failed for url {:?}: {:?}", url, e);
+                    log!(
+                        error,
+                        "❌ HTTP POST (protobuf) send failed for url {:?}: {:?}",
+                        url,
+                        e
+                    );
                     http::Error::IoError
                 })?;
 
@@ -628,7 +689,12 @@ impl<'a> DdcClient<'a> {
                     break;
                 }
                 Ok(Err(e)) => {
-                    log!(error, "❌ HTTP POST (protobuf) response error for url {:?}: {:?}", url, e);
+                    log!(
+                        error,
+                        "❌ HTTP POST (protobuf) response error for url {:?}: {:?}",
+                        url,
+                        e
+                    );
                     error = Some(http::Error::DeadlineReached);
                     continue;
                 }
@@ -671,11 +737,7 @@ impl<'a> DdcClient<'a> {
             return Err(http::Error::Unknown);
         }
 
-        log!(
-            trace,
-            "HTTP POST (protobuf) request to {:?} completed",
-            url,
-        );
+        log!(trace, "HTTP POST (protobuf) request to {:?} completed", url,);
 
         Ok(response)
     }
@@ -722,7 +784,12 @@ impl<'a> DdcClient<'a> {
                     break;
                 }
                 Ok(Err(e)) => {
-                    log!(error, "❌ HTTP POST response error for url {:?}: {:?}", url, e);
+                    log!(
+                        error,
+                        "❌ HTTP POST response error for url {:?}: {:?}",
+                        url,
+                        e
+                    );
                     error = Some(http::Error::DeadlineReached);
                     continue;
                 }
@@ -780,7 +847,12 @@ fn build_list_url(base: &str, path: &str, cursor: Option<&[u8]>, limit: Option<u
     let mut url = format!("{}{}", base, path);
     let mut first = true;
     if let Some(c) = cursor {
-        url = format!("{}{}cursor={}", url, if first { "?" } else { "&" }, hex::encode(c));
+        url = format!(
+            "{}{}cursor={}",
+            url,
+            if first { "?" } else { "&" },
+            hex::encode(c)
+        );
         first = false;
     }
     if let Some(l) = limit {

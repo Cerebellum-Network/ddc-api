@@ -271,5 +271,4 @@ mod tests {
         });
         assert!(verify_record_signature(valid_signature_msg));
     }
-
 }

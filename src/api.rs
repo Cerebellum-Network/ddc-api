@@ -1,6 +1,7 @@
 use core::str;
 
 use codec::{Decode, Encode};
+use ddc_primitives::StorageNodeMode;
 use ddc_primitives::{
     traits::{ClusterManager, NodeManager},
     BucketId, ClusterId, EhdEra, NodeParams, NodePubKey, StorageNodeParams, TcaEra,
@@ -12,7 +13,6 @@ use scale_info::{
 use serde::{Deserialize, Serialize};
 use sp_runtime::offchain::{http, Duration};
 use sp_std::prelude::*;
-use ddc_primitives::StorageNodeMode;
 
 use crate::{
     client::DdcClient,
@@ -164,7 +164,7 @@ pub fn get_g_collectors_nodes<
                 continue;
             }
         }
-        
+
         if g_collectors_keys.contains(&node_key) {
             g_collectors.push((node_key, node_params))
         }
@@ -194,7 +194,12 @@ pub fn get_g_collector_node<
     // todo(yahortsaryk): replace G-Collector with Sync node once it is supported at DDC
     let g_collectors = get_g_collectors_nodes::<AccountId, BlockNumber, CM, NM>(cluster_id)
         .map_err(|e| {
-            log!(error, "❌ Failed to fetch G-Collectors for cluster {:?}: {:?}", cluster_id, e);
+            log!(
+                error,
+                "❌ Failed to fetch G-Collectors for cluster {:?}: {:?}",
+                cluster_id,
+                e
+            );
             ApiError::FailedToFetchGCollectors {
                 cluster_id: *cluster_id,
             }
@@ -227,9 +232,13 @@ pub fn get_sync_node<
 >(
     cluster_id: &ClusterId,
 ) -> Result<SyncNode, ApiError> {
-    
     let dry_run_params = CM::get_inspection_dry_run_params(cluster_id).map_err(|e| {
-        log!(error, "❌ Failed to fetch inspection dry run params for cluster {:?}: {:?}", cluster_id, e);
+        log!(
+            error,
+            "❌ Failed to fetch inspection dry run params for cluster {:?}: {:?}",
+            cluster_id,
+            e
+        );
         ApiError::FailedToFetchInspectionDryRunParams {
             cluster_id: *cluster_id,
         }
@@ -243,11 +252,12 @@ pub fn get_sync_node<
         })
     } else {
         // todo(yahortsaryk): replace G-Collector with Sync node once it is supported at DDC
-        get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id)
-        .map(|(key, params)| SyncNode {
-            dry_run: false,
-            key,
-            params,
+        get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map(|(key, params)| {
+            SyncNode {
+                dry_run: false,
+                key,
+                params,
+            }
         })
     }
 }
@@ -258,7 +268,13 @@ pub fn get_grouping_collectors_keys(
     node_params: &StorageNodeParams,
 ) -> Result<Vec<NodePubKey>, ApiError> {
     let host = str::from_utf8(&node_params.host).map_err(|e| {
-        log!(error, "❌ Failed to parse node host for node {:?} in cluster {:?}: {:?}", node_key, cluster_id, e);
+        log!(
+            error,
+            "❌ Failed to parse node host for node {:?} in cluster {:?}: {:?}",
+            node_key,
+            cluster_id,
+            e
+        );
         ApiError::NodeHostParseError {
             cluster_id: *cluster_id,
             node_key: node_key.clone(),
@@ -266,17 +282,25 @@ pub fn get_grouping_collectors_keys(
         }
     })?;
     let base_url: String = format!("http://{}:{}", host, node_params.http_port);
-    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+    );
 
-    let api_response = client
-        .get_grouping_collectors()
-        .map_err(|e| {
-            log!(error, "❌ Failed to fetch grouping collectors from node {:?} in cluster {:?}: {:?}", node_key, cluster_id, e);
-            ApiError::HttpClientError {
-                cluster_id: *cluster_id,
-                host: node_params.host.clone(),
-            }
-        })?;
+    let api_response = client.get_grouping_collectors().map_err(|e| {
+        log!(
+            error,
+            "❌ Failed to fetch grouping collectors from node {:?} in cluster {:?}: {:?}",
+            node_key,
+            cluster_id,
+            e
+        );
+        ApiError::HttpClientError {
+            cluster_id: *cluster_id,
+            host: node_params.host.clone(),
+        }
+    })?;
 
     api_response
         .response
@@ -291,7 +315,6 @@ pub fn get_grouping_collectors_keys(
         .collect()
 }
 
-
 /// Fetch collectors nodes of a cluster.
 /// Parameters:
 /// - `cluster_id`: Cluster id of a cluster.
@@ -305,7 +328,12 @@ pub fn get_collectors_nodes<
 ) -> Result<Vec<(NodePubKey, StorageNodeParams)>, ApiError> {
     let mut collectors = Vec::new();
     let nodes = CM::get_nodes(cluster_id).map_err(|e| {
-        log!(error, "❌ Failed to fetch collectors for cluster {:?}: {:?}", cluster_id, e);
+        log!(
+            error,
+            "❌ Failed to fetch collectors for cluster {:?}: {:?}",
+            cluster_id,
+            e
+        );
         ApiError::FailedToFetchCollectors {
             cluster_id: *cluster_id,
         }
@@ -337,7 +365,13 @@ pub fn get_collector_node<
 ) -> Result<(NodePubKey, StorageNodeParams), ApiError> {
     let mut collectors = Vec::new();
     let nodes = CM::get_nodes(cluster_id).map_err(|e| {
-        log!(error, "❌ Failed to fetch collector {:?} for cluster {:?}: {:?}", collector_key, cluster_id, e);
+        log!(
+            error,
+            "❌ Failed to fetch collector {:?} for cluster {:?}: {:?}",
+            collector_key,
+            cluster_id,
+            e
+        );
         ApiError::FailedToFetchCollector {
             cluster_id: *cluster_id,
             node_key: collector_key.clone(),
@@ -377,18 +411,27 @@ pub fn fetch_bucket_aggregates<
 ) -> Result<(Vec<proto::activity_tree::BucketAggregate>, Vec<u8>), ApiError> {
     let (_, collector_params) =
         get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key.clone())?;
-    let host =
-        str::from_utf8(&collector_params.host).map_err(|e| {
-            log!(error, "❌ Failed to parse collector host for node {:?} in cluster {:?}: {:?}", collector_key, cluster_id, e);
-            ApiError::NodeHostParseError {
-                cluster_id: *cluster_id,
-                node_key: collector_key,
-                host: collector_params.host.clone(),
-            }
-        })?;
+    let host = str::from_utf8(&collector_params.host).map_err(|e| {
+        log!(
+            error,
+            "❌ Failed to parse collector host for node {:?} in cluster {:?}: {:?}",
+            collector_key,
+            cluster_id,
+            e
+        );
+        ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: collector_key,
+            host: collector_params.host.clone(),
+        }
+    })?;
 
     let base_url = format!("http://{}:{}", host, collector_params.http_port);
-    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+    );
 
     let mut buckets_aggregates: Vec<proto::activity_tree::BucketAggregate> = Vec::new();
     let mut prev_token = None;
@@ -402,7 +445,13 @@ pub fn fetch_bucket_aggregates<
                 Some(BUCKETS_AGGREGATES_FETCH_BATCH_SIZE as u32),
             )
             .map_err(|e| {
-                log!(error, "❌ Failed to fetch bucket aggregates for cluster {:?}, tca {:?}: {:?}", cluster_id, tca_id, e);
+                log!(
+                    error,
+                    "❌ Failed to fetch bucket aggregates for cluster {:?}, tca {:?}: {:?}",
+                    cluster_id,
+                    tca_id,
+                    e
+                );
                 ApiError::FailedToFetchBucketAggregates {
                     cluster_id: *cluster_id,
                     tca_id,
@@ -441,28 +490,42 @@ pub fn fetch_bucket_aggregate<
 ) -> Result<(Option<proto::activity_tree::BucketAggregate>, Vec<u8>), ApiError> {
     let (_, collector_params) =
         get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key.clone())?;
-    let host =
-        str::from_utf8(&collector_params.host).map_err(|e| {
-            log!(error, "❌ Failed to parse collector host for node {:?} in cluster {:?}: {:?}", collector_key, cluster_id, e);
-            ApiError::NodeHostParseError {
-                cluster_id: *cluster_id,
-                node_key: collector_key,
-                host: collector_params.host.clone(),
-            }
-        })?;
+    let host = str::from_utf8(&collector_params.host).map_err(|e| {
+        log!(
+            error,
+            "❌ Failed to parse collector host for node {:?} in cluster {:?}: {:?}",
+            collector_key,
+            cluster_id,
+            e
+        );
+        ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: collector_key,
+            host: collector_params.host.clone(),
+        }
+    })?;
 
     let base_url = format!("http://{}:{}", host, collector_params.http_port);
-    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+    );
 
-    let api_response = client
-        .bucket_aggregate(tca_id, bucket_id)
-        .map_err(|e| {
-            log!(error, "❌ Failed to fetch bucket aggregate for bucket {:?} in cluster {:?}, tca {:?}: {:?}", bucket_id, cluster_id, tca_id, e);
-            ApiError::FailedToFetchBucketAggregates {
-                cluster_id: *cluster_id,
-                tca_id,
-            }
-        })?;
+    let api_response = client.bucket_aggregate(tca_id, bucket_id).map_err(|e| {
+        log!(
+            error,
+            "❌ Failed to fetch bucket aggregate for bucket {:?} in cluster {:?}, tca {:?}: {:?}",
+            bucket_id,
+            cluster_id,
+            tca_id,
+            e
+        );
+        ApiError::FailedToFetchBucketAggregates {
+            cluster_id: *cluster_id,
+            tca_id,
+        }
+    })?;
 
     let sig = api_response
         .signed_by
@@ -491,23 +554,39 @@ pub fn fetch_node_aggregate<
 ) -> Result<(Option<proto::activity_tree::NodeAggregate>, Vec<u8>), ApiError> {
     let (_, collector_params) =
         get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key.clone())?;
-    let host =
-        str::from_utf8(&collector_params.host).map_err(|e| {
-            log!(error, "❌ Failed to parse collector host for node {:?} in cluster {:?}: {:?}", collector_key, cluster_id, e);
-            ApiError::NodeHostParseError {
-                cluster_id: *cluster_id,
-                node_key: collector_key,
-                host: collector_params.host.clone(),
-            }
-        })?;
+    let host = str::from_utf8(&collector_params.host).map_err(|e| {
+        log!(
+            error,
+            "❌ Failed to parse collector host for node {:?} in cluster {:?}: {:?}",
+            collector_key,
+            cluster_id,
+            e
+        );
+        ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: collector_key,
+            host: collector_params.host.clone(),
+        }
+    })?;
 
     let base_url = format!("http://{}:{}", host, collector_params.http_port);
-    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+    );
 
     let api_response = client
         .node_aggregate(tca_id, node_key.clone())
         .map_err(|e| {
-            log!(error, "❌ Failed to fetch node aggregate for node {:?} in cluster {:?}, tca {:?}: {:?}", node_key, cluster_id, tca_id, e);
+            log!(
+                error,
+                "❌ Failed to fetch node aggregate for node {:?} in cluster {:?}, tca {:?}: {:?}",
+                node_key,
+                cluster_id,
+                tca_id,
+                e
+            );
             ApiError::FailedToFetchNodeAggregate {
                 cluster_id: *cluster_id,
                 tca_id,
@@ -520,11 +599,7 @@ pub fn fetch_node_aggregate<
         .map(|signed_by| signed_by.signature)
         .unwrap_or_default();
 
-    let node_aggregate = api_response
-        .response
-        .nodes
-        .into_iter()
-        .next();
+    let node_aggregate = api_response.response.nodes.into_iter().next();
 
     Ok((node_aggregate, sig))
 }
@@ -551,18 +626,27 @@ pub fn fetch_traversed_partial_historical_document<
 ) -> Result<ApiResponse<proto::activity_tree::PhdTreeTraversalResponse>, ApiError> {
     let (collector_key, collector_params) =
         get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
-    let host =
-        str::from_utf8(&collector_params.host).map_err(|e| {
-            log!(error, "❌ Failed to parse collector host for node {:?} in cluster {:?}: {:?}", collector_key, cluster_id, e);
-            ApiError::NodeHostParseError {
-                cluster_id: *cluster_id,
-                node_key: collector_key.clone(),
-                host: collector_params.host.clone(),
-            }
-        })?;
+    let host = str::from_utf8(&collector_params.host).map_err(|e| {
+        log!(
+            error,
+            "❌ Failed to parse collector host for node {:?} in cluster {:?}: {:?}",
+            collector_key,
+            cluster_id,
+            e
+        );
+        ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: collector_key.clone(),
+            host: collector_params.host.clone(),
+        }
+    })?;
 
     let base_url = format!("http://{}:{}", host, collector_params.http_port);
-    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+    );
 
     let traversed_phd = client.traverse_partial_historical_document(
         era,
@@ -602,18 +686,27 @@ pub fn fetch_traversed_node_aggregate<
 ) -> Result<ApiResponse<proto::activity::ActivityTreeTraversalResponse>, ApiError> {
     let (collector_key, collector_params) =
         get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
-    let host =
-        str::from_utf8(&collector_params.host).map_err(|e| {
-            log!(error, "❌ Failed to parse collector host for node {:?} in cluster {:?}: {:?}", collector_key, cluster_id, e);
-            ApiError::NodeHostParseError {
-                cluster_id: *cluster_id,
-                node_key: collector_key.clone(),
-                host: collector_params.host.clone(),
-            }
-        })?;
+    let host = str::from_utf8(&collector_params.host).map_err(|e| {
+        log!(
+            error,
+            "❌ Failed to parse collector host for node {:?} in cluster {:?}: {:?}",
+            collector_key,
+            cluster_id,
+            e
+        );
+        ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: collector_key.clone(),
+            host: collector_params.host.clone(),
+        }
+    })?;
 
     let base_url = format!("http://{}:{}", host, collector_params.http_port);
-    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+    );
 
     let traversed_node_aggregate = client.traverse_node_aggregate(
         tca_id,
@@ -669,7 +762,13 @@ pub fn fetch_records_range<
     let (node_key, node_params) =
         get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, node_key)?;
     let host = str::from_utf8(&node_params.host).map_err(|e| {
-        log!(error, "❌ Failed to parse node host for {:?} in cluster {:?}: {:?}", node_key, cluster_id, e);
+        log!(
+            error,
+            "❌ Failed to parse node host for {:?} in cluster {:?}: {:?}",
+            node_key,
+            cluster_id,
+            e
+        );
         ApiError::NodeHostParseError {
             cluster_id: *cluster_id,
             node_key: node_key.clone(),
@@ -678,7 +777,11 @@ pub fn fetch_records_range<
     })?;
 
     let base_url = format!("http://{}:{}", host, node_params.http_port);
-    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+    );
 
     client
         .fetch_records_range(tca_id, bucket_id, record_id_gte, record_id_lte, cursor, limit, indexes)
@@ -714,18 +817,27 @@ pub fn fetch_traversed_bucket_sub_aggregate<
 ) -> Result<ApiResponse<proto::activity::ActivityTreeTraversalResponse>, ApiError> {
     let (collector_key, collector_params) =
         get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
-    let host =
-        str::from_utf8(&collector_params.host).map_err(|e| {
-            log!(error, "❌ Failed to parse collector host for node {:?} in cluster {:?}: {:?}", collector_key, cluster_id, e);
-            ApiError::NodeHostParseError {
-                cluster_id: *cluster_id,
-                node_key: collector_key.clone(),
-                host: collector_params.host.clone(),
-            }
-        })?;
+    let host = str::from_utf8(&collector_params.host).map_err(|e| {
+        log!(
+            error,
+            "❌ Failed to parse collector host for node {:?} in cluster {:?}: {:?}",
+            collector_key,
+            cluster_id,
+            e
+        );
+        ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: collector_key.clone(),
+            host: collector_params.host.clone(),
+        }
+    })?;
 
     let base_url = format!("http://{}:{}", host, collector_params.http_port);
-    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+    );
 
     let traversed_bucket_sub_aggregate = client.traverse_bucket_sub_aggregate(
         tca_id,
@@ -774,23 +886,37 @@ pub fn fetch_traversed_era_historical_document<
 ) -> Result<ApiResponse<proto::activity_tree::EhdTreeTraversalResponse>, ApiError> {
     let (g_collector_key, g_collector_params) =
         get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|e| {
-            log!(error, "❌ Failed to fetch G-Collector node for cluster {:?}: {:?}", cluster_id, e);
+            log!(
+                error,
+                "❌ Failed to fetch G-Collector node for cluster {:?}: {:?}",
+                cluster_id,
+                e
+            );
             ApiError::FailedToFetchGCollectors {
                 cluster_id: *cluster_id,
             }
         })?;
-    let host =
-        str::from_utf8(&g_collector_params.host).map_err(|e| {
-            log!(error, "❌ Failed to parse G-Collector host for node {:?} in cluster {:?}: {:?}", g_collector_key, cluster_id, e);
-            ApiError::NodeHostParseError {
-                cluster_id: *cluster_id,
-                node_key: g_collector_key.clone(),
-                host: g_collector_params.host.clone(),
-            }
-        })?;
+    let host = str::from_utf8(&g_collector_params.host).map_err(|e| {
+        log!(
+            error,
+            "❌ Failed to parse G-Collector host for node {:?} in cluster {:?}: {:?}",
+            g_collector_key,
+            cluster_id,
+            e
+        );
+        ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: g_collector_key.clone(),
+            host: g_collector_params.host.clone(),
+        }
+    })?;
 
     let base_url = format!("http://{}:{}", host, g_collector_params.http_port);
-    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+    );
 
     let traversed_ehd = client.traverse_era_historical_document(
         era,
@@ -811,7 +937,7 @@ pub fn fetch_traversed_era_historical_document<
             tree_levels_count,
         }
     })?;
-    
+
     Ok(traversed_ehd)
 }
 
@@ -832,17 +958,16 @@ pub fn get_ehd_root<
     let api_response = fetch_traversed_era_historical_document::<AccountId, BlockNumber, CM, NM>(
         cluster_id, era, 1, 1,
     )?;
-    
-    let first_node = api_response.response.nodes
-        .into_iter()
-        .next()
-        .ok_or(ApiError::FailedToFetchTraversedEHD {
+
+    let first_node = api_response.response.nodes.into_iter().next().ok_or(
+        ApiError::FailedToFetchTraversedEHD {
             cluster_id: *cluster_id,
             era,
             tree_node_id: 1,
             tree_levels_count: 1,
-        })?;
-    
+        },
+    )?;
+
     Ok(ApiResponse {
         response: first_node,
         signed_by: api_response.signed_by,
@@ -869,15 +994,14 @@ pub fn get_phd_root<
         cluster_id, era, collector, 1, 1,
     )?;
 
-    let first_node = api_response.response.nodes
-        .into_iter()
-        .next()
-        .ok_or(ApiError::FailedToFetchTraversedPHD {
+    let first_node = api_response.response.nodes.into_iter().next().ok_or(
+        ApiError::FailedToFetchTraversedPHD {
             cluster_id: *cluster_id,
             era,
             tree_node_id: 1,
             tree_levels_count: 1,
-        })?;
+        },
+    )?;
 
     Ok(ApiResponse {
         response: first_node,
@@ -904,19 +1028,23 @@ pub fn get_node_tca_root<
     node_key: NodePubKey,
 ) -> Result<ApiResponse<proto::activity::ActivityTreeTraversedNode>, ApiError> {
     let api_response = fetch_traversed_node_aggregate::<AccountId, BlockNumber, CM, NM>(
-        cluster_id, tca_id, collector_key, node_key.clone(), 1, 1,
+        cluster_id,
+        tca_id,
+        collector_key,
+        node_key.clone(),
+        1,
+        1,
     )?;
 
-    let first_node = api_response.response.nodes
-        .into_iter()
-        .next()
-        .ok_or(ApiError::FailedToFetchTraversedNodeAggregate {
+    let first_node = api_response.response.nodes.into_iter().next().ok_or(
+        ApiError::FailedToFetchTraversedNodeAggregate {
             cluster_id: *cluster_id,
             tca_id,
             node_key: node_key.clone(),
             tree_node_id: 1,
             tree_levels_count: 1,
-        })?;
+        },
+    )?;
 
     Ok(ApiResponse {
         response: first_node,
@@ -945,20 +1073,25 @@ pub fn get_bucket_tca_root<
     node_key: NodePubKey,
 ) -> Result<ApiResponse<proto::activity::ActivityTreeTraversedNode>, ApiError> {
     let api_response = fetch_traversed_bucket_sub_aggregate::<AccountId, BlockNumber, CM, NM>(
-        cluster_id, tca_id, collector_key, bucket_id, node_key.clone(), 1, 1,
+        cluster_id,
+        tca_id,
+        collector_key,
+        bucket_id,
+        node_key.clone(),
+        1,
+        1,
     )?;
 
-    let first_node = api_response.response.nodes
-        .into_iter()
-        .next()
-        .ok_or(ApiError::FailedToFetchTraversedBucketSubAggregate {
+    let first_node = api_response.response.nodes.into_iter().next().ok_or(
+        ApiError::FailedToFetchTraversedBucketSubAggregate {
             cluster_id: *cluster_id,
             tca_id,
             bucket_id,
             node_key: node_key.clone(),
             tree_node_id: 1,
             tree_levels_count: 1,
-        })?;
+        },
+    )?;
 
     Ok(ApiResponse {
         response: first_node,
@@ -985,7 +1118,13 @@ pub fn fetch_processed_eras_for_cluster<
 
     if sync_node.dry_run {
         let host = str::from_utf8(&sync_node.params.host).map_err(|e| {
-            log!(error, "❌ Failed to parse sync node host for node {:?} in cluster {:?}: {:?}", sync_node.key, cluster_id, e);
+            log!(
+                error,
+                "❌ Failed to parse sync node host for node {:?} in cluster {:?}: {:?}",
+                sync_node.key,
+                cluster_id,
+                e
+            );
             ApiError::NodeHostParseError {
                 cluster_id: *cluster_id,
                 node_key: sync_node.key.clone(),
@@ -993,25 +1132,50 @@ pub fn fetch_processed_eras_for_cluster<
             }
         })?;
         let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
-        let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+        let client = DdcClient::new(
+            &base_url,
+            Duration::from_millis(RESPONSE_TIMEOUT),
+            MAX_RETRIES_COUNT,
+        );
 
         return client
             .dry_run_processed_eras(cursor, limit)
             .map(|r| r.response)
             .map_err(|e| {
-                log!(error, "❌ Failed to fetch dry-run processed eras for cluster {:?}: {:?}", cluster_id, e);
-                ApiError::FailedToFetchProcessedEras { cluster_id: *cluster_id }
+                log!(
+                    error,
+                    "❌ Failed to fetch dry-run processed eras for cluster {:?}: {:?}",
+                    cluster_id,
+                    e
+                );
+                ApiError::FailedToFetchProcessedEras {
+                    cluster_id: *cluster_id,
+                }
             });
     }
 
     let (_, g_collector_params) =
         get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|e| {
-            log!(error, "❌ Failed to fetch G-Collector node for cluster {:?}: {:?}", cluster_id, e);
-            ApiError::FailedToFetchGCollectors { cluster_id: *cluster_id }
+            log!(
+                error,
+                "❌ Failed to fetch G-Collector node for cluster {:?}: {:?}",
+                cluster_id,
+                e
+            );
+            ApiError::FailedToFetchGCollectors {
+                cluster_id: *cluster_id,
+            }
         })?;
     fetch_processed_eras(&g_collector_params, cursor, limit).map_err(|e| {
-        log!(error, "❌ Failed to fetch processed eras for cluster {:?}: {:?}", cluster_id, e);
-        ApiError::FailedToFetchProcessedEras { cluster_id: *cluster_id }
+        log!(
+            error,
+            "❌ Failed to fetch processed eras for cluster {:?}: {:?}",
+            cluster_id,
+            e
+        );
+        ApiError::FailedToFetchProcessedEras {
+            cluster_id: *cluster_id,
+        }
     })
 }
 
@@ -1022,11 +1186,19 @@ pub fn fetch_processed_eras(
     limit: Option<u32>,
 ) -> Result<proto::activity::GetErasResponse, http::Error> {
     let host = str::from_utf8(&node_params.host).map_err(|e| {
-        log!(error, "❌ Failed to parse node host for processed eras: {:?}", e);
+        log!(
+            error,
+            "❌ Failed to parse node host for processed eras: {:?}",
+            e
+        );
         http::Error::Unknown
     })?;
     let base_url = format!("http://{}:{}", host, node_params.http_port);
-    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+    );
     Ok(client.processed_eras(cursor, limit)?.response)
 }
 
@@ -1043,13 +1215,26 @@ pub fn fetch_inspected_eras_for_cluster<
     limit: Option<u32>,
 ) -> Result<proto::activity::GetErasResponse, ApiError> {
     let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|e| {
-        log!(error, "❌ Failed to fetch sync node for cluster {:?}: {:?}", cluster_id, e);
-        ApiError::FailedToFetchSyncNodes { cluster_id: *cluster_id }
+        log!(
+            error,
+            "❌ Failed to fetch sync node for cluster {:?}: {:?}",
+            cluster_id,
+            e
+        );
+        ApiError::FailedToFetchSyncNodes {
+            cluster_id: *cluster_id,
+        }
     })?;
 
     if sync_node.dry_run {
         let host = str::from_utf8(&sync_node.params.host).map_err(|e| {
-            log!(error, "❌ Failed to parse sync node host for node {:?} in cluster {:?}: {:?}", sync_node.key, cluster_id, e);
+            log!(
+                error,
+                "❌ Failed to parse sync node host for node {:?} in cluster {:?}: {:?}",
+                sync_node.key,
+                cluster_id,
+                e
+            );
             ApiError::NodeHostParseError {
                 cluster_id: *cluster_id,
                 node_key: sync_node.key.clone(),
@@ -1057,20 +1242,38 @@ pub fn fetch_inspected_eras_for_cluster<
             }
         })?;
         let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
-        let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+        let client = DdcClient::new(
+            &base_url,
+            Duration::from_millis(RESPONSE_TIMEOUT),
+            MAX_RETRIES_COUNT,
+        );
 
         return client
             .dry_run_inspected_eras(cursor, limit)
             .map(|r| r.response)
             .map_err(|e| {
-                log!(error, "❌ Failed to fetch dry-run inspected eras for cluster {:?}: {:?}", cluster_id, e);
-                ApiError::FailedToFetchInspectedEras { cluster_id: *cluster_id }
+                log!(
+                    error,
+                    "❌ Failed to fetch dry-run inspected eras for cluster {:?}: {:?}",
+                    cluster_id,
+                    e
+                );
+                ApiError::FailedToFetchInspectedEras {
+                    cluster_id: *cluster_id,
+                }
             });
     }
 
     fetch_inspected_eras(&sync_node.params, cursor, limit).map_err(|e| {
-        log!(error, "❌ Failed to fetch inspected eras for cluster {:?}: {:?}", cluster_id, e);
-        ApiError::FailedToFetchInspectedEras { cluster_id: *cluster_id }
+        log!(
+            error,
+            "❌ Failed to fetch inspected eras for cluster {:?}: {:?}",
+            cluster_id,
+            e
+        );
+        ApiError::FailedToFetchInspectedEras {
+            cluster_id: *cluster_id,
+        }
     })
 }
 
@@ -1093,7 +1296,10 @@ pub fn fetch_inspected_era<
     page.records
         .into_iter()
         .find(|e| e.id == era)
-        .ok_or(ApiError::FailedToFetchEra { cluster_id: *cluster_id, era })
+        .ok_or(ApiError::FailedToFetchEra {
+            cluster_id: *cluster_id,
+            era,
+        })
 }
 
 /// Fetch a single processed era by id.
@@ -1114,7 +1320,10 @@ pub fn fetch_processed_era<
     page.records
         .into_iter()
         .find(|e| e.id == era)
-        .ok_or(ApiError::FailedToFetchEra { cluster_id: *cluster_id, era })
+        .ok_or(ApiError::FailedToFetchEra {
+            cluster_id: *cluster_id,
+            era,
+        })
 }
 
 /// Fetch inspected EHD eras from a sync node via /activity/inspected-eras.
@@ -1125,11 +1334,19 @@ pub fn fetch_inspected_eras(
     limit: Option<u32>,
 ) -> Result<proto::activity::GetErasResponse, http::Error> {
     let host = str::from_utf8(&node_params.host).map_err(|e| {
-        log!(error, "❌ Failed to parse node host for inspected eras: {:?}", e);
+        log!(
+            error,
+            "❌ Failed to parse node host for inspected eras: {:?}",
+            e
+        );
         http::Error::Unknown
     })?;
     let base_url = format!("http://{}:{}", host, node_params.http_port);
-    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+    );
     Ok(client.inspected_eras(cursor, limit)?.response)
 }
 
@@ -1146,7 +1363,11 @@ pub fn fetch_tcas_page(
         http::Error::Unknown
     })?;
     let base_url = format!("http://{}:{}", host, node_params.http_port);
-    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+    );
     let api_response = client.tcas(cursor, limit)?;
     Ok(api_response.response)
 }
@@ -1182,7 +1403,11 @@ pub fn fetch_eras_page(
         http::Error::Unknown
     })?;
     let base_url = format!("http://{}:{}", host, node_params.http_port);
-    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+    );
     let api_response = client.eras(cursor, limit)?;
     Ok(api_response.response)
 }
@@ -1221,27 +1446,40 @@ pub fn post_itm_lease<
 ) -> Result<proto::inspection::LeaseResult, ApiError> {
     let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
-    let host =
-        str::from_utf8(&sync_node.params.host).map_err(|e| {
-            log!(error, "❌ Failed to parse sync node host for node {:?} in cluster {:?}: {:?}", sync_node.key, cluster_id, e);
-            ApiError::NodeHostParseError {
-                cluster_id: *cluster_id,
-                node_key: sync_node.key.clone(),
-                host: sync_node.params.host.clone(),
-            }
-        })?;
+    let host = str::from_utf8(&sync_node.params.host).map_err(|e| {
+        log!(
+            error,
+            "❌ Failed to parse sync node host for node {:?} in cluster {:?}: {:?}",
+            sync_node.key,
+            cluster_id,
+            e
+        );
+        ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: sync_node.key.clone(),
+            host: sync_node.params.host.clone(),
+        }
+    })?;
     let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
-    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT).with_dry_run(sync_node.dry_run);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+    )
+    .with_dry_run(sync_node.dry_run);
 
-    client
-        .post_itm_lease(request)
-        .map_err(|e| {
-            log!(error, "❌ Failed to post ITM lease for cluster {:?}: {:?}", cluster_id, e);
-            ApiError::HttpClientError {
-                cluster_id: *cluster_id,
-                host: sync_node.params.host.clone(),
-            }
-        })
+    client.post_itm_lease(request).map_err(|e| {
+        log!(
+            error,
+            "❌ Failed to post ITM lease for cluster {:?}: {:?}",
+            cluster_id,
+            e
+        );
+        ApiError::HttpClientError {
+            cluster_id: *cluster_id,
+            host: sync_node.params.host.clone(),
+        }
+    })
 }
 
 pub fn submit_assignments_table<
@@ -1255,27 +1493,40 @@ pub fn submit_assignments_table<
 ) -> Result<proto::inspection::PostAssignmentTableResponse, ApiError> {
     let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
-    let host =
-        str::from_utf8(&sync_node.params.host).map_err(|e| {
-            log!(error, "❌ Failed to parse sync node host for node {:?} in cluster {:?}: {:?}", sync_node.key, cluster_id, e);
-            ApiError::NodeHostParseError {
-                cluster_id: *cluster_id,
-                node_key: sync_node.key.clone(),
-                host: sync_node.params.host.clone(),
-            }
-        })?;
+    let host = str::from_utf8(&sync_node.params.host).map_err(|e| {
+        log!(
+            error,
+            "❌ Failed to parse sync node host for node {:?} in cluster {:?}: {:?}",
+            sync_node.key,
+            cluster_id,
+            e
+        );
+        ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: sync_node.key.clone(),
+            host: sync_node.params.host.clone(),
+        }
+    })?;
     let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
-    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT).with_dry_run(sync_node.dry_run);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+    )
+    .with_dry_run(sync_node.dry_run);
 
-    client
-        .submit_assignments_table(request)
-        .map_err(|e| {
-            log!(error, "❌ Failed to submit assignments table for cluster {:?}: {:?}", cluster_id, e);
-            ApiError::HttpClientError {
-                cluster_id: *cluster_id,
-                host: sync_node.params.host.clone(),
-            }
-        })
+    client.submit_assignments_table(request).map_err(|e| {
+        log!(
+            error,
+            "❌ Failed to submit assignments table for cluster {:?}: {:?}",
+            cluster_id,
+            e
+        );
+        ApiError::HttpClientError {
+            cluster_id: *cluster_id,
+            host: sync_node.params.host.clone(),
+        }
+    })
 }
 
 pub fn get_assignments_table<
@@ -1289,27 +1540,41 @@ pub fn get_assignments_table<
 ) -> Result<proto::inspection::GetAssignmentTableResponse, ApiError> {
     let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
-    let host =
-        str::from_utf8(&sync_node.params.host).map_err(|e| {
-            log!(error, "❌ Failed to parse sync node host for node {:?} in cluster {:?}: {:?}", sync_node.key, cluster_id, e);
-            ApiError::NodeHostParseError {
-                cluster_id: *cluster_id,
-                node_key: sync_node.key.clone(),
-                host: sync_node.params.host.clone(),
-            }
-        })?;
+    let host = str::from_utf8(&sync_node.params.host).map_err(|e| {
+        log!(
+            error,
+            "❌ Failed to parse sync node host for node {:?} in cluster {:?}: {:?}",
+            sync_node.key,
+            cluster_id,
+            e
+        );
+        ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: sync_node.key.clone(),
+            host: sync_node.params.host.clone(),
+        }
+    })?;
     let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
-    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT).with_dry_run(sync_node.dry_run);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+    )
+    .with_dry_run(sync_node.dry_run);
 
-    client
-        .get_assignments_table(era)
-        .map_err(|e| {
-            log!(error, "❌ Failed to get assignments table for cluster {:?}, era {:?}: {:?}", cluster_id, era, e);
-            ApiError::HttpClientError {
-                cluster_id: *cluster_id,
-                host: sync_node.params.host.clone(),
-            }
-        })
+    client.get_assignments_table(era).map_err(|e| {
+        log!(
+            error,
+            "❌ Failed to get assignments table for cluster {:?}, era {:?}: {:?}",
+            cluster_id,
+            era,
+            e
+        );
+        ApiError::HttpClientError {
+            cluster_id: *cluster_id,
+            host: sync_node.params.host.clone(),
+        }
+    })
 }
 
 pub fn submit_inspection_result<
@@ -1323,27 +1588,40 @@ pub fn submit_inspection_result<
 ) -> Result<proto::inspection::PostInspectionResultResponse, ApiError> {
     let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
-    let host =
-        str::from_utf8(&sync_node.params.host).map_err(|e| {
-            log!(error, "❌ Failed to parse sync node host for node {:?} in cluster {:?}: {:?}", sync_node.key, cluster_id, e);
-            ApiError::NodeHostParseError {
-                cluster_id: *cluster_id,
-                node_key: sync_node.key.clone(),
-                host: sync_node.params.host.clone(),
-            }
-        })?;
+    let host = str::from_utf8(&sync_node.params.host).map_err(|e| {
+        log!(
+            error,
+            "❌ Failed to parse sync node host for node {:?} in cluster {:?}: {:?}",
+            sync_node.key,
+            cluster_id,
+            e
+        );
+        ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: sync_node.key.clone(),
+            host: sync_node.params.host.clone(),
+        }
+    })?;
     let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
-    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT).with_dry_run(sync_node.dry_run);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+    )
+    .with_dry_run(sync_node.dry_run);
 
-    client
-        .submit_inspection_result(request)
-        .map_err(|e| {
-            log!(error, "❌ Failed to submit inspection result for cluster {:?}: {:?}", cluster_id, e);
-            ApiError::HttpClientError {
-                cluster_id: *cluster_id,
-                host: sync_node.params.host.clone(),
-            }
-        })
+    client.submit_inspection_result(request).map_err(|e| {
+        log!(
+            error,
+            "❌ Failed to submit inspection result for cluster {:?}: {:?}",
+            cluster_id,
+            e
+        );
+        ApiError::HttpClientError {
+            cluster_id: *cluster_id,
+            host: sync_node.params.host.clone(),
+        }
+    })
 }
 
 pub fn get_inspection_state<
@@ -1357,27 +1635,41 @@ pub fn get_inspection_state<
 ) -> Result<proto::inspection::InspectionState, ApiError> {
     let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
-    let host =
-        str::from_utf8(&sync_node.params.host).map_err(|e| {
-            log!(error, "❌ Failed to parse sync node host for node {:?} in cluster {:?}: {:?}", sync_node.key, cluster_id, e);
-            ApiError::NodeHostParseError {
-                cluster_id: *cluster_id,
-                node_key: sync_node.key.clone(),
-                host: sync_node.params.host.clone(),
-            }
-        })?;
+    let host = str::from_utf8(&sync_node.params.host).map_err(|e| {
+        log!(
+            error,
+            "❌ Failed to parse sync node host for node {:?} in cluster {:?}: {:?}",
+            sync_node.key,
+            cluster_id,
+            e
+        );
+        ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: sync_node.key.clone(),
+            host: sync_node.params.host.clone(),
+        }
+    })?;
     let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
-    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT).with_dry_run(sync_node.dry_run);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+    )
+    .with_dry_run(sync_node.dry_run);
 
-    client
-        .get_inspection_state(era)
-        .map_err(|e| {
-            log!(error, "❌ Failed to get inspection state for cluster {:?}, era {:?}: {:?}", cluster_id, era, e);
-            ApiError::HttpClientError {
-                cluster_id: *cluster_id,
-                host: sync_node.params.host.clone(),
-            }
-        })
+    client.get_inspection_state(era).map_err(|e| {
+        log!(
+            error,
+            "❌ Failed to get inspection state for cluster {:?}, era {:?}: {:?}",
+            cluster_id,
+            era,
+            e
+        );
+        ApiError::HttpClientError {
+            cluster_id: *cluster_id,
+            host: sync_node.params.host.clone(),
+        }
+    })
 }
 
 pub fn get_inspection_receipt<
@@ -1391,27 +1683,41 @@ pub fn get_inspection_receipt<
 ) -> Result<proto::inspection::InspectionReceipt, ApiError> {
     let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
-    let host =
-        str::from_utf8(&sync_node.params.host).map_err(|e| {
-            log!(error, "❌ Failed to parse sync node host for node {:?} in cluster {:?}: {:?}", sync_node.key, cluster_id, e);
-            ApiError::NodeHostParseError {
-                cluster_id: *cluster_id,
-                node_key: sync_node.key.clone(),
-                host: sync_node.params.host.clone(),
-            }
-        })?;
+    let host = str::from_utf8(&sync_node.params.host).map_err(|e| {
+        log!(
+            error,
+            "❌ Failed to parse sync node host for node {:?} in cluster {:?}: {:?}",
+            sync_node.key,
+            cluster_id,
+            e
+        );
+        ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: sync_node.key.clone(),
+            host: sync_node.params.host.clone(),
+        }
+    })?;
     let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
-    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT).with_dry_run(sync_node.dry_run);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+    )
+    .with_dry_run(sync_node.dry_run);
 
-    client
-        .get_inspection_receipt(era)
-        .map_err(|e| {
-            log!(error, "❌ Failed to get inspection receipt for cluster {:?}, era {:?}: {:?}", cluster_id, era, e);
-            ApiError::FailedToFetchInspSummary {
-                cluster_id: *cluster_id,
-                era,
-            }
-        })
+    client.get_inspection_receipt(era).map_err(|e| {
+        log!(
+            error,
+            "❌ Failed to get inspection receipt for cluster {:?}, era {:?}: {:?}",
+            cluster_id,
+            era,
+            e
+        );
+        ApiError::FailedToFetchInspSummary {
+            cluster_id: *cluster_id,
+            era,
+        }
+    })
 }
 
 pub fn get_quorum_info<
@@ -1425,25 +1731,38 @@ pub fn get_quorum_info<
 ) -> Result<proto::inspection::InspSyncQuorumInfo, ApiError> {
     let sync_node = get_sync_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 
-    let host =
-        str::from_utf8(&sync_node.params.host).map_err(|e| {
-            log!(error, "❌ Failed to parse sync node host for node {:?} in cluster {:?}: {:?}", sync_node.key, cluster_id, e);
-            ApiError::NodeHostParseError {
-                cluster_id: *cluster_id,
-                node_key: sync_node.key.clone(),
-                host: sync_node.params.host.clone(),
-            }
-        })?;
+    let host = str::from_utf8(&sync_node.params.host).map_err(|e| {
+        log!(
+            error,
+            "❌ Failed to parse sync node host for node {:?} in cluster {:?}: {:?}",
+            sync_node.key,
+            cluster_id,
+            e
+        );
+        ApiError::NodeHostParseError {
+            cluster_id: *cluster_id,
+            node_key: sync_node.key.clone(),
+            host: sync_node.params.host.clone(),
+        }
+    })?;
     let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
-    let client = DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+    let client = DdcClient::new(
+        &base_url,
+        Duration::from_millis(RESPONSE_TIMEOUT),
+        MAX_RETRIES_COUNT,
+    );
 
-    client
-        .get_quorum_info(era)
-        .map_err(|e| {
-            log!(error, "❌ Failed to get quorum info for cluster {:?}, era {:?}: {:?}", cluster_id, era, e);
-            ApiError::HttpClientError {
-                cluster_id: *cluster_id,
-                host: sync_node.params.host.clone(),
-            }
-        })
+    client.get_quorum_info(era).map_err(|e| {
+        log!(
+            error,
+            "❌ Failed to get quorum info for cluster {:?}, era {:?}: {:?}",
+            cluster_id,
+            era,
+            e
+        );
+        ApiError::HttpClientError {
+            cluster_id: *cluster_id,
+            host: sync_node.params.host.clone(),
+        }
+    })
 }

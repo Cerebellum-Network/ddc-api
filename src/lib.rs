@@ -19,7 +19,7 @@ pub mod proto {
         include!(concat!(env!("OUT_DIR"), "/activity.rs"));
 
         // Backward compatibility: AuthToken, Payload, Operation moved to proto::auth
-        pub use super::auth::{AuthToken, Payload, Operation};
+        pub use super::auth::{AuthToken, Operation, Payload};
 
         impl ActivityTreeTraversedNode {
             pub fn get_activity(&self) -> Option<super::activity_tree::ActivityNode> {
@@ -271,7 +271,10 @@ pub mod proto {
                 assert_eq!(decoded.status, PostInspectionResultStatus::Partial as i32);
                 assert_eq!(decoded.accepted_count, 3);
                 assert_eq!(decoded.rejected_count, 1);
-                assert_eq!(decoded.rejected_paths[0].reason, RejectionReason::Duplicate as i32);
+                assert_eq!(
+                    decoded.rejected_paths[0].reason,
+                    RejectionReason::Duplicate as i32
+                );
             }
 
             #[test]
@@ -413,10 +416,22 @@ pub mod proto {
                 assert_eq!(LeaseStatus::HeldByOther as i32, 2);
                 assert_eq!(LeaseStatus::Error as i32, 3);
 
-                assert_eq!(InspectionPathStatusEnum::InspectionPathStatusUnspecified as i32, 0);
-                assert_eq!(InspectionPathStatusEnum::InspectionPathStatusPending as i32, 1);
-                assert_eq!(InspectionPathStatusEnum::InspectionPathStatusIrfReached as i32, 2);
-                assert_eq!(InspectionPathStatusEnum::InspectionPathStatusIrfUnreached as i32, 3);
+                assert_eq!(
+                    InspectionPathStatusEnum::InspectionPathStatusUnspecified as i32,
+                    0
+                );
+                assert_eq!(
+                    InspectionPathStatusEnum::InspectionPathStatusPending as i32,
+                    1
+                );
+                assert_eq!(
+                    InspectionPathStatusEnum::InspectionPathStatusIrfReached as i32,
+                    2
+                );
+                assert_eq!(
+                    InspectionPathStatusEnum::InspectionPathStatusIrfUnreached as i32,
+                    3
+                );
 
                 assert_eq!(GetAssignmentTableStatus::Found as i32, 1);
                 assert_eq!(GetAssignmentTableStatus::NotFound as i32, 2);
@@ -521,11 +536,10 @@ pub mod proto {
         }
     }
 
-    pub use self::inspection::InspectionReceipt;
-    pub use self::inspection::InspPathException;
     pub use self::inspection::insp_path_exception;
+    pub use self::inspection::InspPathException;
+    pub use self::inspection::InspectionReceipt;
     pub use self::inspection::UnverifiedPath;
-
 
     impl InspectionReceipt {
         pub fn to_proto_bytes(&self) -> sp_std::vec::Vec<u8> {
@@ -546,7 +560,9 @@ pub mod proto {
             match self.kind {
                 Some(insp_path_exception::Kind::MultipleExceptions(mut m)) => {
                     m.exceptions.push(other);
-                    Self { kind: Some(insp_path_exception::Kind::MultipleExceptions(m)) }
+                    Self {
+                        kind: Some(insp_path_exception::Kind::MultipleExceptions(m)),
+                    }
                 }
                 _ => Self {
                     kind: Some(insp_path_exception::Kind::MultipleExceptions(
@@ -646,14 +662,16 @@ pub mod proto {
         impl EhdTreeTraversedNode {
             /// Returns parsed PHD collector keys, filtering out any that fail to parse.
             pub fn get_phd_collectors(&self) -> impl Iterator<Item = NodePubKey> + '_ {
-                self.phd_collectors.iter().filter_map(|s| NodePubKey::try_from(s.clone()).ok())
+                self.phd_collectors
+                    .iter()
+                    .filter_map(|s| NodePubKey::try_from(s.clone()).ok())
             }
 
             /// Returns cluster usage aggregated from all providers.
             pub fn get_cluster_usage(&self) -> ActivityNode {
-                self.providers.iter().fold(
-                    ActivityNode::default(),
-                    |mut acc, provider| {
+                self.providers
+                    .iter()
+                    .fold(ActivityNode::default(), |mut acc, provider| {
                         if let Some(usage) = &provider.provided_usage {
                             acc.stored = acc.stored.saturating_add(usage.stored);
                             acc.transferred = acc.transferred.saturating_add(usage.transferred);
@@ -662,11 +680,11 @@ pub mod proto {
                             acc.cpu_units = acc.cpu_units.saturating_add(usage.cpu_units);
                             acc.gpu_units = acc.gpu_units.saturating_add(usage.gpu_units);
                             acc.ram_units = acc.ram_units.saturating_add(usage.ram_units);
-                            acc.compute_count = acc.compute_count.saturating_add(usage.compute_count);
+                            acc.compute_count =
+                                acc.compute_count.saturating_add(usage.compute_count);
                         }
                         acc
-                    },
-                )
+                    })
             }
         }
 
@@ -674,7 +692,9 @@ pub mod proto {
             pub fn get_node_key(&self) -> Option<NodePubKey> {
                 if self.node_key.len() == 32 {
                     let arr: [u8; 32] = self.node_key.as_slice().try_into().ok()?;
-                    Some(NodePubKey::StoragePubKey(sp_runtime::AccountId32::from(arr)))
+                    Some(NodePubKey::StoragePubKey(sp_runtime::AccountId32::from(
+                        arr,
+                    )))
                 } else {
                     None
                 }
@@ -685,7 +705,9 @@ pub mod proto {
             pub fn get_node_key(&self) -> Option<NodePubKey> {
                 if self.node_key.len() == 32 {
                     let arr: [u8; 32] = self.node_key.as_slice().try_into().ok()?;
-                    Some(NodePubKey::StoragePubKey(sp_runtime::AccountId32::from(arr)))
+                    Some(NodePubKey::StoragePubKey(sp_runtime::AccountId32::from(
+                        arr,
+                    )))
                 } else {
                     None
                 }
@@ -693,7 +715,6 @@ pub mod proto {
         }
 
         impl ActivityNode {
-
             /// Encodes ActivityNode to protobuf bytes
             pub fn to_proto_bytes(&self) -> sp_std::vec::Vec<u8> {
                 use prost::Message;
@@ -706,6 +727,5 @@ pub mod proto {
                 Self::decode(bytes).ok()
             }
         }
-
     }
 }

@@ -86,10 +86,7 @@ fn main() -> Result<()> {
         "activity_tree.BucketSubTreeLeaf",
         "#[derive(Eq, PartialOrd, Ord)]",
     );
-    prost_build.type_attribute(
-        "activity_tree.TcaPayload",
-        "#[derive(Eq, PartialOrd, Ord)]",
-    );
+    prost_build.type_attribute("activity_tree.TcaPayload", "#[derive(Eq, PartialOrd, Ord)]");
     prost_build.type_attribute(
         "activity_tree.TcaBucketAggregate",
         "#[derive(Eq, PartialOrd, Ord)]",
@@ -98,18 +95,9 @@ fn main() -> Result<()> {
         "activity_tree.TcaNodeAggregate",
         "#[derive(Eq, PartialOrd, Ord)]",
     );
-    prost_build.type_attribute(
-        "activity_tree.PhdPayload",
-        "#[derive(Eq, PartialOrd)]",
-    );
-    prost_build.type_attribute(
-        "activity_tree.EhdPayload",
-        "#[derive(Eq, PartialOrd)]",
-    );
-    prost_build.type_attribute(
-        "inspection.VerifiedUsage",
-        "#[derive(Eq, PartialOrd, Ord)]",
-    );
+    prost_build.type_attribute("activity_tree.PhdPayload", "#[derive(Eq, PartialOrd)]");
+    prost_build.type_attribute("activity_tree.EhdPayload", "#[derive(Eq, PartialOrd)]");
+    prost_build.type_attribute("inspection.VerifiedUsage", "#[derive(Eq, PartialOrd, Ord)]");
     prost_build.type_attribute(
         "inspection.EraVerifiedUsage",
         "#[derive(Eq, PartialOrd, Ord)]",
