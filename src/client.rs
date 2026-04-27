@@ -65,6 +65,27 @@ macro_rules! fetch_and_parse_proto {
     }};
 }
 
+/// Decode a signed-envelope response body, verify the signature, and
+/// return the inner proto. Used by every /v1/itm/* call (both POST and GET)
+/// that receives a SignedResponse-wrapped body.
+fn decode_signed_proto<R: Message + Default>(
+    url: &str,
+    body: &[u8],
+) -> Result<R, http::Error> {
+    let signed = proto::signature::SignedResponse::decode(body).map_err(|e| {
+        log!(error, "❌ Failed to decode SignedResponse from {:?}: {:?}", url, e);
+        http::Error::Unknown
+    })?;
+    if !signed.verify() {
+        log!(error, "❌ Bad signature on response from {:?}", url);
+        return Err(http::Error::Unknown);
+    }
+    R::decode(signed.payload.as_slice()).map_err(|e| {
+        log!(error, "❌ Failed to decode signed payload from {:?}: {:?}", url, e);
+        http::Error::Unknown
+    })
+}
+
 impl<'a> DdcClient<'a> {
     pub fn new(base_url: &'a str, timeout: Duration, retries: u32) -> Self {
         Self {
@@ -386,10 +407,7 @@ impl<'a> DdcClient<'a> {
         let response = self.post_proto(&url, body)?;
         let body = response.body().collect::<Vec<u8>>();
 
-        proto::inspection::LeaseResult::decode(body.as_slice()).map_err(|e| {
-            log!(error, "❌ Failed to decode LeaseResult protobuf: {:?}", e);
-            http::Error::Unknown
-        })
+        decode_signed_proto::<proto::inspection::LeaseResult>(&url, &body)
     }
 
     /// POST /itm/submit - Submit completed assignment table (protobuf)
@@ -410,16 +428,7 @@ impl<'a> DdcClient<'a> {
         let response = self.post_proto(&url, body)?;
         let body = response.body().collect::<Vec<u8>>();
 
-        proto::inspection::PostAssignmentTableResponse::decode(body.as_slice()).map_err(
-            |e| {
-                log!(
-                    error,
-                    "❌ Failed to decode PostAssignmentTableResponse protobuf: {:?}",
-                    e
-                );
-                http::Error::Unknown
-            },
-        )
+        decode_signed_proto::<proto::inspection::PostAssignmentTableResponse>(&url, &body)
     }
 
     /// GET /itm/table - Retrieve assignment table (protobuf)
@@ -432,16 +441,7 @@ impl<'a> DdcClient<'a> {
         let response = self.get(&url, Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
 
-        proto::inspection::GetAssignmentTableResponse::decode(body.as_slice()).map_err(
-            |e| {
-                log!(
-                    error,
-                    "❌ Failed to decode GetAssignmentTableResponse protobuf: {:?}",
-                    e
-                );
-                http::Error::Unknown
-            },
-        )
+        decode_signed_proto::<proto::inspection::GetAssignmentTableResponse>(&url, &body)
     }
 
     /// POST /itm/path - Submit inspection path results (protobuf)
@@ -455,16 +455,7 @@ impl<'a> DdcClient<'a> {
         let response = self.post_proto(&url, body)?;
         let body = response.body().collect::<Vec<u8>>();
 
-        proto::inspection::PostInspectionResultResponse::decode(body.as_slice()).map_err(
-            |e| {
-                log!(
-                    error,
-                    "❌ Failed to decode PostInspectionResultResponse protobuf: {:?}",
-                    e
-                );
-                http::Error::Unknown
-            },
-        )
+        decode_signed_proto::<proto::inspection::PostInspectionResultResponse>(&url, &body)
     }
 
     /// GET /itm/state - Retrieve inspection state (protobuf)
@@ -477,14 +468,7 @@ impl<'a> DdcClient<'a> {
         let response = self.get(&url, Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
 
-        proto::inspection::InspectionState::decode(body.as_slice()).map_err(|e| {
-            log!(
-                error,
-                "❌ Failed to decode InspectionState protobuf: {:?}",
-                e
-            );
-            http::Error::Unknown
-        })
+        decode_signed_proto::<proto::inspection::InspectionState>(&url, &body)
     }
 
     /// GET /itm/receipt - Retrieve inspection receipt (protobuf)
@@ -497,14 +481,7 @@ impl<'a> DdcClient<'a> {
         let response = self.get(&url, Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
 
-        proto::inspection::InspectionReceipt::decode(body.as_slice()).map_err(|e| {
-            log!(
-                error,
-                "❌ Failed to decode InspectionReceipt protobuf: {:?}",
-                e
-            );
-            http::Error::Unknown
-        })
+        decode_signed_proto::<proto::inspection::InspectionReceipt>(&url, &body)
     }
 
     /// GET /itm/quorum - Retrieve quorum information (protobuf)
@@ -512,19 +489,12 @@ impl<'a> DdcClient<'a> {
         &self,
         era: EhdEra,
     ) -> Result<proto::inspection::InspSyncQuorumInfo, http::Error> {
-        let url = format!("{}/itm/quorum?eraId={}", self.base_url, era);
+        let url = format!("{}/v1/itm/quorum?eraId={}", self.base_url, era);
 
         let response = self.get(&url, Accept::Protobuf)?;
         let body = response.body().collect::<Vec<u8>>();
 
-        proto::inspection::InspSyncQuorumInfo::decode(body.as_slice()).map_err(|e| {
-            log!(
-                error,
-                "❌ Failed to decode InspSyncQuorumInfo protobuf: {:?}",
-                e
-            );
-            http::Error::Unknown
-        })
+        decode_signed_proto::<proto::inspection::InspSyncQuorumInfo>(&url, &body)
     }
 
     pub fn get_grouping_collectors(
