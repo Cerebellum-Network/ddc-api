@@ -59,6 +59,10 @@ fn main() -> Result<()> {
         "#[derive(Eq, PartialOrd, Ord)]",
     );
     prost_build.type_attribute(
+        "activity_tree.BucketSubAggregateMetadata",
+        "#[derive(Eq, PartialOrd, Ord)]",
+    );
+    prost_build.type_attribute(
         "activity_tree.BucketAggregate",
         "#[derive(Eq, PartialOrd, Ord)]",
     );
@@ -67,11 +71,11 @@ fn main() -> Result<()> {
         "#[derive(Eq, PartialOrd, Ord)]",
     );
     prost_build.type_attribute(
-        "activity_tree.ActivityTreeTraversedNode",
+        "activity.ActivityTreeTraversedNode",
         "#[derive(Eq, PartialOrd, Ord)]",
     );
     prost_build.type_attribute(
-        "activity_tree.ActivityTreeTraversalResponse",
+        "activity.ActivityTreeTraversalResponse",
         "#[derive(Eq, PartialOrd, Ord)]",
     );
     prost_build.type_attribute(
@@ -82,10 +86,7 @@ fn main() -> Result<()> {
         "activity_tree.BucketSubTreeLeaf",
         "#[derive(Eq, PartialOrd, Ord)]",
     );
-    prost_build.type_attribute(
-        "activity_tree.TcaPayload",
-        "#[derive(Eq, PartialOrd, Ord)]",
-    );
+    prost_build.type_attribute("activity_tree.TcaPayload", "#[derive(Eq, PartialOrd, Ord)]");
     prost_build.type_attribute(
         "activity_tree.TcaBucketAggregate",
         "#[derive(Eq, PartialOrd, Ord)]",
@@ -94,18 +95,9 @@ fn main() -> Result<()> {
         "activity_tree.TcaNodeAggregate",
         "#[derive(Eq, PartialOrd, Ord)]",
     );
-    prost_build.type_attribute(
-        "activity_tree.PhdPayload",
-        "#[derive(Eq, PartialOrd)]",
-    );
-    prost_build.type_attribute(
-        "activity_tree.EhdPayload",
-        "#[derive(Eq, PartialOrd)]",
-    );
-    prost_build.type_attribute(
-        "inspection.VerifiedUsage",
-        "#[derive(Eq, PartialOrd, Ord)]",
-    );
+    prost_build.type_attribute("activity_tree.PhdPayload", "#[derive(Eq, PartialOrd)]");
+    prost_build.type_attribute("activity_tree.EhdPayload", "#[derive(Eq, PartialOrd)]");
+    prost_build.type_attribute("inspection.VerifiedUsage", "#[derive(Eq, PartialOrd, Ord)]");
     prost_build.type_attribute(
         "inspection.EraVerifiedUsage",
         "#[derive(Eq, PartialOrd, Ord)]",
@@ -129,8 +121,9 @@ fn main() -> Result<()> {
             format!("{proto_dir}/activity/tree/tca.proto"),
             format!("{proto_dir}/activity/tree/phd.proto"),
             format!("{proto_dir}/activity/tree/ehd.proto"),
+            format!("{proto_dir}/activity/api.proto"),
+            format!("{proto_dir}/activity/wasm_abi.proto"),
             format!("{proto_dir}/inspection/inspection.proto"),
-            format!("{proto_dir}/inspection/challenge.proto"),
             format!("{proto_dir}/era/era.proto"),
         ],
         &[proto_dir],

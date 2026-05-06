@@ -6,7 +6,6 @@ pub mod api;
 pub mod client;
 pub mod verification;
 
-pub mod json;
 pub mod proto {
     pub mod signature {
         include!(concat!(env!("OUT_DIR"), "/signature.rs"));
@@ -20,7 +19,13 @@ pub mod proto {
         include!(concat!(env!("OUT_DIR"), "/activity.rs"));
 
         // Backward compatibility: AuthToken, Payload, Operation moved to proto::auth
-        pub use super::auth::{AuthToken, Payload, Operation};
+        pub use super::auth::{AuthToken, Operation, Payload};
+
+        impl ActivityTreeTraversedNode {
+            pub fn get_activity(&self) -> Option<super::activity_tree::ActivityNode> {
+                self.activity.clone()
+            }
+        }
     }
 
     pub mod era {
@@ -90,8 +95,10 @@ pub mod proto {
                         collectors: vec!["0xc0c1".into(), "0xc2c3".into()],
                         path_data: Some(PathData::NodeAr(NodeArPath {
                             node_key: "0x0a0b".into(),
-                            leaves_ids: vec![1, 2, 3],
+                            leaves_pos: vec![1, 2, 3],
                             tca_id: 5,
+                            record_id_range_start: vec![],
+                            record_id_range_end: vec![],
                         })),
                     },
                 );
@@ -133,7 +140,7 @@ pub mod proto {
                 match &decoded.paths["path-001"].path_data {
                     Some(PathData::NodeAr(node_ar)) => {
                         assert_eq!(node_ar.node_key, "0x0a0b");
-                        assert_eq!(node_ar.leaves_ids, vec![1, 2, 3]);
+                        assert_eq!(node_ar.leaves_pos, vec![1, 2, 3]);
                         assert_eq!(node_ar.tca_id, 5);
                     }
                     _ => panic!("Expected NodeAr path_data"),
@@ -264,7 +271,10 @@ pub mod proto {
                 assert_eq!(decoded.status, PostInspectionResultStatus::Partial as i32);
                 assert_eq!(decoded.accepted_count, 3);
                 assert_eq!(decoded.rejected_count, 1);
-                assert_eq!(decoded.rejected_paths[0].reason, RejectionReason::Duplicate as i32);
+                assert_eq!(
+                    decoded.rejected_paths[0].reason,
+                    RejectionReason::Duplicate as i32
+                );
             }
 
             #[test]
@@ -406,10 +416,22 @@ pub mod proto {
                 assert_eq!(LeaseStatus::HeldByOther as i32, 2);
                 assert_eq!(LeaseStatus::Error as i32, 3);
 
-                assert_eq!(InspectionPathStatusEnum::InspectionPathStatusUnspecified as i32, 0);
-                assert_eq!(InspectionPathStatusEnum::InspectionPathStatusPending as i32, 1);
-                assert_eq!(InspectionPathStatusEnum::InspectionPathStatusIrfReached as i32, 2);
-                assert_eq!(InspectionPathStatusEnum::InspectionPathStatusIrfUnreached as i32, 3);
+                assert_eq!(
+                    InspectionPathStatusEnum::InspectionPathStatusUnspecified as i32,
+                    0
+                );
+                assert_eq!(
+                    InspectionPathStatusEnum::InspectionPathStatusPending as i32,
+                    1
+                );
+                assert_eq!(
+                    InspectionPathStatusEnum::InspectionPathStatusIrfReached as i32,
+                    2
+                );
+                assert_eq!(
+                    InspectionPathStatusEnum::InspectionPathStatusIrfUnreached as i32,
+                    3
+                );
 
                 assert_eq!(GetAssignmentTableStatus::Found as i32, 1);
                 assert_eq!(GetAssignmentTableStatus::NotFound as i32, 2);
@@ -514,11 +536,10 @@ pub mod proto {
         }
     }
 
-    pub use self::inspection::InspectionReceipt;
-    pub use self::inspection::InspPathException;
     pub use self::inspection::insp_path_exception;
+    pub use self::inspection::InspPathException;
+    pub use self::inspection::InspectionReceipt;
     pub use self::inspection::UnverifiedPath;
-
 
     impl InspectionReceipt {
         pub fn to_proto_bytes(&self) -> sp_std::vec::Vec<u8> {
@@ -539,7 +560,9 @@ pub mod proto {
             match self.kind {
                 Some(insp_path_exception::Kind::MultipleExceptions(mut m)) => {
                     m.exceptions.push(other);
-                    Self { kind: Some(insp_path_exception::Kind::MultipleExceptions(m)) }
+                    Self {
+                        kind: Some(insp_path_exception::Kind::MultipleExceptions(m)),
+                    }
                 }
                 _ => Self {
                     kind: Some(insp_path_exception::Kind::MultipleExceptions(
@@ -548,6 +571,38 @@ pub mod proto {
                         },
                     )),
                 },
+            }
+        }
+    }
+
+    impl From<&activity_tree::ActivityNode> for inspection::PathValue {
+        fn from(a: &activity_tree::ActivityNode) -> Self {
+            inspection::PathValue {
+                put_count: a.put_count,
+                get_count: a.get_count,
+                stored: a.stored,
+                transferred: a.transferred,
+                cpu_units: a.cpu_units,
+                gpu_units: a.gpu_units,
+                ram_units: a.ram_units,
+                compute_count: a.compute_count,
+            }
+        }
+    }
+
+    impl From<&inspection::PathValue> for activity_tree::ActivityNode {
+        fn from(v: &inspection::PathValue) -> Self {
+            activity_tree::ActivityNode {
+                put_count: v.put_count,
+                get_count: v.get_count,
+                stored: v.stored,
+                transferred: v.transferred,
+                cpu_units: v.cpu_units,
+                gpu_units: v.gpu_units,
+                ram_units: v.ram_units,
+                compute_count: v.compute_count,
+                record_id_range_start: Default::default(),
+                record_id_range_end: Default::default(),
             }
         }
     }
@@ -568,51 +623,55 @@ pub mod proto {
 
     impl inspection::InspectionPathResult {
         /// Creates a new `InspectionPathResult` with `result_hash` computed as
-        /// Blake2b-256(path_hash_bytes || exception_bytes || source_collectors).
+        /// Blake2b-256(path_hash || exception_bytes || source_nodes).
         pub fn new(
-            path_hash: scale_info::prelude::string::String,
+            path_hash: sp_std::vec::Vec<u8>,
             exception: Option<inspection::InspPathException>,
-            source_collectors: sp_std::vec::Vec<inspection::Provenance>,
+            source_nodes: sp_std::vec::Vec<inspection::NodeProvenance>,
         ) -> Self {
             use blake2::digest::{consts::U32, Digest};
             use prost::Message;
-            let path_hash_bytes = hex::decode(path_hash.trim_start_matches("0x"))
-                .unwrap_or_default();
             let mut data = sp_std::vec::Vec::new();
-            data.extend_from_slice(&path_hash_bytes);
+            data.extend_from_slice(&path_hash);
             if let Some(ref exc) = exception {
                 data.extend_from_slice(&exc.encode_to_vec());
             }
-            for cr in &source_collectors {
-                data.extend_from_slice(cr.collector_key.as_bytes());
-                data.extend_from_slice(&cr.response_signature);
+            for node in &source_nodes {
+                data.extend_from_slice(&node.node_key);
+                data.extend_from_slice(&node.response_signature);
             }
             let hash: [u8; 32] = blake2::Blake2b::<U32>::digest(&data).into();
             Self {
                 path_hash,
-                result_hash: scale_info::prelude::format!("0x{}", hex::encode(hash)),
+                result_hash: hash.to_vec(),
                 exception,
-                source_collectors,
+                source_nodes,
             }
         }
+    }
+
+    pub mod activity_wasm {
+        include!(concat!(env!("OUT_DIR"), "/activity_wasm.rs"));
     }
 
     pub mod activity_tree {
         include!(concat!(env!("OUT_DIR"), "/activity_tree.rs"));
 
-        use ddc_primitives::{NodePubKey, PHDId};
+        use ddc_primitives::NodePubKey;
 
         impl EhdTreeTraversedNode {
-            /// Returns parsed PHD IDs, filtering out any that fail to parse.
-            pub fn get_phds(&self) -> impl Iterator<Item = PHDId> + '_ {
-                self.phd_ids.iter().filter_map(|s| PHDId::try_from(s.clone()).ok())
+            /// Returns parsed PHD collector keys, filtering out any that fail to parse.
+            pub fn get_phd_collectors(&self) -> impl Iterator<Item = NodePubKey> + '_ {
+                self.phd_collectors
+                    .iter()
+                    .filter_map(|s| NodePubKey::try_from(s.clone()).ok())
             }
 
             /// Returns cluster usage aggregated from all providers.
             pub fn get_cluster_usage(&self) -> ActivityNode {
-                self.providers.iter().fold(
-                    ActivityNode::default(),
-                    |mut acc, provider| {
+                self.providers
+                    .iter()
+                    .fold(ActivityNode::default(), |mut acc, provider| {
                         if let Some(usage) = &provider.provided_usage {
                             acc.stored = acc.stored.saturating_add(usage.stored);
                             acc.transferred = acc.transferred.saturating_add(usage.transferred);
@@ -621,22 +680,11 @@ pub mod proto {
                             acc.cpu_units = acc.cpu_units.saturating_add(usage.cpu_units);
                             acc.gpu_units = acc.gpu_units.saturating_add(usage.gpu_units);
                             acc.ram_units = acc.ram_units.saturating_add(usage.ram_units);
-                            acc.compute_count = acc.compute_count.saturating_add(usage.compute_count);
+                            acc.compute_count =
+                                acc.compute_count.saturating_add(usage.compute_count);
                         }
                         acc
-                    },
-                )
-            }
-        }
-
-        impl PhdTreeTraversedNode {
-            pub fn get_collector_key(&self) -> Option<NodePubKey> {
-                if self.collector_id.len() == 32 {
-                    let arr: [u8; 32] = self.collector_id.as_slice().try_into().ok()?;
-                    Some(NodePubKey::StoragePubKey(sp_runtime::AccountId32::from(arr)))
-                } else {
-                    None
-                }
+                    })
             }
         }
 
@@ -644,7 +692,9 @@ pub mod proto {
             pub fn get_node_key(&self) -> Option<NodePubKey> {
                 if self.node_key.len() == 32 {
                     let arr: [u8; 32] = self.node_key.as_slice().try_into().ok()?;
-                    Some(NodePubKey::StoragePubKey(sp_runtime::AccountId32::from(arr)))
+                    Some(NodePubKey::StoragePubKey(sp_runtime::AccountId32::from(
+                        arr,
+                    )))
                 } else {
                     None
                 }
@@ -655,7 +705,9 @@ pub mod proto {
             pub fn get_node_key(&self) -> Option<NodePubKey> {
                 if self.node_key.len() == 32 {
                     let arr: [u8; 32] = self.node_key.as_slice().try_into().ok()?;
-                    Some(NodePubKey::StoragePubKey(sp_runtime::AccountId32::from(arr)))
+                    Some(NodePubKey::StoragePubKey(sp_runtime::AccountId32::from(
+                        arr,
+                    )))
                 } else {
                     None
                 }
@@ -663,7 +715,6 @@ pub mod proto {
         }
 
         impl ActivityNode {
-
             /// Encodes ActivityNode to protobuf bytes
             pub fn to_proto_bytes(&self) -> sp_std::vec::Vec<u8> {
                 use prost::Message;
@@ -674,12 +725,6 @@ pub mod proto {
             pub fn from_proto_bytes(bytes: &[u8]) -> Option<Self> {
                 use prost::Message;
                 Self::decode(bytes).ok()
-            }
-        }
-
-        impl ActivityTreeTraversedNode {
-            pub fn get_activity(&self) -> Option<ActivityNode> {
-                self.activity.clone()
             }
         }
     }

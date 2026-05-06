@@ -1,6 +1,4 @@
 use prost::Message;
-use scale_info::prelude::{vec, vec::Vec};
-use serde::Serialize;
 use sp_core::{
     ed25519::{Public as PublicEd25519, Signature as SignatureEd25519},
     sr25519::{Public as PublicSr25519, Signature as SignatureSr25519},
@@ -8,7 +6,6 @@ use sp_core::{
 use sp_io::crypto::{ed25519_verify, sr25519_verify};
 
 use super::*;
-use crate::json;
 
 pub trait Verify {
     type VerificationResult;
@@ -101,50 +98,6 @@ impl Verify for proto::activity::ActivityFulfillment {
     }
 }
 
-impl Verify for proto::inspection::challenge_response::proof::Record {
-    type VerificationResult = bool;
-
-    fn verify(&self) -> bool {
-        if let Some(record) = &self.record {
-            return record.verify();
-        }
-
-        true
-    }
-}
-
-pub struct LeavesChallengeResult {
-    pub is_verified: bool,
-    pub unverified_leaves: Vec<u64>,
-}
-
-impl Verify for proto::inspection::ChallengeResponse {
-    type VerificationResult = LeavesChallengeResult;
-
-    fn verify(&self) -> LeavesChallengeResult {
-        let mut unverified_leaves = vec![];
-
-        for proof in self.proofs.iter() {
-            for leaf in proof.leaves.iter() {
-                if let Some(
-                    proto::inspection::challenge_response::proof::leaf::LeafVariant::Record(record),
-                ) = &leaf.leaf_variant
-                {
-                    if !record.verify() {
-                        unverified_leaves.push(proof.merkle_tree_node_id.into());
-                    }
-                }
-            }
-        }
-
-        let is_verified = unverified_leaves.is_empty();
-        LeavesChallengeResult {
-            is_verified,
-            unverified_leaves,
-        }
-    }
-}
-
 impl Verify for proto::signature::SignedResponse {
     type VerificationResult = bool;
 
@@ -172,29 +125,6 @@ impl Verify for proto::signature::SignedResponse {
 
         let is_verified = ed25519_verify(&sig, self.payload.as_slice(), &pub_key);
         is_verified
-    }
-}
-
-impl<T: Serialize> Verify for json::SignedJsonResponse<T> {
-    type VerificationResult = bool;
-
-    fn verify(&self) -> bool {
-        let sig = match SignatureEd25519::try_from(self.signature.as_slice()) {
-            Ok(s) => s,
-            Err(_) => return false,
-        };
-
-        let payload = match serde_json::to_vec(&self.payload) {
-            Ok(p) => p,
-            Err(_) => return false,
-        };
-
-        let pub_key = match PublicEd25519::try_from(self.signer.as_slice()) {
-            Ok(p) => p,
-            Err(_) => return false,
-        };
-
-        ed25519_verify(&sig, payload.as_slice(), &pub_key)
     }
 }
 
@@ -340,18 +270,5 @@ mod tests {
             signer: valid_signature_msg_signer.public().0.to_vec(),
         });
         assert!(verify_record_signature(valid_signature_msg));
-    }
-
-    #[ignore = "Compute usage is in progress"]
-    #[test]
-    fn verify_challenge_response_works() {
-        let challenge_response_serialized =
-            include_bytes!("./test_data/challenge_response.pb").as_slice();
-        let challenge_response =
-            proto::inspection::ChallengeResponse::decode(challenge_response_serialized)
-                .expect("protobuf fixture decoding failed, fix the test data");
-
-        let result = challenge_response.verify();
-        assert!(result.is_verified);
     }
 }
