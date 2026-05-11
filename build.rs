@@ -97,6 +97,7 @@ fn main() -> Result<()> {
     );
     prost_build.type_attribute("activity_tree.PhdPayload", "#[derive(Eq, PartialOrd)]");
     prost_build.type_attribute("activity_tree.EhdPayload", "#[derive(Eq, PartialOrd)]");
+    prost_build.type_attribute("inspection.PathValue", "#[derive(Eq, PartialOrd, Ord)]");
     prost_build.type_attribute("inspection.VerifiedUsage", "#[derive(Eq, PartialOrd, Ord)]");
     prost_build.type_attribute(
         "inspection.EraVerifiedUsage",
