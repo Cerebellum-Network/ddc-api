@@ -590,22 +590,6 @@ pub mod proto {
         }
     }
 
-    impl From<&inspection::PathValue> for activity_tree::ActivityNode {
-        fn from(v: &inspection::PathValue) -> Self {
-            activity_tree::ActivityNode {
-                put_count: v.put_count,
-                get_count: v.get_count,
-                stored: v.stored,
-                transferred: v.transferred,
-                cpu_units: v.cpu_units,
-                gpu_units: v.gpu_units,
-                ram_units: v.ram_units,
-                compute_count: v.compute_count,
-                record_id_range_start: Default::default(),
-                record_id_range_end: Default::default(),
-            }
-        }
-    }
 
     impl inspection::InspectionPath {
         /// Blake2b-256 hash of protobuf-serialized bytes, returned as raw 32-byte array.

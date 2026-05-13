@@ -308,14 +308,14 @@ impl<'a> DdcClient<'a> {
         indexes: Option<&[u64]>,
     ) -> Result<ApiResponse<proto::activity::GetRecordsResponse>, http::Error> {
         let mut url = format!(
-            "{}/activity/v1/records?tcaId={}&record_id_gte={}&record_id_lte={}",
+            "{}/activity/v1/records?tcaId={}&recordIdGte={}&recordIdLte={}",
             self.base_url,
             tca_id,
             hex::encode(record_id_gte),
             hex::encode(record_id_lte),
         );
         if let Some(b) = bucket_id {
-            url = format!("{}&bucket_id={}", url, b);
+            url = format!("{}&bucketId={}", url, b);
         }
         if let Some(idx) = indexes {
             let joined = idx
