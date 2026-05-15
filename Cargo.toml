@@ -32,7 +32,6 @@ ddc-primitives = { git = "https://github.com/Cerebellum-Network/ddc-primitives.g
 
 
 
-
 [build-dependencies]
 prost-build = "0.13.3"
 
