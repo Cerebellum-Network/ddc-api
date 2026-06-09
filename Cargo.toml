@@ -30,7 +30,7 @@ serde_with = { version = "3.12.0", default-features = false, features = ["base64
 
 
 # Cere dependencies
-ddc-primitives = { path = "../ddc-primitives", default-features = false } #After DDC primitives is merged change it to dev
+ddc-primitives = { git = "https://github.com/Cerebellum-Network/ddc-primitives.git", branch = "dev-2512.3.2", default-features = false }
 
 
 
