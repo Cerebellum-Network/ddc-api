@@ -1,9 +1,9 @@
 use prost::Message;
-use sp_core::{
+use polkadot_sdk::sp_core::{
     ed25519::{Public as PublicEd25519, Signature as SignatureEd25519},
     sr25519::{Public as PublicSr25519, Signature as SignatureSr25519},
 };
-use sp_io::crypto::{ed25519_verify, sr25519_verify};
+use polkadot_sdk::sp_io::crypto::{ed25519_verify, sr25519_verify};
 
 use super::*;
 
@@ -219,7 +219,7 @@ fn verify_record_signature(mut signed: impl Clone + Message + Signed) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use sp_core::Pair;
+    use polkadot_sdk::sp_core::Pair;
 
     use super::*;
 
@@ -244,7 +244,7 @@ mod tests {
             foo: "invalid_signature_msg".to_string(),
             signature: None,
         };
-        let invalid_signature_msg_signer = sp_core::ed25519::Pair::generate().0;
+        let invalid_signature_msg_signer = polkadot_sdk::sp_core::ed25519::Pair::generate().0;
         let invalid_signature_msg_signature =
             invalid_signature_msg_signer.sign(invalid_signature_msg.encode_to_vec().as_slice());
         let mut invalid_signature_msg_signature_vec = invalid_signature_msg_signature.0.to_vec();
@@ -261,7 +261,7 @@ mod tests {
             foo: "valid_signature_msg".to_string(),
             signature: None,
         };
-        let valid_signature_msg_signer = sp_core::ed25519::Pair::generate().0;
+        let valid_signature_msg_signer = polkadot_sdk::sp_core::ed25519::Pair::generate().0;
         let valid_signature_msg_signature =
             valid_signature_msg_signer.sign(valid_signature_msg.encode_to_vec().as_slice());
         valid_signature_msg.signature = Some(proto::signature::Signature {

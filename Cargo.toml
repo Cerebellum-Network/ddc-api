@@ -8,32 +8,34 @@ license = "GPL-3.0-or-later WITH Classpath-exception-2.0"
 repository = "https://github.com/Cerebellum-Network/ddc-api"
 
 [dependencies]
-blake2 = { version = "0.10.6", default-features = false }
-codec = { package = "parity-scale-codec", version = "3.6.12", default-features = false, features = ["derive", "max-encoded-len"] }
-frame-support = { version = "45.0.0", default-features = false, features = ["tuples-96"] }
-frame-system = { version = "45.0.0", default-features = false }
+blake2 = { version = "0.10.4", default-features = false }
+codec = { package = "parity-scale-codec", version = "3.7.5", default-features = false, features = ["derive", "max-encoded-len"] }
 hex = { version = "0.4.3", default-features = false, features = ["alloc"] }
 log = { version = "0.4.22", default-features = false }
-polkadot-ckb-merkle-mountain-range = { version = "0.7.0", default-features = false }
-prost = { version = "0.13", default-features = false, features = ["prost-derive"] }
-scale-info = { version = "2.11.3", default-features = false, features = ["derive"] }
-serde = { version = "1.0.210", default-features = false, features = ["derive"] }
-serde_json = { version = "1.0.1", default-features = false }
-serde_with = { version = "3", default-features = false, features = ["base64", "macros"] }
-sp-application-crypto = { version = "44.0.0", default-features = false }
-sp-core = { version = "39.0.0", default-features = false, features = ["serde"] }
-sp-io = { version = "44.0.0", default-features = false }
-sp-runtime = { version = "45.0.0", default-features = false }
-sp-std = { version = "14.0.0", default-features = false }
+polkadot-ckb-merkle-mountain-range = { version = "0.8.1", default-features = false }
+polkadot-sdk = { version = "=2512.3.2", default-features = false, features = [
+  "frame-support",
+  "frame-system",
+  "sp-application-crypto",
+  "sp-core",
+  "sp-io",
+  "sp-runtime",
+  "sp-std",
+] }
+prost = { version = "0.12.4", default-features = false, features = ["prost-derive"] }
+scale-info = { version = "2.11.6", default-features = false, features = ["derive"] }
+serde = { version = "1.0.214", default-features = false, features = ["derive"] }
+serde_json = { version = "1.0.132", default-features = false }
+serde_with = { version = "3.12.0", default-features = false, features = ["base64", "macros"] }
 
 
 # Cere dependencies
-ddc-primitives = { git = "https://github.com/Cerebellum-Network/ddc-primitives.git", branch = "dev", default-features = false }
+ddc-primitives = { path = "../ddc-primitives", default-features = false } #After DDC primitives is merged change it to dev
 
 
 
 [build-dependencies]
-prost-build = "0.13.3"
+prost-build = "0.13.2"
 
 [features]
 default = ["std"]
@@ -43,13 +45,7 @@ std = [
   "polkadot-ckb-merkle-mountain-range/std",
   "codec/std",
   "scale-info/std",
-  "sp-core/std",
-  "sp-std/std",
-  "sp-runtime/std",
-  "sp-io/std",
-  "sp-application-crypto/std",
-  "frame-support/std",
-  "frame-system/std",
+  "polkadot-sdk/std",
   "log/std",
   "serde/std",
   "serde_json/std",
@@ -57,7 +53,6 @@ std = [
   "ddc-primitives/std",
 ]
 runtime-benchmarks = [
-  "frame-support/runtime-benchmarks",
-  "frame-system/runtime-benchmarks",
-  "sp-runtime/runtime-benchmarks",
+  "polkadot-sdk/runtime-benchmarks",
+  "ddc-primitives/runtime-benchmarks",
 ]
