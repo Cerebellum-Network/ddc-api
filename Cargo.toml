@@ -13,26 +13,15 @@ codec = { package = "parity-scale-codec", version = "3.7.5", default-features = 
 hex = { version = "0.4.3", default-features = false, features = ["alloc"] }
 log = { version = "0.4.22", default-features = false }
 polkadot-ckb-merkle-mountain-range = { version = "0.8.1", default-features = false }
-polkadot-sdk = { version = "=2512.3.2", default-features = false, features = [
-  "frame-support",
-  "frame-system",
-  "sp-application-crypto",
-  "sp-core",
-  "sp-io",
-  "sp-runtime",
-  "sp-std",
-] }
+polkadot-sdk = { version = "=2512.3.2", default-features = false, features = ["frame-support", "frame-system", "sp-application-crypto", "sp-core", "sp-io", "sp-runtime", "sp-std"] }
 prost = { version = "0.12.4", default-features = false, features = ["prost-derive"] }
 scale-info = { version = "2.11.6", default-features = false, features = ["derive"] }
 serde = { version = "1.0.214", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0.132", default-features = false }
 serde_with = { version = "3.12.0", default-features = false, features = ["base64", "macros"] }
 
-
 # Cere dependencies
 ddc-primitives = { git = "https://github.com/Cerebellum-Network/ddc-primitives.git", branch = "dev-2512.3.2", default-features = false }
-
-
 
 [build-dependencies]
 prost-build = "0.13.2"
