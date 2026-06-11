@@ -1,3 +1,5 @@
+[workspace]
+
 [package]
 name = "ddc-api"
 version = "7.3.2"
@@ -21,7 +23,7 @@ serde_json = { version = "1.0.132", default-features = false }
 serde_with = { version = "3.12.0", default-features = false, features = ["base64", "macros"] }
 
 # Cere dependencies
-ddc-primitives = { git = "https://github.com/Cerebellum-Network/ddc-primitives.git", branch = "dev-2512.3.2", default-features = false }
+ddc-primitives = { git = "https://github.com/Cerebellum-Network/ddc-primitives.git", branch = "dev", default-features = false }
 
 [build-dependencies]
 prost-build = "0.13.2"
