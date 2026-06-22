@@ -542,7 +542,7 @@ pub mod proto {
     pub use self::inspection::UnverifiedPath;
 
     impl InspectionReceipt {
-        pub fn to_proto_bytes(&self) -> sp_std::vec::Vec<u8> {
+        pub fn to_proto_bytes(&self) -> polkadot_sdk::sp_std::vec::Vec<u8> {
             use prost::Message;
             self.encode_to_vec()
         }
@@ -567,7 +567,7 @@ pub mod proto {
                 _ => Self {
                     kind: Some(insp_path_exception::Kind::MultipleExceptions(
                         inspection::MultipleExceptions {
-                            exceptions: sp_std::vec![self, other],
+                            exceptions: polkadot_sdk::sp_std::vec![self, other],
                         },
                     )),
                 },
@@ -590,7 +590,6 @@ pub mod proto {
         }
     }
 
-
     impl inspection::InspectionPath {
         /// Blake2b-256 hash of protobuf-serialized bytes, returned as raw 32-byte array.
         pub fn path_hash(&self) -> [u8; 32] {
@@ -609,13 +608,13 @@ pub mod proto {
         /// Creates a new `InspectionPathResult` with `result_hash` computed as
         /// Blake2b-256(path_hash || exception_bytes || source_nodes).
         pub fn new(
-            path_hash: sp_std::vec::Vec<u8>,
+            path_hash: polkadot_sdk::sp_std::vec::Vec<u8>,
             exception: Option<inspection::InspPathException>,
-            source_nodes: sp_std::vec::Vec<inspection::NodeProvenance>,
+            source_nodes: polkadot_sdk::sp_std::vec::Vec<inspection::NodeProvenance>,
         ) -> Self {
             use blake2::digest::{consts::U32, Digest};
             use prost::Message;
-            let mut data = sp_std::vec::Vec::new();
+            let mut data = polkadot_sdk::sp_std::vec::Vec::new();
             data.extend_from_slice(&path_hash);
             if let Some(ref exc) = exception {
                 data.extend_from_slice(&exc.encode_to_vec());
@@ -676,9 +675,9 @@ pub mod proto {
             pub fn get_node_key(&self) -> Option<NodePubKey> {
                 if self.node_key.len() == 32 {
                     let arr: [u8; 32] = self.node_key.as_slice().try_into().ok()?;
-                    Some(NodePubKey::StoragePubKey(sp_runtime::AccountId32::from(
-                        arr,
-                    )))
+                    Some(NodePubKey::StoragePubKey(
+                        polkadot_sdk::sp_runtime::AccountId32::from(arr),
+                    ))
                 } else {
                     None
                 }
@@ -689,9 +688,9 @@ pub mod proto {
             pub fn get_node_key(&self) -> Option<NodePubKey> {
                 if self.node_key.len() == 32 {
                     let arr: [u8; 32] = self.node_key.as_slice().try_into().ok()?;
-                    Some(NodePubKey::StoragePubKey(sp_runtime::AccountId32::from(
-                        arr,
-                    )))
+                    Some(NodePubKey::StoragePubKey(
+                        polkadot_sdk::sp_runtime::AccountId32::from(arr),
+                    ))
                 } else {
                     None
                 }
@@ -700,7 +699,7 @@ pub mod proto {
 
         impl ActivityNode {
             /// Encodes ActivityNode to protobuf bytes
-            pub fn to_proto_bytes(&self) -> sp_std::vec::Vec<u8> {
+            pub fn to_proto_bytes(&self) -> polkadot_sdk::sp_std::vec::Vec<u8> {
                 use prost::Message;
                 self.encode_to_vec()
             }
