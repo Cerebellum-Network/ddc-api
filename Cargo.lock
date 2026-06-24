@@ -3970,7 +3970,7 @@ dependencies = [
 [[package]]
 name = "ddc-primitives"
 version = "7.3.3"
-source = "git+https://github.com/Cerebellum-Network/ddc-primitives.git?branch=chore%2Fstaging-2512.3.2-umbrella#464498b716f8ba0b90ff22744cd446d2e6247e60"
+source = "git+https://github.com/Cerebellum-Network/ddc-primitives.git?branch=staging#9aaac1ae283ad5f1d9e976377515055a4e7e0d2a"
 dependencies = [
  "blake2 0.10.6",
  "hex",
