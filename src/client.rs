@@ -238,6 +238,7 @@ impl<'a> DdcClient<'a> {
 	pub fn fetch_records_range(
 		&self,
 		tca_id: TcaEra,
+		node_pubkey: &[u8],
 		bucket_id: Option<BucketId>,
 		record_id_gte: &[u8],
 		record_id_lte: &[u8],
@@ -246,9 +247,10 @@ impl<'a> DdcClient<'a> {
 		indexes: Option<&[u64]>,
 	) -> Result<ApiResponse<proto::activity::GetRecordsResponse>, http::Error> {
 		let mut url = format!(
-			"{}/activity/v1/records?tcaId={}&recordIdGte={}&recordIdLte={}",
+			"{}/activity/v1/records?tcaId={}&nodePubKey={}&recordIdGte={}&recordIdLte={}",
 			self.base_url,
 			tca_id,
+			hex::encode(node_pubkey),
 			hex::encode(record_id_gte),
 			hex::encode(record_id_lte),
 		);
