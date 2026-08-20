@@ -784,7 +784,7 @@ pub fn fetch_records_range<
     );
 
     client
-        .fetch_records_range(tca_id, bucket_id, record_id_gte, record_id_lte, cursor, limit, indexes)
+        .fetch_records_range(tca_id, node_key.as_ref(), bucket_id, record_id_gte, record_id_lte, cursor, limit, indexes)
         .map_err(|e| {
             log!(error,
                 "❌ Data node {:?} (cluster {:?}) unavailable while fetching records range. Host: {:?}, Error: {:?}",

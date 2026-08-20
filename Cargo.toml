@@ -1,3 +1,5 @@
+[workspace]
+
 [package]
 name = "ddc-api"
 version = "7.3.3"
