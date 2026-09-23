@@ -881,7 +881,7 @@ pub fn get_ehd_root<
 		cluster_id, era, 1, 1,
 	)?;
 
-	let first_node = api_response.response.nodes.into_iter().next().ok_or(
+	let mut first_node = api_response.response.nodes.into_iter().next().ok_or(
 		ApiError::FailedToFetchTraversedEHD {
 			cluster_id: *cluster_id,
 			era,
@@ -889,6 +889,14 @@ pub fn get_ehd_root<
 			tree_levels_count: 1,
 		},
 	)?;
+
+	// Collectors serve the same customers and providers in different orders, and
+	// the EHD hash does not bind that order, so an ordering difference reaches
+	// consumers unflagged. Every validator prices an era independently and the
+	// result is hashed into the payout fingerprint, so anything order-sensitive
+	// downstream splits the quorum. Hand out one canonical order instead.
+	first_node.customers.sort_unstable_by(|a, b| a.customer_id.cmp(&b.customer_id));
+	first_node.providers.sort_unstable_by(|a, b| a.provider_id.cmp(&b.provider_id));
 
 	Ok(ApiResponse { response: first_node, signed_by: api_response.signed_by })
 }
