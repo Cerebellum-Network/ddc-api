@@ -15,7 +15,7 @@ use scale_info::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-	client::DdcClient,
+	client::{DdcClient, MemberReadError},
 	proto::{self},
 	sync_nodes::{get_configured_sync_node, SyncNode},
 };
@@ -1392,6 +1392,118 @@ pub fn submit_inspection_result<
 		"submit inspection result",
 		|client| client.submit_inspection_result(request),
 	)
+}
+
+/// Submits inspection results, then reads the era's state back from a
+/// different member to confirm the submission was committed (ADR-006 §6).
+///
+/// The store's reads are linearizable, so a path missing this inspector's key
+/// on another member was not committed: it is resubmitted there and the first
+/// member is dropped from the cached list. A named member that denies
+/// membership proves the list false and drops it. A reader that cannot answer
+/// is no evidence either way and the next member is asked. A configured sync
+/// node has no second member to read from and is submitted to as usual.
+pub fn submit_inspection_result_read_back<
+	AccountId,
+	BlockNumber,
+	CM: ClusterManager<AccountId, BlockNumber>,
+	NM: NodeManager<AccountId>,
+>(
+	cluster_id: &ClusterId,
+	request: &proto::inspection::PostInspectionResultRequest,
+) -> Result<proto::inspection::PostInspectionResultResponse, ApiError> {
+	if get_configured_sync_node::<AccountId, BlockNumber, CM>(cluster_id)?.is_some() {
+		return submit_inspection_result::<AccountId, BlockNumber, CM, NM>(cluster_id, request);
+	}
+
+	let nodes = crate::sync_nodes::get_discovered_sync_nodes::<AccountId, BlockNumber, CM, NM>(
+		cluster_id,
+	)?;
+	let mut submit = |client: &DdcClient| client.submit_inspection_result(request);
+
+	let mut submitted = None;
+	for (index, node) in nodes.iter().enumerate() {
+		if let Ok(response) =
+			try_sync_nodes(cluster_id, "submit inspection result", core::slice::from_ref(node), &mut submit)
+		{
+			submitted = Some((index, response));
+			break;
+		}
+	}
+	let Some((submitter_index, response)) = submitted else {
+		return submit_inspection_result::<AccountId, BlockNumber, CM, NM>(cluster_id, request);
+	};
+	let submitter = &nodes[submitter_index];
+
+	let rejected: Vec<&Vec<u8>> = response.rejected_paths.iter().map(|p| &p.path_hash).collect();
+	let expected: Vec<Vec<u8>> = request
+		.paths_results
+		.iter()
+		.map(|result| result.path_hash.clone())
+		.filter(|path_hash| !rejected.contains(&path_hash))
+		.collect();
+
+	for reader in nodes.iter().filter(|node| node.key != submitter.key) {
+		let Ok(host) = str::from_utf8(&reader.params.host) else { continue };
+		let base_url = format!("http://{}:{}", host, reader.params.http_port);
+		let client =
+			DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+
+		match client.read_inspection_state_from_member(request.era_id) {
+			Ok(state) => {
+				let missing =
+					crate::sync_nodes::uncommitted_paths(&state, &request.inspector_key, &expected);
+				if missing.is_empty() {
+					return Ok(response);
+				}
+				log!(
+					error,
+					"❌ Sync node {:?} of cluster {:?} accepted {} inspection results for era {:?} that member {:?} does not hold; resubmitting there. At fault: {:?}; reader of record: {:?}",
+					submitter.key,
+					cluster_id,
+					missing.len(),
+					request.era_id,
+					reader.key,
+					submitter.key,
+					reader.key
+				);
+				crate::sync_nodes::forget_cached_sync_node(cluster_id, &submitter.key);
+				return try_sync_nodes(
+					cluster_id,
+					"resubmit inspection result",
+					core::slice::from_ref(reader),
+					&mut submit,
+				);
+			},
+			Err(MemberReadError::NotAMember) => {
+				log!(
+					error,
+					"❌ Sync node {:?} named as a member of cluster {:?} denies membership; the member list is false and is dropped",
+					reader.key,
+					cluster_id
+				);
+				crate::sync_nodes::forget_cached_sync_nodes(cluster_id);
+			},
+			Err(MemberReadError::Unavailable) => {
+				log!(
+					warn,
+					"Sync node {:?} of cluster {:?} could not be read back for era {:?}; asking the next member",
+					reader.key,
+					cluster_id,
+					request.era_id
+				);
+			},
+		}
+	}
+
+	log!(
+		warn,
+		"Inspection results for era {:?} of cluster {:?} were accepted by {:?} but no other member confirmed them",
+		request.era_id,
+		cluster_id,
+		submitter.key
+	);
+	Ok(response)
 }
 
 pub fn get_inspection_state<

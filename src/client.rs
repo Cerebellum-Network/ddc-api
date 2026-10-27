@@ -17,6 +17,9 @@ pub const QUORUM_DEADLINE_HEADER: &str = "X-Insp-Quorum-Deadline-Ms";
 
 const QUORUM_REFUSAL_NO_CLIENT: &str = "no-client";
 const QUORUM_REFUSAL_STORE_UNREACHABLE: &str = "store-unreachable";
+const REFUSAL_NOT_A_MEMBER: &str = "not-a-member";
+/// The non-member refusal of a binary older than its `not-a-member` reason.
+const NOT_A_MEMBER_MESSAGE: &str = "Inspection sync is disabled on this node.";
 const HTTP_OK: u16 = 200;
 const HTTP_NOT_FOUND: u16 = 404;
 const HTTP_SERVICE_UNAVAILABLE: u16 = 503;
@@ -45,7 +48,31 @@ pub enum QuorumProbe {
 
 #[derive(serde::Deserialize)]
 struct QuorumRefusalBody {
+	message: Option<String>,
 	reason: Option<String>,
+}
+
+/// Why a named member could not be read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemberReadError {
+	/// The node refused as one that does not serve the sync store.
+	NotAMember,
+	/// Anything else: no answer, an error, an unreadable body.
+	Unavailable,
+}
+
+/// Whether a response is a node's refusal as a non-member of the sync store.
+pub fn is_not_a_member_refusal(code: u16, body: &[u8]) -> bool {
+	if code != HTTP_SERVICE_UNAVAILABLE {
+		return false;
+	}
+	match serde_json::from_slice::<QuorumRefusalBody>(body) {
+		Ok(refusal) => {
+			refusal.reason.as_deref() == Some(REFUSAL_NOT_A_MEMBER)
+				|| refusal.message.as_deref() == Some(NOT_A_MEMBER_MESSAGE)
+		},
+		Err(_) => false,
+	}
 }
 
 /// Classifies a non-success quorum response by its status and refusal reason.
@@ -493,6 +520,34 @@ impl<'a> DdcClient<'a> {
 		let body = response.body().collect::<Vec<u8>>();
 
 		decode_signed_proto::<proto::inspection::InspectionState>(&url, &body)
+	}
+
+	/// Reads the inspection state from one named member, once, telling a node
+	/// that denies membership apart from one that could not answer.
+	pub fn read_inspection_state_from_member(
+		&self,
+		era: EhdEra,
+	) -> Result<proto::inspection::InspectionState, MemberReadError> {
+		let url = format!("{}/itm/v1/state/{}", self.base_url, era);
+		let deadline = timestamp().add(self.timeout);
+		let request =
+			http::Request::get(&url).deadline(deadline).add_header("Accept", "application/protobuf");
+		let response = match request.send().map(|pending| pending.try_wait(deadline)) {
+			Ok(Ok(Ok(response))) => response,
+			_ => return Err(MemberReadError::Unavailable),
+		};
+
+		let code = response.code;
+		let body = response.body().collect::<Vec<u8>>();
+		if code != HTTP_OK {
+			return Err(if is_not_a_member_refusal(code, &body) {
+				MemberReadError::NotAMember
+			} else {
+				MemberReadError::Unavailable
+			});
+		}
+		decode_signed_proto::<proto::inspection::InspectionState>(&url, &body)
+			.map_err(|_| MemberReadError::Unavailable)
 	}
 
 	/// GET /itm/receipt - Retrieve inspection receipt (protobuf)
