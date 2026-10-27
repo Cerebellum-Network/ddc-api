@@ -19,6 +19,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          # ddc-proto is private; same secret as ddc-node's storage CI.
+          token: ${{ secrets.GH_READ_TOKEN || github.token }}
 
       # Only when the secret exists; public deps resolve without it.
       - name: Configure git authentication
