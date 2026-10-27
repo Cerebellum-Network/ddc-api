@@ -18,6 +18,10 @@ pub const SHARED_MEMORY_DEADLINE_HEADER: &str = "X-Insp-Quorum-Deadline-Ms";
 
 const REFUSAL_NO_CLIENT: &str = "no-client";
 const REFUSAL_STORE_UNREACHABLE: &str = "store-unreachable";
+/// Wire reason a node gives when it does not hold the shared memory.
+const REFUSAL_NOT_A_MEMBER: &str = "not-a-member";
+/// The non-member refusal of a binary older than its `not-a-member` reason.
+const NOT_A_MEMBER_MESSAGE: &str = "Inspection sync is disabled on this node.";
 const HTTP_OK: u16 = 200;
 const HTTP_NOT_FOUND: u16 = 404;
 const HTTP_SERVICE_UNAVAILABLE: u16 = 503;
@@ -46,7 +50,31 @@ pub enum SharedMemoryProbe {
 
 #[derive(serde::Deserialize)]
 struct SharedMemoryRefusalBody {
+	message: Option<String>,
 	reason: Option<String>,
+}
+
+/// Why reading the inspectors' shared memory back through a node failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadBackError {
+	/// The node does not hold the shared memory, though it was named as holding it.
+	NotSharedMemory,
+	/// Anything else: no answer, an error, an unreadable body.
+	Unavailable,
+}
+
+/// Whether a response is a node's refusal as one not holding the shared memory.
+pub fn is_not_shared_memory_refusal(code: u16, body: &[u8]) -> bool {
+	if code != HTTP_SERVICE_UNAVAILABLE {
+		return false;
+	}
+	match serde_json::from_slice::<SharedMemoryRefusalBody>(body) {
+		Ok(refusal) => {
+			refusal.reason.as_deref() == Some(REFUSAL_NOT_A_MEMBER)
+				|| refusal.message.as_deref() == Some(NOT_A_MEMBER_MESSAGE)
+		},
+		Err(_) => false,
+	}
 }
 
 /// Classifies a non-success answer from the shared-memory membership route by
@@ -495,6 +523,35 @@ impl<'a> DdcClient<'a> {
 		let body = response.body().collect::<Vec<u8>>();
 
 		decode_signed_proto::<proto::inspection::InspectionState>(&url, &body)
+	}
+
+	/// Reads an era's inspection state back from the inspectors' shared memory
+	/// through this node, once, telling a node that does not hold the shared
+	/// memory apart from one that could not answer.
+	pub fn read_back_inspection_state(
+		&self,
+		era: EhdEra,
+	) -> Result<proto::inspection::InspectionState, ReadBackError> {
+		let url = format!("{}/itm/v1/state/{}", self.base_url, era);
+		let deadline = timestamp().add(self.timeout);
+		let request =
+			http::Request::get(&url).deadline(deadline).add_header("Accept", "application/protobuf");
+		let response = match request.send().map(|pending| pending.try_wait(deadline)) {
+			Ok(Ok(Ok(response))) => response,
+			_ => return Err(ReadBackError::Unavailable),
+		};
+
+		let code = response.code;
+		let body = response.body().collect::<Vec<u8>>();
+		if code != HTTP_OK {
+			return Err(if is_not_shared_memory_refusal(code, &body) {
+				ReadBackError::NotSharedMemory
+			} else {
+				ReadBackError::Unavailable
+			});
+		}
+		decode_signed_proto::<proto::inspection::InspectionState>(&url, &body)
+			.map_err(|_| ReadBackError::Unavailable)
 	}
 
 	/// GET /itm/receipt - Retrieve inspection receipt (protobuf)

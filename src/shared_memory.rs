@@ -279,6 +279,39 @@ fn probe_node(params: &StorageNodeParams) -> SharedMemoryProbe {
 		.probe_shared_memory(MEMBERSHIP_ERA)
 }
 
+/// Drops one node from the cached shared-memory list, so later calls stop going to it.
+pub fn forget_cached_shared_memory_node(cluster_id: &ClusterId, key: &NodePubKey) {
+	if let Some(mut nodes) = cached_shared_memory_nodes(cluster_id) {
+		nodes.retain(|node| node.key != *key);
+		StorageValueRef::persistent(&cache_key(cluster_id)).set(&nodes);
+	}
+}
+
+/// Drops the cached list, so the next call discovers again.
+pub fn forget_cached_shared_memory_nodes(cluster_id: &ClusterId) {
+	StorageValueRef::persistent(&cache_key(cluster_id)).clear();
+}
+
+/// The submitted paths whose status in `state` does not list `inspector_key`
+/// among its inspectors, i.e. the submissions that were not committed.
+pub fn uncommitted_paths(
+	state: &proto::inspection::InspectionState,
+	inspector_key: &[u8],
+	submitted: &[Vec<u8>],
+) -> Vec<Vec<u8>> {
+	submitted
+		.iter()
+		.filter(|path_hash| {
+			!state.paths.iter().any(|(path_key, status)| {
+				let hex_key = path_key.strip_prefix("0x").unwrap_or(path_key);
+				hex::decode(hex_key).map(|bytes| bytes == **path_hash).unwrap_or(false)
+					&& status.inspectors.iter().any(|inspector| inspector == inspector_key)
+			})
+		})
+		.cloned()
+		.collect()
+}
+
 fn cached_shared_memory_nodes(cluster_id: &ClusterId) -> Option<Vec<SharedMemoryNode>> {
 	StorageValueRef::persistent(&cache_key(cluster_id))
 		.get::<Vec<SharedMemoryNode>>()
@@ -416,6 +449,49 @@ mod tests {
 		});
 		assert!(result.is_err());
 		assert_eq!(asked, MAX_DISCOVERY_ATTEMPTS);
+	}
+
+	const INSPECTOR: &[u8] = b"inspector-key";
+	const PATH_ONE: [u8; 2] = [0x01, 0x02];
+	const PATH_TWO: [u8; 2] = [0x03, 0x04];
+
+	fn state_with(path_key: &str, inspectors: Vec<Vec<u8>>) -> proto::inspection::InspectionState {
+		let mut state = proto::inspection::InspectionState::default();
+		state.paths.insert(
+			path_key.into(),
+			proto::inspection::InspectionPathStatus { inspectors, ..Default::default() },
+		);
+		state
+	}
+
+	#[test]
+	fn a_path_listing_the_inspector_counts_as_committed() {
+		let state = state_with("0x0102", vec![INSPECTOR.to_vec()]);
+		assert!(uncommitted_paths(&state, INSPECTOR, &[PATH_ONE.to_vec()]).is_empty());
+	}
+
+	#[test]
+	fn a_path_without_the_inspector_or_absent_from_the_state_is_uncommitted() {
+		let state = state_with("0102", vec![b"someone-else".to_vec()]);
+		assert_eq!(
+			uncommitted_paths(&state, INSPECTOR, &[PATH_ONE.to_vec(), PATH_TWO.to_vec()]),
+			vec![PATH_ONE.to_vec(), PATH_TWO.to_vec()]
+		);
+	}
+
+	#[test]
+	fn a_refusal_from_a_node_without_the_shared_memory_is_recognised_with_or_without_its_reason() {
+		use crate::client::is_not_shared_memory_refusal;
+		assert!(is_not_shared_memory_refusal(
+			503,
+			br#"{"message":"Inspection sync is disabled on this node.","reason":"not-a-member"}"#
+		));
+		assert!(is_not_shared_memory_refusal(
+			503,
+			br#"{"message":"Inspection sync is disabled on this node."}"#
+		));
+		assert!(!is_not_shared_memory_refusal(503, br#"{"message":"m","reason":"store-unreachable"}"#));
+		assert!(!is_not_shared_memory_refusal(500, b""));
 	}
 
 	#[test]

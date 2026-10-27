@@ -15,7 +15,7 @@ use scale_info::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-	client::DdcClient,
+	client::{DdcClient, ReadBackError},
 	proto::{self},
 	shared_memory::{dry_run_shared_memory_node, SharedMemoryNode},
 };
@@ -1392,6 +1392,120 @@ pub fn submit_inspection_result<
 		"submit inspection result",
 		|client| client.submit_inspection_result(request),
 	)
+}
+
+/// Writes inspection results to the inspectors' shared memory, then reads them
+/// back through a different replica to confirm they were committed
+/// (ADR-006 §6).
+///
+/// The shared memory's reads are linearizable, so a path missing this
+/// inspector's key when read back elsewhere was not committed: it is written
+/// again through the reader and the first replica is dropped from the cached
+/// list. A replica that turns out not to hold the shared memory proves the
+/// list false and drops it. A replica that cannot answer is no evidence either
+/// way and the next one reads back. A configured dry-run sync node has no
+/// second replica to read back from and is written to as usual.
+pub fn submit_inspection_result_read_back<
+	AccountId,
+	BlockNumber,
+	CM: ClusterManager<AccountId, BlockNumber>,
+	NM: NodeManager<AccountId>,
+>(
+	cluster_id: &ClusterId,
+	request: &proto::inspection::PostInspectionResultRequest,
+) -> Result<proto::inspection::PostInspectionResultResponse, ApiError> {
+	if dry_run_shared_memory_node::<AccountId, BlockNumber, CM>(cluster_id)?.is_some() {
+		return submit_inspection_result::<AccountId, BlockNumber, CM, NM>(cluster_id, request);
+	}
+
+	let nodes = crate::shared_memory::discovered_shared_memory_nodes::<AccountId, BlockNumber, CM, NM>(
+		cluster_id,
+	)?;
+	let mut submit = |client: &DdcClient| client.submit_inspection_result(request);
+
+	let mut submitted = None;
+	for (index, node) in nodes.iter().enumerate() {
+		if let Ok(response) =
+			try_shared_memory_replicas(cluster_id, "submit inspection result", core::slice::from_ref(node), &mut submit)
+		{
+			submitted = Some((index, response));
+			break;
+		}
+	}
+	let Some((submitter_index, response)) = submitted else {
+		return submit_inspection_result::<AccountId, BlockNumber, CM, NM>(cluster_id, request);
+	};
+	let submitter = &nodes[submitter_index];
+
+	let rejected: Vec<&Vec<u8>> = response.rejected_paths.iter().map(|p| &p.path_hash).collect();
+	let expected: Vec<Vec<u8>> = request
+		.paths_results
+		.iter()
+		.map(|result| result.path_hash.clone())
+		.filter(|path_hash| !rejected.contains(&path_hash))
+		.collect();
+
+	for reader in nodes.iter().filter(|node| node.key != submitter.key) {
+		let Ok(host) = str::from_utf8(&reader.params.host) else { continue };
+		let base_url = format!("http://{}:{}", host, reader.params.http_port);
+		let client =
+			DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+
+		match client.read_back_inspection_state(request.era_id) {
+			Ok(state) => {
+				let missing =
+					crate::shared_memory::uncommitted_paths(&state, &request.inspector_key, &expected);
+				if missing.is_empty() {
+					return Ok(response);
+				}
+				log!(
+					error,
+					"❌ Shared-memory replica {:?} of cluster {:?} accepted {} inspection results for era {:?} that do not read back through {:?}; writing them again there. At fault: {:?}; reader of record: {:?}",
+					submitter.key,
+					cluster_id,
+					missing.len(),
+					request.era_id,
+					reader.key,
+					submitter.key,
+					reader.key
+				);
+				crate::shared_memory::forget_cached_shared_memory_node(cluster_id, &submitter.key);
+				return try_shared_memory_replicas(
+					cluster_id,
+					"resubmit inspection result",
+					core::slice::from_ref(reader),
+					&mut submit,
+				);
+			},
+			Err(ReadBackError::NotSharedMemory) => {
+				log!(
+					error,
+					"❌ Node {:?} was named as a shared-memory replica of cluster {:?} but does not hold it; the cached list is false and is dropped",
+					reader.key,
+					cluster_id
+				);
+				crate::shared_memory::forget_cached_shared_memory_nodes(cluster_id);
+			},
+			Err(ReadBackError::Unavailable) => {
+				log!(
+					warn,
+					"Shared-memory replica {:?} of cluster {:?} could not read back era {:?}; trying the next one",
+					reader.key,
+					cluster_id,
+					request.era_id
+				);
+			},
+		}
+	}
+
+	log!(
+		warn,
+		"Inspection results for era {:?} of cluster {:?} were accepted by {:?} but no other replica read them back",
+		request.era_id,
+		cluster_id,
+		submitter.key
+	);
+	Ok(response)
 }
 
 pub fn get_inspection_state<
