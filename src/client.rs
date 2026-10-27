@@ -12,11 +12,12 @@ use scale_info::prelude::{format, string::String, vec::Vec};
 use super::*;
 use crate::{log, verification::Verify};
 
-/// Header in which a node declares the deadline it bounds the quorum route to.
-pub const QUORUM_DEADLINE_HEADER: &str = "X-Insp-Quorum-Deadline-Ms";
+/// Header in which a node declares the deadline it bounds the shared-memory
+/// membership route (`/itm/v1/quorum`) to.
+pub const SHARED_MEMORY_DEADLINE_HEADER: &str = "X-Insp-Quorum-Deadline-Ms";
 
-const QUORUM_REFUSAL_NO_CLIENT: &str = "no-client";
-const QUORUM_REFUSAL_STORE_UNREACHABLE: &str = "store-unreachable";
+const REFUSAL_NO_CLIENT: &str = "no-client";
+const REFUSAL_STORE_UNREACHABLE: &str = "store-unreachable";
 /// Wire reason a node gives when it does not hold the shared memory.
 const REFUSAL_NOT_A_MEMBER: &str = "not-a-member";
 /// The non-member refusal of a binary older than its `not-a-member` reason.
@@ -27,7 +28,7 @@ const HTTP_SERVICE_UNAVAILABLE: u16 = 503;
 
 /// What a node said, or failed to say, when asked who the sync members are.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum QuorumAnswerKind {
+pub enum SharedMemoryAnswerKind {
 	/// A list that did not survive the registry intersection or the member floor.
 	Rejected,
 	/// The node holds no sync client.
@@ -42,13 +43,13 @@ pub enum QuorumAnswerKind {
 	Transport,
 }
 
-pub enum QuorumProbe {
+pub enum SharedMemoryProbe {
 	Answer { info: proto::inspection::InspSyncQuorumInfo, declared_deadline_ms: Option<u64> },
-	Refused(QuorumAnswerKind),
+	Refused(SharedMemoryAnswerKind),
 }
 
 #[derive(serde::Deserialize)]
-struct QuorumRefusalBody {
+struct SharedMemoryRefusalBody {
 	message: Option<String>,
 	reason: Option<String>,
 }
@@ -67,7 +68,7 @@ pub fn is_not_shared_memory_refusal(code: u16, body: &[u8]) -> bool {
 	if code != HTTP_SERVICE_UNAVAILABLE {
 		return false;
 	}
-	match serde_json::from_slice::<QuorumRefusalBody>(body) {
+	match serde_json::from_slice::<SharedMemoryRefusalBody>(body) {
 		Ok(refusal) => {
 			refusal.reason.as_deref() == Some(REFUSAL_NOT_A_MEMBER)
 				|| refusal.message.as_deref() == Some(NOT_A_MEMBER_MESSAGE)
@@ -76,18 +77,19 @@ pub fn is_not_shared_memory_refusal(code: u16, body: &[u8]) -> bool {
 	}
 }
 
-/// Classifies a non-success quorum response by its status and refusal reason.
-pub fn classify_quorum_refusal(code: u16, body: &[u8]) -> QuorumAnswerKind {
+/// Classifies a non-success answer from the shared-memory membership route by
+/// its status and refusal reason.
+pub fn classify_shared_memory_refusal(code: u16, body: &[u8]) -> SharedMemoryAnswerKind {
 	match code {
-		HTTP_NOT_FOUND => QuorumAnswerKind::NoRoute,
+		HTTP_NOT_FOUND => SharedMemoryAnswerKind::NoRoute,
 		HTTP_SERVICE_UNAVAILABLE => {
-			match serde_json::from_slice::<QuorumRefusalBody>(body).ok().and_then(|b| b.reason) {
-				Some(r) if r == QUORUM_REFUSAL_NO_CLIENT => QuorumAnswerKind::NoClient,
-				Some(r) if r == QUORUM_REFUSAL_STORE_UNREACHABLE => QuorumAnswerKind::StoreUnreachable,
-				_ => QuorumAnswerKind::Predates,
+			match serde_json::from_slice::<SharedMemoryRefusalBody>(body).ok().and_then(|b| b.reason) {
+				Some(r) if r == REFUSAL_NO_CLIENT => SharedMemoryAnswerKind::NoClient,
+				Some(r) if r == REFUSAL_STORE_UNREACHABLE => SharedMemoryAnswerKind::StoreUnreachable,
+				_ => SharedMemoryAnswerKind::Predates,
 			}
 		},
-		_ => QuorumAnswerKind::Predates,
+		_ => SharedMemoryAnswerKind::Predates,
 	}
 }
 
@@ -580,7 +582,7 @@ impl<'a> DdcClient<'a> {
 
 	/// Asks once, with no retry, who the sync members are. Retrying is the
 	/// caller's next tick, not this request's.
-	pub fn probe_quorum_info(&self, era: EhdEra) -> QuorumProbe {
+	pub fn probe_shared_memory(&self, era: EhdEra) -> SharedMemoryProbe {
 		let url = format!("{}/itm/v1/quorum/{}", self.base_url, era);
 		let deadline = timestamp().add(self.timeout);
 		let request =
@@ -589,20 +591,20 @@ impl<'a> DdcClient<'a> {
 			Ok(Ok(Ok(response))) => response,
 			_ => {
 				log!(debug, "Sync membership probe to {:?} got no answer", url);
-				return QuorumProbe::Refused(QuorumAnswerKind::Transport);
+				return SharedMemoryProbe::Refused(SharedMemoryAnswerKind::Transport);
 			},
 		};
 
 		let code = response.code;
 		let declared_deadline_ms =
-			response.headers().find(QUORUM_DEADLINE_HEADER).and_then(|v| v.parse::<u64>().ok());
+			response.headers().find(SHARED_MEMORY_DEADLINE_HEADER).and_then(|v| v.parse::<u64>().ok());
 		let body = response.body().collect::<Vec<u8>>();
 		if code != HTTP_OK {
-			return QuorumProbe::Refused(classify_quorum_refusal(code, &body));
+			return SharedMemoryProbe::Refused(classify_shared_memory_refusal(code, &body));
 		}
 		match decode_signed_proto::<proto::inspection::InspSyncQuorumInfo>(&url, &body) {
-			Ok(info) => QuorumProbe::Answer { info, declared_deadline_ms },
-			Err(_) => QuorumProbe::Refused(QuorumAnswerKind::Transport),
+			Ok(info) => SharedMemoryProbe::Answer { info, declared_deadline_ms },
+			Err(_) => SharedMemoryProbe::Refused(SharedMemoryAnswerKind::Transport),
 		}
 	}
 
