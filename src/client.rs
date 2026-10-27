@@ -17,6 +17,7 @@ pub const QUORUM_DEADLINE_HEADER: &str = "X-Insp-Quorum-Deadline-Ms";
 
 const QUORUM_REFUSAL_NO_CLIENT: &str = "no-client";
 const QUORUM_REFUSAL_STORE_UNREACHABLE: &str = "store-unreachable";
+/// Wire reason a node gives when it does not hold the shared memory.
 const REFUSAL_NOT_A_MEMBER: &str = "not-a-member";
 /// The non-member refusal of a binary older than its `not-a-member` reason.
 const NOT_A_MEMBER_MESSAGE: &str = "Inspection sync is disabled on this node.";
@@ -52,17 +53,17 @@ struct QuorumRefusalBody {
 	reason: Option<String>,
 }
 
-/// Why a named member could not be read.
+/// Why reading the inspectors' shared memory back through a node failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MemberReadError {
-	/// The node refused as one that does not serve the sync store.
-	NotAMember,
+pub enum ReadBackError {
+	/// The node does not hold the shared memory, though it was named as holding it.
+	NotSharedMemory,
 	/// Anything else: no answer, an error, an unreadable body.
 	Unavailable,
 }
 
-/// Whether a response is a node's refusal as a non-member of the sync store.
-pub fn is_not_a_member_refusal(code: u16, body: &[u8]) -> bool {
+/// Whether a response is a node's refusal as one not holding the shared memory.
+pub fn is_not_shared_memory_refusal(code: u16, body: &[u8]) -> bool {
 	if code != HTTP_SERVICE_UNAVAILABLE {
 		return false;
 	}
@@ -522,32 +523,33 @@ impl<'a> DdcClient<'a> {
 		decode_signed_proto::<proto::inspection::InspectionState>(&url, &body)
 	}
 
-	/// Reads the inspection state from one named member, once, telling a node
-	/// that denies membership apart from one that could not answer.
-	pub fn read_inspection_state_from_member(
+	/// Reads an era's inspection state back from the inspectors' shared memory
+	/// through this node, once, telling a node that does not hold the shared
+	/// memory apart from one that could not answer.
+	pub fn read_back_inspection_state(
 		&self,
 		era: EhdEra,
-	) -> Result<proto::inspection::InspectionState, MemberReadError> {
+	) -> Result<proto::inspection::InspectionState, ReadBackError> {
 		let url = format!("{}/itm/v1/state/{}", self.base_url, era);
 		let deadline = timestamp().add(self.timeout);
 		let request =
 			http::Request::get(&url).deadline(deadline).add_header("Accept", "application/protobuf");
 		let response = match request.send().map(|pending| pending.try_wait(deadline)) {
 			Ok(Ok(Ok(response))) => response,
-			_ => return Err(MemberReadError::Unavailable),
+			_ => return Err(ReadBackError::Unavailable),
 		};
 
 		let code = response.code;
 		let body = response.body().collect::<Vec<u8>>();
 		if code != HTTP_OK {
-			return Err(if is_not_a_member_refusal(code, &body) {
-				MemberReadError::NotAMember
+			return Err(if is_not_shared_memory_refusal(code, &body) {
+				ReadBackError::NotSharedMemory
 			} else {
-				MemberReadError::Unavailable
+				ReadBackError::Unavailable
 			});
 		}
 		decode_signed_proto::<proto::inspection::InspectionState>(&url, &body)
-			.map_err(|_| MemberReadError::Unavailable)
+			.map_err(|_| ReadBackError::Unavailable)
 	}
 
 	/// GET /itm/receipt - Retrieve inspection receipt (protobuf)

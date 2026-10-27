@@ -15,7 +15,7 @@ use scale_info::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-	client::{DdcClient, MemberReadError},
+	client::{DdcClient, ReadBackError},
 	proto::{self},
 	sync_nodes::{get_configured_sync_node, SyncNode},
 };
@@ -1395,15 +1395,17 @@ pub fn submit_inspection_result<
 	)
 }
 
-/// Submits inspection results, then reads the era's state back from a
-/// different member to confirm the submission was committed (ADR-006 §6).
+/// Writes inspection results to the inspectors' shared memory, then reads them
+/// back through a different replica to confirm they were committed
+/// (ADR-006 §6).
 ///
-/// The store's reads are linearizable, so a path missing this inspector's key
-/// on another member was not committed: it is resubmitted there and the first
-/// member is dropped from the cached list. A named member that denies
-/// membership proves the list false and drops it. A reader that cannot answer
-/// is no evidence either way and the next member is asked. A configured sync
-/// node has no second member to read from and is submitted to as usual.
+/// The shared memory's reads are linearizable, so a path missing this
+/// inspector's key when read back elsewhere was not committed: it is written
+/// again through the reader and the first replica is dropped from the cached
+/// list. A replica that turns out not to hold the shared memory proves the
+/// list false and drops it. A replica that cannot answer is no evidence either
+/// way and the next one reads back. A configured dry-run sync node has no
+/// second replica to read back from and is written to as usual.
 pub fn submit_inspection_result_read_back<
 	AccountId,
 	BlockNumber,
@@ -1425,7 +1427,7 @@ pub fn submit_inspection_result_read_back<
 	let mut submitted = None;
 	for (index, node) in nodes.iter().enumerate() {
 		if let Ok(response) =
-			try_sync_nodes(cluster_id, "submit inspection result", core::slice::from_ref(node), &mut submit)
+			try_shared_memory_replicas(cluster_id, "submit inspection result", core::slice::from_ref(node), &mut submit)
 		{
 			submitted = Some((index, response));
 			break;
@@ -1450,7 +1452,7 @@ pub fn submit_inspection_result_read_back<
 		let client =
 			DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
 
-		match client.read_inspection_state_from_member(request.era_id) {
+		match client.read_back_inspection_state(request.era_id) {
 			Ok(state) => {
 				let missing =
 					crate::sync_nodes::uncommitted_paths(&state, &request.inspector_key, &expected);
@@ -1459,7 +1461,7 @@ pub fn submit_inspection_result_read_back<
 				}
 				log!(
 					error,
-					"❌ Sync node {:?} of cluster {:?} accepted {} inspection results for era {:?} that member {:?} does not hold; resubmitting there. At fault: {:?}; reader of record: {:?}",
+					"❌ Shared-memory replica {:?} of cluster {:?} accepted {} inspection results for era {:?} that do not read back through {:?}; writing them again there. At fault: {:?}; reader of record: {:?}",
 					submitter.key,
 					cluster_id,
 					missing.len(),
@@ -1469,26 +1471,26 @@ pub fn submit_inspection_result_read_back<
 					reader.key
 				);
 				crate::sync_nodes::forget_cached_sync_node(cluster_id, &submitter.key);
-				return try_sync_nodes(
+				return try_shared_memory_replicas(
 					cluster_id,
 					"resubmit inspection result",
 					core::slice::from_ref(reader),
 					&mut submit,
 				);
 			},
-			Err(MemberReadError::NotAMember) => {
+			Err(ReadBackError::NotSharedMemory) => {
 				log!(
 					error,
-					"❌ Sync node {:?} named as a member of cluster {:?} denies membership; the member list is false and is dropped",
+					"❌ Node {:?} was named as a shared-memory replica of cluster {:?} but does not hold it; the cached list is false and is dropped",
 					reader.key,
 					cluster_id
 				);
 				crate::sync_nodes::forget_cached_sync_nodes(cluster_id);
 			},
-			Err(MemberReadError::Unavailable) => {
+			Err(ReadBackError::Unavailable) => {
 				log!(
 					warn,
-					"Sync node {:?} of cluster {:?} could not be read back for era {:?}; asking the next member",
+					"Shared-memory replica {:?} of cluster {:?} could not read back era {:?}; trying the next one",
 					reader.key,
 					cluster_id,
 					request.era_id
@@ -1499,7 +1501,7 @@ pub fn submit_inspection_result_read_back<
 
 	log!(
 		warn,
-		"Inspection results for era {:?} of cluster {:?} were accepted by {:?} but no other member confirmed them",
+		"Inspection results for era {:?} of cluster {:?} were accepted by {:?} but no other replica read them back",
 		request.era_id,
 		cluster_id,
 		submitter.key

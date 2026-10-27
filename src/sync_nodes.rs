@@ -473,18 +473,18 @@ mod tests {
 	}
 
 	#[test]
-	fn a_non_member_refusal_is_recognised_with_or_without_its_reason() {
-		use crate::client::is_not_a_member_refusal;
-		assert!(is_not_a_member_refusal(
+	fn a_refusal_from_a_node_without_the_shared_memory_is_recognised_with_or_without_its_reason() {
+		use crate::client::is_not_shared_memory_refusal;
+		assert!(is_not_shared_memory_refusal(
 			503,
 			br#"{"message":"Inspection sync is disabled on this node.","reason":"not-a-member"}"#
 		));
-		assert!(is_not_a_member_refusal(
+		assert!(is_not_shared_memory_refusal(
 			503,
 			br#"{"message":"Inspection sync is disabled on this node."}"#
 		));
-		assert!(!is_not_a_member_refusal(503, br#"{"message":"m","reason":"store-unreachable"}"#));
-		assert!(!is_not_a_member_refusal(500, b""));
+		assert!(!is_not_shared_memory_refusal(503, br#"{"message":"m","reason":"store-unreachable"}"#));
+		assert!(!is_not_shared_memory_refusal(500, b""));
 	}
 
 	#[test]
