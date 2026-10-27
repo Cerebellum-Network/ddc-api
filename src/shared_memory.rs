@@ -1,10 +1,12 @@
-//! Sync-node discovery (ADR-006).
+//! Discovery of the inspectors' shared memory (ADR-006).
 //!
-//! An inspector learns the sync-store members by asking a registry node of
-//! the cluster, keeps only the members the registry confirms, caches that
-//! list and asks again once the refresh mark expires. G-Collectors and sync
-//! members are different subsets of a cluster, so nothing here reads one
-//! for the other.
+//! The sync store is the inspectors' shared memory; which nodes hold it is
+//! learned, not configured. An inspector asks a registry node of the cluster
+//! who the store's members are, keeps only the members the registry confirms,
+//! caches that list and asks again once the refresh mark expires. Members are
+//! named as such only here, where membership is the subject. G-Collectors and
+//! shared-memory nodes are different subsets of a cluster, so nothing here
+//! reads one for the other.
 
 use codec::{Decode, Encode};
 use ddc_primitives::{
@@ -40,45 +42,45 @@ pub const REFRESH_INTERVAL_MS: u64 = 600_000;
 /// Membership does not depend on the era; the route takes one.
 const MEMBERSHIP_ERA: EhdEra = 0;
 const DISCOVERY_RETRIES: u32 = 1;
-const CACHE_KEY_PREFIX: &[u8] = b"ddc-api::sync-nodes::";
-const REFRESH_KEY_PREFIX: &[u8] = b"ddc-api::sync-nodes-refresh::";
+const CACHE_KEY_PREFIX: &[u8] = b"ddc-api::shared-memory-nodes::";
+const REFRESH_KEY_PREFIX: &[u8] = b"ddc-api::shared-memory-refresh::";
 
 #[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
-pub struct SyncNode {
+pub struct SharedMemoryNode {
 	pub dry_run: bool,
 	pub key: NodePubKey,
 	pub params: StorageNodeParams,
 }
 
-/// The sync nodes to contact for a cluster, in key order.
+/// The nodes holding a cluster's shared memory, in key order.
 ///
 /// A sync node configured in the cluster's dry-run parameters overrides
 /// discovery and is not checked against the registry: a dry-run sync node
 /// sits outside the inspected cluster by design.
-pub fn get_sync_nodes<
+pub fn shared_memory_nodes<
 	AccountId,
 	BlockNumber,
 	CM: ClusterManager<AccountId, BlockNumber>,
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
-) -> Result<Vec<SyncNode>, ApiError> {
-	match get_configured_sync_node::<AccountId, BlockNumber, CM>(cluster_id)? {
+) -> Result<Vec<SharedMemoryNode>, ApiError> {
+	match dry_run_shared_memory_node::<AccountId, BlockNumber, CM>(cluster_id)? {
 		Some(node) => Ok(vec![node]),
-		None => get_discovered_sync_nodes::<AccountId, BlockNumber, CM, NM>(cluster_id),
+		None => discovered_shared_memory_nodes::<AccountId, BlockNumber, CM, NM>(cluster_id),
 	}
 }
 
 /// The discovered sync members of a cluster: the cached list while the
 /// refresh mark stands, a fresh discovery once it has expired.
-pub fn get_discovered_sync_nodes<
+pub fn discovered_shared_memory_nodes<
 	AccountId,
 	BlockNumber,
 	CM: ClusterManager<AccountId, BlockNumber>,
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
-) -> Result<Vec<SyncNode>, ApiError> {
+) -> Result<Vec<SharedMemoryNode>, ApiError> {
 	let refresh_key = refresh_key(cluster_id);
 	let mut lock = StorageLock::<Time>::with_deadline(
 		&refresh_key,
@@ -93,7 +95,7 @@ pub fn get_discovered_sync_nodes<
 			}
 			nodes
 		}
-		Err(_) => match cached_sync_nodes(cluster_id) {
+		Err(_) => match cached_shared_memory_nodes(cluster_id) {
 			Some(nodes) => Ok(nodes),
 			None => discover_and_cache::<AccountId, BlockNumber, CM, NM>(cluster_id),
 		},
@@ -103,25 +105,25 @@ pub fn get_discovered_sync_nodes<
 
 /// Discovers again regardless of the refresh mark, for when no cached member
 /// answered.
-pub fn rediscover_sync_nodes<
+pub fn rediscover_shared_memory_nodes<
 	AccountId,
 	BlockNumber,
 	CM: ClusterManager<AccountId, BlockNumber>,
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
-) -> Result<Vec<SyncNode>, ApiError> {
+) -> Result<Vec<SharedMemoryNode>, ApiError> {
 	discover_and_cache::<AccountId, BlockNumber, CM, NM>(cluster_id)
 }
 
 /// The sync node named in the cluster's dry-run parameters, if any.
-pub fn get_configured_sync_node<
+pub fn dry_run_shared_memory_node<
 	AccountId,
 	BlockNumber,
 	CM: ClusterManager<AccountId, BlockNumber>,
 >(
 	cluster_id: &ClusterId,
-) -> Result<Option<SyncNode>, ApiError> {
+) -> Result<Option<SharedMemoryNode>, ApiError> {
 	let params = CM::get_inspection_dry_run_params(cluster_id).map_err(|e| {
 		log!(
 			error,
@@ -131,7 +133,7 @@ pub fn get_configured_sync_node<
 		);
 		ApiError::FailedToFetchInspectionDryRunParams { cluster_id: *cluster_id }
 	})?;
-	Ok(params.map(|p| SyncNode {
+	Ok(params.map(|p| SharedMemoryNode {
 		dry_run: p.enabled,
 		key: p.sync_node_key,
 		params: p.sync_node_params,
@@ -145,7 +147,7 @@ fn discover_and_cache<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
-) -> Result<Vec<SyncNode>, ApiError> {
+) -> Result<Vec<SharedMemoryNode>, ApiError> {
 	let registry = validated_storage_nodes::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 	let nodes = discover(cluster_id, &registry, probe_node)?;
 	StorageValueRef::persistent(&cache_key(cluster_id)).set(&nodes);
@@ -158,7 +160,7 @@ pub fn discover<P: FnMut(&StorageNodeParams) -> QuorumProbe>(
 	cluster_id: &ClusterId,
 	registry: &[(NodePubKey, StorageNodeParams)],
 	mut probe: P,
-) -> Result<Vec<SyncNode>, ApiError> {
+) -> Result<Vec<SharedMemoryNode>, ApiError> {
 	let mut seen = Vec::new();
 	let candidates = registry
 		.iter()
@@ -172,7 +174,7 @@ pub fn discover<P: FnMut(&StorageNodeParams) -> QuorumProbe>(
 				if members.len() >= MEMBER_FLOOR {
 					log!(
 						debug,
-						"Sync nodes of cluster {:?} discovered from node {:?}",
+						"Shared memory of cluster {:?} discovered from node {:?}",
 						cluster_id,
 						key
 					);
@@ -186,11 +188,11 @@ pub fn discover<P: FnMut(&StorageNodeParams) -> QuorumProbe>(
 
 	log!(
 		error,
-		"❌ No usable sync-node answer for cluster {:?}; answers seen: {:?}",
+		"❌ No usable shared-memory answer for cluster {:?}; answers seen: {:?}",
 		cluster_id,
 		seen
 	);
-	Err(ApiError::FailedToFetchSyncNodes { cluster_id: *cluster_id })
+	Err(ApiError::FailedToFetchSharedMemoryNodes { cluster_id: *cluster_id })
 }
 
 /// Keeps the members whose decoded key is a validated storage node of the
@@ -199,16 +201,15 @@ pub fn discover<P: FnMut(&StorageNodeParams) -> QuorumProbe>(
 pub fn accept_members(
 	info: &proto::inspection::InspSyncQuorumInfo,
 	registry: &[(NodePubKey, StorageNodeParams)],
-) -> Vec<SyncNode> {
-	let mut members: Vec<SyncNode> =
+) -> Vec<SharedMemoryNode> {
+	let mut members: Vec<SharedMemoryNode> =
 		info.quorum_members
 			.iter()
 			.filter_map(|member| decode_member_key(&member.node_key))
 			.filter_map(|key| {
-				registry
-					.iter()
-					.find(|(registered, _)| *registered == key)
-					.map(|(_, params)| SyncNode { dry_run: false, key, params: params.clone() })
+				registry.iter().find(|(registered, _)| *registered == key).map(|(_, params)| {
+					SharedMemoryNode { dry_run: false, key, params: params.clone() }
+				})
 			})
 			.collect();
 	members.sort_by(|a, b| a.key.cmp(&b.key));
@@ -250,7 +251,7 @@ pub fn validated_storage_nodes<
 ) -> Result<Vec<(NodePubKey, StorageNodeParams)>, ApiError> {
 	let keys = CM::get_nodes(cluster_id).map_err(|e| {
 		log!(error, "❌ Failed to fetch nodes of cluster {:?}: {:?}", cluster_id, e);
-		ApiError::FailedToFetchSyncNodes { cluster_id: *cluster_id }
+		ApiError::FailedToFetchSharedMemoryNodes { cluster_id: *cluster_id }
 	})?;
 	let mut nodes: Vec<(NodePubKey, StorageNodeParams)> = keys
 		.into_iter()
@@ -278,8 +279,11 @@ fn probe_node(params: &StorageNodeParams) -> QuorumProbe {
 		.probe_quorum_info(MEMBERSHIP_ERA)
 }
 
-fn cached_sync_nodes(cluster_id: &ClusterId) -> Option<Vec<SyncNode>> {
-	StorageValueRef::persistent(&cache_key(cluster_id)).get::<Vec<SyncNode>>().ok().flatten()
+fn cached_shared_memory_nodes(cluster_id: &ClusterId) -> Option<Vec<SharedMemoryNode>> {
+	StorageValueRef::persistent(&cache_key(cluster_id))
+		.get::<Vec<SharedMemoryNode>>()
+		.ok()
+		.flatten()
 }
 
 fn cache_key(cluster_id: &ClusterId) -> Vec<u8> {
@@ -394,7 +398,10 @@ mod tests {
 			info: info(vec![member(KEY_B, "x"), member(KEY_D, "x")]),
 			declared_deadline_ms: None,
 		});
-		assert_eq!(result, Err(ApiError::FailedToFetchSyncNodes { cluster_id: ClusterId::zero() }));
+		assert_eq!(
+			result,
+			Err(ApiError::FailedToFetchSharedMemoryNodes { cluster_id: ClusterId::zero() })
+		);
 	}
 
 	#[test]
