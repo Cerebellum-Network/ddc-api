@@ -12,6 +12,57 @@ use scale_info::prelude::{format, string::String, vec::Vec};
 use super::*;
 use crate::{log, verification::Verify};
 
+/// Header in which a node declares the deadline it bounds the quorum route to.
+pub const QUORUM_DEADLINE_HEADER: &str = "X-Insp-Quorum-Deadline-Ms";
+
+const QUORUM_REFUSAL_NO_CLIENT: &str = "no-client";
+const QUORUM_REFUSAL_STORE_UNREACHABLE: &str = "store-unreachable";
+const HTTP_OK: u16 = 200;
+const HTTP_NOT_FOUND: u16 = 404;
+const HTTP_SERVICE_UNAVAILABLE: u16 = 503;
+
+/// What a node said, or failed to say, when asked who the sync members are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuorumAnswerKind {
+	/// A list that did not survive the registry intersection or the member floor.
+	Rejected,
+	/// The node holds no sync client.
+	NoClient,
+	/// The node holds a client and the store did not answer in time.
+	StoreUnreachable,
+	/// The node has no such route.
+	NoRoute,
+	/// A refusal without the route's own reason: a binary older than discovery.
+	Predates,
+	/// The node did not answer, or answered with something unreadable.
+	Transport,
+}
+
+pub enum QuorumProbe {
+	Answer { info: proto::inspection::InspSyncQuorumInfo, declared_deadline_ms: Option<u64> },
+	Refused(QuorumAnswerKind),
+}
+
+#[derive(serde::Deserialize)]
+struct QuorumRefusalBody {
+	reason: Option<String>,
+}
+
+/// Classifies a non-success quorum response by its status and refusal reason.
+pub fn classify_quorum_refusal(code: u16, body: &[u8]) -> QuorumAnswerKind {
+	match code {
+		HTTP_NOT_FOUND => QuorumAnswerKind::NoRoute,
+		HTTP_SERVICE_UNAVAILABLE => {
+			match serde_json::from_slice::<QuorumRefusalBody>(body).ok().and_then(|b| b.reason) {
+				Some(r) if r == QUORUM_REFUSAL_NO_CLIENT => QuorumAnswerKind::NoClient,
+				Some(r) if r == QUORUM_REFUSAL_STORE_UNREACHABLE => QuorumAnswerKind::StoreUnreachable,
+				_ => QuorumAnswerKind::Predates,
+			}
+		},
+		_ => QuorumAnswerKind::Predates,
+	}
+}
+
 pub struct DdcClient<'a> {
 	pub base_url: &'a str,
 	timeout: Duration,
@@ -468,6 +519,34 @@ impl<'a> DdcClient<'a> {
 		let body = response.body().collect::<Vec<u8>>();
 
 		decode_signed_proto::<proto::inspection::InspSyncQuorumInfo>(&url, &body)
+	}
+
+	/// Asks once, with no retry, who the sync members are. Retrying is the
+	/// caller's next tick, not this request's.
+	pub fn probe_quorum_info(&self, era: EhdEra) -> QuorumProbe {
+		let url = format!("{}/itm/v1/quorum/{}", self.base_url, era);
+		let deadline = timestamp().add(self.timeout);
+		let request =
+			http::Request::get(&url).deadline(deadline).add_header("Accept", "application/protobuf");
+		let mut response = match request.send().map(|pending| pending.try_wait(deadline)) {
+			Ok(Ok(Ok(response))) => response,
+			_ => {
+				log!(debug, "Sync membership probe to {:?} got no answer", url);
+				return QuorumProbe::Refused(QuorumAnswerKind::Transport);
+			},
+		};
+
+		let code = response.code;
+		let declared_deadline_ms =
+			response.headers().find(QUORUM_DEADLINE_HEADER).and_then(|v| v.parse::<u64>().ok());
+		let body = response.body().collect::<Vec<u8>>();
+		if code != HTTP_OK {
+			return QuorumProbe::Refused(classify_quorum_refusal(code, &body));
+		}
+		match decode_signed_proto::<proto::inspection::InspSyncQuorumInfo>(&url, &body) {
+			Ok(info) => QuorumProbe::Answer { info, declared_deadline_ms },
+			Err(_) => QuorumProbe::Refused(QuorumAnswerKind::Transport),
+		}
 	}
 
 	pub fn get_grouping_collectors(
