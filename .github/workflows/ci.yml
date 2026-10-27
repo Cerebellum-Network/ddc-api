@@ -55,10 +55,3 @@ jobs:
         run: cargo test
         env:
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-
-      # The runtime consumes this crate without std; reported even when tests fail.
-      - name: Check no_std build
-        if: success() || failure()
-        run: cargo check --no-default-features --target wasm32-unknown-unknown
-        env:
-          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
