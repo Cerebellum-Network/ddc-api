@@ -988,7 +988,7 @@ pub fn fetch_processed_eras_for_cluster<
 	cursor: Option<&[u8]>,
 	limit: Option<u32>,
 ) -> Result<proto::activity::GetErasResponse, ApiError> {
-	// Processed eras are the G-Collector's, except in a dry-run.
+	// Era statuses are the G-Collector's; a dry-run sync node serves its own instead.
 	let configured = get_configured_sync_node::<AccountId, BlockNumber, CM>(cluster_id)?;
 	if let Some(sync_node) = configured.filter(|node| node.dry_run) {
 		let host = str::from_utf8(&sync_node.params.host).map_err(|e| {
@@ -1052,7 +1052,8 @@ pub fn fetch_processed_eras(
 	Ok(client.processed_eras(cursor, limit)?.response)
 }
 
-/// Fetch inspected EHD eras from the sync node for a cluster.
+/// Fetch inspected EHD eras of a cluster from its G-Collector, or from the
+/// dry-run sync node during a dry-run.
 #[allow(dead_code)]
 pub fn fetch_inspected_eras_for_cluster<
 	AccountId,
@@ -1064,19 +1065,9 @@ pub fn fetch_inspected_eras_for_cluster<
 	cursor: Option<&[u8]>,
 	limit: Option<u32>,
 ) -> Result<proto::activity::GetErasResponse, ApiError> {
-	// Inspected eras are the G-Collector's era statuses, not sync-store artefacts;
-	// a configured sync node serves them in its place.
-	let sync_node = match get_configured_sync_node::<AccountId, BlockNumber, CM>(cluster_id)? {
-		Some(node) => node,
-		None => get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id)
-			.map(|(key, params)| SyncNode { dry_run: false, key, params })
-			.map_err(|e| {
-				log!(error, "❌ Failed to fetch G-Collector for cluster {:?}: {:?}", cluster_id, e);
-				ApiError::FailedToFetchSyncNodes { cluster_id: *cluster_id }
-			})?,
-	};
-
-	if sync_node.dry_run {
+	// Era statuses are the G-Collector's; a dry-run sync node serves its own instead.
+	let configured = get_configured_sync_node::<AccountId, BlockNumber, CM>(cluster_id)?;
+	if let Some(sync_node) = configured.filter(|node| node.dry_run) {
 		let host = str::from_utf8(&sync_node.params.host).map_err(|e| {
 			log!(
 				error,
@@ -1106,7 +1097,17 @@ pub fn fetch_inspected_eras_for_cluster<
 		});
 	}
 
-	fetch_inspected_eras(&sync_node.params, cursor, limit).map_err(|e| {
+	let (_, g_collector_params) =
+		get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|e| {
+			log!(
+				error,
+				"❌ Failed to fetch G-Collector node for cluster {:?}: {:?}",
+				cluster_id,
+				e
+			);
+			ApiError::FailedToFetchGCollectors { cluster_id: *cluster_id }
+		})?;
+	fetch_inspected_eras(&g_collector_params, cursor, limit).map_err(|e| {
 		log!(error, "❌ Failed to fetch inspected eras for cluster {:?}: {:?}", cluster_id, e);
 		ApiError::FailedToFetchInspectedEras { cluster_id: *cluster_id }
 	})
@@ -1251,12 +1252,12 @@ pub fn fetch_eras_all(
 // These functions use the new etcd-based sync quorum API with full protobuf
 // serialization. They correspond to the inspection_router endpoints.
 
-/// Calls the cluster's sync nodes in turn until one answers.
-///
-/// A configured sync node is the only one tried. Discovered members are tried
-/// in key order, each at its registry endpoint, and when none answers the
-/// cluster is asked again in the same tick.
-fn call_sync_nodes<
+/// Runs one operation on the inspectors' shared memory: the cluster's sync
+/// store. Which replica answers is a storage detail; replicas are tried in key
+/// order, each at its registry endpoint, and when none answers the cluster is
+/// asked again in the same tick. A configured dry-run sync node is the only
+/// one tried.
+fn with_shared_memory<
 	AccountId,
 	BlockNumber,
 	CM: ClusterManager<AccountId, BlockNumber>,
@@ -1268,23 +1269,23 @@ fn call_sync_nodes<
 	mut call: impl FnMut(&DdcClient) -> Result<R, http::Error>,
 ) -> Result<R, ApiError> {
 	if let Some(node) = get_configured_sync_node::<AccountId, BlockNumber, CM>(cluster_id)? {
-		return try_sync_nodes(cluster_id, operation, &[node], &mut call);
+		return try_shared_memory_replicas(cluster_id, operation, &[node], &mut call);
 	}
 
 	let nodes = crate::sync_nodes::get_discovered_sync_nodes::<AccountId, BlockNumber, CM, NM>(
 		cluster_id,
 	)?;
-	if let Ok(result) = try_sync_nodes(cluster_id, operation, &nodes, &mut call) {
+	if let Ok(result) = try_shared_memory_replicas(cluster_id, operation, &nodes, &mut call) {
 		return Ok(result);
 	}
 
-	log!(warn, "No cached sync node of cluster {:?} answered; discovering again", cluster_id);
+	log!(warn, "No cached shared-memory replica of cluster {:?} answered; discovering again", cluster_id);
 	let nodes =
 		crate::sync_nodes::rediscover_sync_nodes::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
-	try_sync_nodes(cluster_id, operation, &nodes, &mut call)
+	try_shared_memory_replicas(cluster_id, operation, &nodes, &mut call)
 }
 
-fn try_sync_nodes<R>(
+fn try_shared_memory_replicas<R>(
 	cluster_id: &ClusterId,
 	operation: &str,
 	nodes: &[SyncNode],
@@ -1320,7 +1321,7 @@ fn try_sync_nodes<R>(
 			Err(e) => {
 				log!(
 					error,
-					"❌ Failed to {} at sync node {:?} of cluster {:?}: {:?}",
+					"❌ Failed to {} at shared-memory replica {:?} of cluster {:?}: {:?}",
 					operation,
 					node.key,
 					cluster_id,
@@ -1343,7 +1344,7 @@ pub fn post_itm_lease<
 	cluster_id: &ClusterId,
 	request: &proto::inspection::LeaseRequest,
 ) -> Result<proto::inspection::LeaseResult, ApiError> {
-	call_sync_nodes::<AccountId, BlockNumber, CM, NM, _>(cluster_id, "post ITM lease", |client| {
+	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(cluster_id, "post ITM lease", |client| {
 		client.post_itm_lease(request)
 	})
 }
@@ -1357,7 +1358,7 @@ pub fn submit_assignments_table<
 	cluster_id: &ClusterId,
 	request: &proto::inspection::PostAssignmentTableRequest,
 ) -> Result<proto::inspection::PostAssignmentTableResponse, ApiError> {
-	call_sync_nodes::<AccountId, BlockNumber, CM, NM, _>(
+	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(
 		cluster_id,
 		"submit assignments table",
 		|client| client.submit_assignments_table(request),
@@ -1373,7 +1374,7 @@ pub fn get_assignments_table<
 	cluster_id: &ClusterId,
 	era: EhdEra,
 ) -> Result<proto::inspection::GetAssignmentTableResponse, ApiError> {
-	call_sync_nodes::<AccountId, BlockNumber, CM, NM, _>(cluster_id, "get assignments table", |client| {
+	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(cluster_id, "get assignments table", |client| {
 		client.get_assignments_table(era)
 	})
 }
@@ -1387,7 +1388,7 @@ pub fn submit_inspection_result<
 	cluster_id: &ClusterId,
 	request: &proto::inspection::PostInspectionResultRequest,
 ) -> Result<proto::inspection::PostInspectionResultResponse, ApiError> {
-	call_sync_nodes::<AccountId, BlockNumber, CM, NM, _>(
+	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(
 		cluster_id,
 		"submit inspection result",
 		|client| client.submit_inspection_result(request),
@@ -1515,7 +1516,7 @@ pub fn get_inspection_state<
 	cluster_id: &ClusterId,
 	era: EhdEra,
 ) -> Result<proto::inspection::InspectionState, ApiError> {
-	call_sync_nodes::<AccountId, BlockNumber, CM, NM, _>(cluster_id, "get inspection state", |client| {
+	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(cluster_id, "get inspection state", |client| {
 		client.get_inspection_state(era)
 	})
 }
@@ -1529,7 +1530,7 @@ pub fn get_inspection_receipt<
 	cluster_id: &ClusterId,
 	era: EhdEra,
 ) -> Result<proto::inspection::InspectionReceipt, ApiError> {
-	call_sync_nodes::<AccountId, BlockNumber, CM, NM, _>(cluster_id, "get inspection receipt", |client| {
+	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(cluster_id, "get inspection receipt", |client| {
 		client.get_inspection_receipt(era)
 	})
 	.map_err(|e| match e {
@@ -1549,7 +1550,7 @@ pub fn get_quorum_info<
 	cluster_id: &ClusterId,
 	era: EhdEra,
 ) -> Result<proto::inspection::InspSyncQuorumInfo, ApiError> {
-	call_sync_nodes::<AccountId, BlockNumber, CM, NM, _>(cluster_id, "get quorum info", |client| {
+	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(cluster_id, "get quorum info", |client| {
 		client.get_quorum_info(era)
 	})
 }

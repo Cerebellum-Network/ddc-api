@@ -49,14 +49,19 @@ pub mod proto {
 			#[test]
 			fn lease_request_round_trip() {
 				let req =
-					LeaseRequest { era_id: 42, inspector_key: "0xabc123".into(), ttl_seconds: 300 };
+					LeaseRequest {
+					era_id: 42,
+					inspector_key: "0xabc123".into(),
+					ttl_seconds: 300,
+					inspector_signature: vec![],
+				};
 
 				let bytes = req.encode_to_vec();
 				assert!(!bytes.is_empty());
 
 				let decoded = LeaseRequest::decode(bytes.as_slice()).unwrap();
 				assert_eq!(decoded.era_id, 42);
-				assert_eq!(decoded.inspector_key, "0xabc123");
+				assert_eq!(decoded.inspector_key, b"0xabc123");
 				assert_eq!(decoded.ttl_seconds, 300);
 			}
 
@@ -68,7 +73,7 @@ pub mod proto {
 					inspector_key: "0xabc123".into(),
 					lease_id: "lease-001".into(),
 					expires_at: 1700000000,
-					current_holder: String::new(),
+					current_holder: vec![],
 					error_message: String::new(),
 				};
 
@@ -76,7 +81,7 @@ pub mod proto {
 				let decoded = LeaseResult::decode(bytes.as_slice()).unwrap();
 				assert_eq!(decoded.status, LeaseStatus::Acquired as i32);
 				assert_eq!(decoded.era_id, 42);
-				assert_eq!(decoded.inspector_key, "0xabc123");
+				assert_eq!(decoded.inspector_key, b"0xabc123");
 				assert_eq!(decoded.lease_id, "lease-001");
 				assert_eq!(decoded.expires_at, 1700000000);
 			}
@@ -88,25 +93,23 @@ pub mod proto {
 				let mut paths = BTreeMap::new();
 				paths.insert(
 					"path-001".into(),
-					InspectionPath {
-						path_type: InspectionPathType::NodeAr as i32,
-						collectors: vec!["0xc0c1".into(), "0xc2c3".into()],
-						path_data: Some(PathData::NodeAr(NodeArPath {
-							node_key: "0x0a0b".into(),
-							leaves_pos: vec![1, 2, 3],
-							tca_id: 5,
-							record_id_range_start: vec![],
-							record_id_range_end: vec![],
-						})),
-					},
-				);
-
-				let mut assignments = BTreeMap::new();
-				assignments.insert(
-					"path-001".into(),
-					InspectorAssignments {
-						main_inspectors: vec!["insp1".into(), "insp2".into()],
-						backup_inspectors: vec!["insp3".into()],
+					PathAssignment {
+						path: Some(InspectionPath {
+							path_type: InspectionPathType::NodeAr as i32,
+							collectors: vec!["0xc0c1".into(), "0xc2c3".into()],
+							path_data: Some(PathData::NodeAr(NodeArPath {
+								node_key: "0x0a0b".into(),
+								leaves_pos: vec![1, 2, 3],
+								tca_id: 5,
+								record_id_range_start: vec![],
+								record_id_range_end: vec![],
+								value: None,
+							})),
+						}),
+						assignments: Some(InspectorAssignments {
+							main_inspectors: vec!["insp1".into(), "insp2".into()],
+							backup_inspectors: vec!["insp3".into()],
+						}),
 					},
 				);
 
@@ -115,13 +118,13 @@ pub mod proto {
 					era: 42,
 					irf: 3,
 					paths,
-					assignments,
 					collective_seed: 12345,
 					builder: "0xabc123".into(),
 					submitted_at: 1700000000,
 					archived_cid: vec![],
 					archived_at: 0,
 					archival_status: ArchivalStatus::Pending as i32,
+					builder_signature: vec![],
 				};
 
 				let bytes = table.encode_to_vec();
@@ -129,18 +132,19 @@ pub mod proto {
 				assert_eq!(decoded.era, 42);
 				assert_eq!(decoded.irf, 3);
 				assert_eq!(decoded.paths.len(), 1);
-				assert_eq!(decoded.assignments.len(), 1);
-				assert_eq!(decoded.paths["path-001"].path_type, InspectionPathType::NodeAr as i32);
-				assert_eq!(decoded.paths["path-001"].collectors.len(), 2);
-				match &decoded.paths["path-001"].path_data {
+				let path = decoded.paths["path-001"].path.as_ref().unwrap();
+				assert_eq!(path.path_type, InspectionPathType::NodeAr as i32);
+				assert_eq!(path.collectors.len(), 2);
+				match &path.path_data {
 					Some(PathData::NodeAr(node_ar)) => {
-						assert_eq!(node_ar.node_key, "0x0a0b");
+						assert_eq!(node_ar.node_key, b"0x0a0b");
 						assert_eq!(node_ar.leaves_pos, vec![1, 2, 3]);
 						assert_eq!(node_ar.tca_id, 5);
 					},
 					_ => panic!("Expected NodeAr path_data"),
 				}
-				assert_eq!(decoded.assignments["path-001"].main_inspectors.len(), 2);
+				let assignments = decoded.paths["path-001"].assignments.as_ref().unwrap();
+				assert_eq!(assignments.main_inspectors.len(), 2);
 			}
 
 			#[test]
@@ -153,13 +157,13 @@ pub mod proto {
 						era: 42,
 						irf: 3,
 						paths: BTreeMap::new(),
-						assignments: BTreeMap::new(),
 						collective_seed: 0,
 						builder: "0xabc123".into(),
 						submitted_at: 0,
 						archived_cid: vec![],
 						archived_at: 0,
 						archival_status: 0,
+						builder_signature: vec![],
 					}),
 				};
 
@@ -200,7 +204,7 @@ pub mod proto {
 				let decoded = GetAssignmentTableResponse::decode(bytes.as_slice()).unwrap();
 				assert_eq!(decoded.status, GetAssignmentTableStatus::Building as i32);
 				assert!(decoded.table.is_none());
-				assert_eq!(decoded.lease_holder, "0xdef456");
+				assert_eq!(decoded.lease_holder, b"0xdef456");
 			}
 
 			#[test]
@@ -208,13 +212,13 @@ pub mod proto {
 				let req = PostInspectionResultRequest {
 					era_id: 42,
 					inspector_key: "0xabc123".into(),
-					inspector_signature: String::new(),
+					inspector_signature: vec![],
 					paths_results: vec![
 						InspectionPathResult {
 							path_hash: "0x01".into(),
 							result_hash: "0xaabbcc".into(),
 							exception: None,
-							source_collectors: vec![],
+							source_nodes: vec![],
 						},
 						InspectionPathResult {
 							path_hash: "0x02".into(),
@@ -229,7 +233,7 @@ pub mod proto {
 									},
 								)),
 							}),
-							source_collectors: vec![],
+							source_nodes: vec![],
 						},
 					],
 				};
@@ -237,11 +241,11 @@ pub mod proto {
 				let bytes = req.encode_to_vec();
 				let decoded = PostInspectionResultRequest::decode(bytes.as_slice()).unwrap();
 				assert_eq!(decoded.paths_results.len(), 2);
-				assert_eq!(decoded.paths_results[0].path_hash, "0x01");
+				assert_eq!(decoded.paths_results[0].path_hash, b"0x01");
 				assert!(decoded.paths_results[1].exception.is_some());
 				match &decoded.paths_results[1].exception.as_ref().unwrap().kind {
 					Some(insp_path_exception::Kind::NodeArsUnavailable(inner)) => {
-						assert_eq!(inner.node_key, "0xnode1");
+						assert_eq!(inner.node_key, b"0xnode1");
 						assert_eq!(inner.tca_id, 1);
 					},
 					_ => panic!("Expected NodeArsUnavailable exception"),
@@ -289,13 +293,16 @@ pub mod proto {
 				);
 
 				let state = InspectionState {
+					cluster_id: "0xaabb".into(),
 					era_id: 42,
 					total_paths: 10,
 					verified_paths: 5,
 					unverified_paths: 2,
 					pending_paths: 3,
+					quorum_unreached_paths: 0,
 					irf: 3,
 					paths,
+					submissions: vec![],
 					updated_at: 1700000000,
 					archived_cid: vec![],
 					archived_at: 0,
@@ -334,9 +341,9 @@ pub mod proto {
 							)),
 						}),
 					}],
-					quorum_unreached_paths: vec!["0x04".into()],
-					assignments_hash: String::new(),
-					state_hash: String::new(),
+					quorum_unreached_paths: vec![UnverifiedPath { path_hash: "0x04".into(), exception: None }],
+					assignments_hash: vec![],
+					state_hash: vec![],
 					generated_at: 1700000000,
 					complete: true,
 					archived_cid: vec![],
@@ -393,7 +400,7 @@ pub mod proto {
 			fn default_values_are_zero() {
 				let req = LeaseRequest::default();
 				assert_eq!(req.era_id, 0);
-				assert_eq!(req.inspector_key, "");
+				assert!(req.inspector_key.is_empty());
 				assert_eq!(req.ttl_seconds, 0);
 
 				let state = InspectionState::default();
@@ -435,6 +442,7 @@ pub mod proto {
 					era_id: 100,
 					inspector_key: "0x1234567890abcdef".into(),
 					ttl_seconds: 60,
+					inspector_signature: vec![],
 				};
 
 				// Serialize to bytes (as inspector client would send)
@@ -457,7 +465,7 @@ pub mod proto {
 					inspector_key: "0x1234567890abcdef".into(),
 					lease_id: "lease-abc-123".into(),
 					expires_at: 1700000060,
-					current_holder: String::new(),
+					current_holder: vec![],
 					error_message: String::new(),
 				};
 
@@ -489,7 +497,7 @@ pub mod proto {
 				let bytes = result.encode_to_vec();
 				let decoded = LeaseResult::decode(bytes.as_slice()).unwrap();
 				assert_eq!(decoded.status, LeaseStatus::HeldByOther as i32);
-				assert_eq!(decoded.current_holder, "0xother_inspector_key");
+				assert_eq!(decoded.current_holder, b"0xother_inspector_key");
 				assert!(decoded.lease_id.is_empty());
 			}
 
@@ -502,7 +510,7 @@ pub mod proto {
 					inspector_key: "0x1234567890abcdef".into(),
 					lease_id: String::new(),
 					expires_at: 0,
-					current_holder: String::new(),
+					current_holder: vec![],
 					error_message: "etcd cluster unavailable".into(),
 				};
 
