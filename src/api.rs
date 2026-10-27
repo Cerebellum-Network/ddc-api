@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
 	client::{DdcClient, ReadBackError},
 	proto::{self},
-	sync_nodes::{get_configured_sync_node, SyncNode},
+	shared_memory::{dry_run_shared_memory_node, SharedMemoryNode},
 };
 
 #[macro_export]
@@ -102,7 +102,7 @@ pub enum ApiError {
 		cluster_id: ClusterId,
 		era: EhdEra,
 	},
-	FailedToFetchSyncNodes {
+	FailedToFetchSharedMemoryNodes {
 		cluster_id: ClusterId,
 	},
 	FailedToFetchInspSummary {
@@ -190,7 +190,6 @@ pub fn get_g_collector_node<
 >(
 	cluster_id: &ClusterId,
 ) -> Result<(NodePubKey, StorageNodeParams), ApiError> {
-	// todo(yahortsaryk): replace G-Collector with Sync node once it is supported at DDC
 	let g_collectors = get_g_collectors_nodes::<AccountId, BlockNumber, CM, NM>(cluster_id)
 		.map_err(|e| {
 			log!(error, "❌ Failed to fetch G-Collectors for cluster {:?}: {:?}", cluster_id, e);
@@ -989,23 +988,23 @@ pub fn fetch_processed_eras_for_cluster<
 	limit: Option<u32>,
 ) -> Result<proto::activity::GetErasResponse, ApiError> {
 	// Era statuses are the G-Collector's; a dry-run sync node serves its own instead.
-	let configured = get_configured_sync_node::<AccountId, BlockNumber, CM>(cluster_id)?;
-	if let Some(sync_node) = configured.filter(|node| node.dry_run) {
-		let host = str::from_utf8(&sync_node.params.host).map_err(|e| {
+	let configured = dry_run_shared_memory_node::<AccountId, BlockNumber, CM>(cluster_id)?;
+	if let Some(dry_run_node) = configured.filter(|node| node.dry_run) {
+		let host = str::from_utf8(&dry_run_node.params.host).map_err(|e| {
 			log!(
 				error,
-				"❌ Failed to parse sync node host for node {:?} in cluster {:?}: {:?}",
-				sync_node.key,
+				"❌ Failed to parse dry-run node host for node {:?} in cluster {:?}: {:?}",
+				dry_run_node.key,
 				cluster_id,
 				e
 			);
 			ApiError::NodeHostParseError {
 				cluster_id: *cluster_id,
-				node_key: sync_node.key.clone(),
-				host: sync_node.params.host.clone(),
+				node_key: dry_run_node.key.clone(),
+				host: dry_run_node.params.host.clone(),
 			}
 		})?;
-		let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
+		let base_url = format!("http://{}:{}", host, dry_run_node.params.http_port);
 		let client =
 			DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
 
@@ -1066,23 +1065,23 @@ pub fn fetch_inspected_eras_for_cluster<
 	limit: Option<u32>,
 ) -> Result<proto::activity::GetErasResponse, ApiError> {
 	// Era statuses are the G-Collector's; a dry-run sync node serves its own instead.
-	let configured = get_configured_sync_node::<AccountId, BlockNumber, CM>(cluster_id)?;
-	if let Some(sync_node) = configured.filter(|node| node.dry_run) {
-		let host = str::from_utf8(&sync_node.params.host).map_err(|e| {
+	let configured = dry_run_shared_memory_node::<AccountId, BlockNumber, CM>(cluster_id)?;
+	if let Some(dry_run_node) = configured.filter(|node| node.dry_run) {
+		let host = str::from_utf8(&dry_run_node.params.host).map_err(|e| {
 			log!(
 				error,
-				"❌ Failed to parse sync node host for node {:?} in cluster {:?}: {:?}",
-				sync_node.key,
+				"❌ Failed to parse dry-run node host for node {:?} in cluster {:?}: {:?}",
+				dry_run_node.key,
 				cluster_id,
 				e
 			);
 			ApiError::NodeHostParseError {
 				cluster_id: *cluster_id,
-				node_key: sync_node.key.clone(),
-				host: sync_node.params.host.clone(),
+				node_key: dry_run_node.key.clone(),
+				host: dry_run_node.params.host.clone(),
 			}
 		})?;
-		let base_url = format!("http://{}:{}", host, sync_node.params.http_port);
+		let base_url = format!("http://{}:{}", host, dry_run_node.params.http_port);
 		let client =
 			DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
 
@@ -1156,7 +1155,7 @@ pub fn fetch_processed_era<
 		.ok_or(ApiError::FailedToFetchEra { cluster_id: *cluster_id, era })
 }
 
-/// Fetch inspected EHD eras from a sync node via /activity/inspected-eras.
+/// Fetch inspected EHD eras from a node via /activity/inspected-eras.
 #[allow(dead_code)]
 pub fn fetch_inspected_eras(
 	node_params: &StorageNodeParams,
@@ -1268,11 +1267,11 @@ fn with_shared_memory<
 	operation: &str,
 	mut call: impl FnMut(&DdcClient) -> Result<R, http::Error>,
 ) -> Result<R, ApiError> {
-	if let Some(node) = get_configured_sync_node::<AccountId, BlockNumber, CM>(cluster_id)? {
+	if let Some(node) = dry_run_shared_memory_node::<AccountId, BlockNumber, CM>(cluster_id)? {
 		return try_shared_memory_replicas(cluster_id, operation, &[node], &mut call);
 	}
 
-	let nodes = crate::sync_nodes::get_discovered_sync_nodes::<AccountId, BlockNumber, CM, NM>(
+	let nodes = crate::shared_memory::discovered_shared_memory_nodes::<AccountId, BlockNumber, CM, NM>(
 		cluster_id,
 	)?;
 	if let Ok(result) = try_shared_memory_replicas(cluster_id, operation, &nodes, &mut call) {
@@ -1281,24 +1280,24 @@ fn with_shared_memory<
 
 	log!(warn, "No cached shared-memory replica of cluster {:?} answered; discovering again", cluster_id);
 	let nodes =
-		crate::sync_nodes::rediscover_sync_nodes::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+		crate::shared_memory::rediscover_shared_memory_nodes::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 	try_shared_memory_replicas(cluster_id, operation, &nodes, &mut call)
 }
 
 fn try_shared_memory_replicas<R>(
 	cluster_id: &ClusterId,
 	operation: &str,
-	nodes: &[SyncNode],
+	nodes: &[SharedMemoryNode],
 	call: &mut impl FnMut(&DdcClient) -> Result<R, http::Error>,
 ) -> Result<R, ApiError> {
-	let mut last_error = ApiError::FailedToFetchSyncNodes { cluster_id: *cluster_id };
+	let mut last_error = ApiError::FailedToFetchSharedMemoryNodes { cluster_id: *cluster_id };
 	for node in nodes {
 		let host = match str::from_utf8(&node.params.host) {
 			Ok(host) => host,
 			Err(e) => {
 				log!(
 					error,
-					"❌ Failed to parse sync node host for node {:?} in cluster {:?}: {:?}",
+					"❌ Failed to parse dry-run node host for node {:?} in cluster {:?}: {:?}",
 					node.key,
 					cluster_id,
 					e
@@ -1415,11 +1414,11 @@ pub fn submit_inspection_result_read_back<
 	cluster_id: &ClusterId,
 	request: &proto::inspection::PostInspectionResultRequest,
 ) -> Result<proto::inspection::PostInspectionResultResponse, ApiError> {
-	if get_configured_sync_node::<AccountId, BlockNumber, CM>(cluster_id)?.is_some() {
+	if dry_run_shared_memory_node::<AccountId, BlockNumber, CM>(cluster_id)?.is_some() {
 		return submit_inspection_result::<AccountId, BlockNumber, CM, NM>(cluster_id, request);
 	}
 
-	let nodes = crate::sync_nodes::get_discovered_sync_nodes::<AccountId, BlockNumber, CM, NM>(
+	let nodes = crate::shared_memory::discovered_shared_memory_nodes::<AccountId, BlockNumber, CM, NM>(
 		cluster_id,
 	)?;
 	let mut submit = |client: &DdcClient| client.submit_inspection_result(request);
@@ -1455,7 +1454,7 @@ pub fn submit_inspection_result_read_back<
 		match client.read_back_inspection_state(request.era_id) {
 			Ok(state) => {
 				let missing =
-					crate::sync_nodes::uncommitted_paths(&state, &request.inspector_key, &expected);
+					crate::shared_memory::uncommitted_paths(&state, &request.inspector_key, &expected);
 				if missing.is_empty() {
 					return Ok(response);
 				}
@@ -1470,7 +1469,7 @@ pub fn submit_inspection_result_read_back<
 					submitter.key,
 					reader.key
 				);
-				crate::sync_nodes::forget_cached_sync_node(cluster_id, &submitter.key);
+				crate::shared_memory::forget_cached_shared_memory_node(cluster_id, &submitter.key);
 				return try_shared_memory_replicas(
 					cluster_id,
 					"resubmit inspection result",
@@ -1485,7 +1484,7 @@ pub fn submit_inspection_result_read_back<
 					reader.key,
 					cluster_id
 				);
-				crate::sync_nodes::forget_cached_sync_nodes(cluster_id);
+				crate::shared_memory::forget_cached_shared_memory_nodes(cluster_id);
 			},
 			Err(ReadBackError::Unavailable) => {
 				log!(

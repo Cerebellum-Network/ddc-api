@@ -4,7 +4,7 @@ pub const LOG_TARGET: &str = "ddc-api";
 
 pub mod api;
 pub mod client;
-pub mod sync_nodes;
+pub mod shared_memory;
 pub mod verification;
 
 pub mod proto {
