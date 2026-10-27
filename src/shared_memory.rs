@@ -24,7 +24,7 @@ use scale_info::prelude::{format, string::String};
 
 use crate::{
 	api::ApiError,
-	client::{DdcClient, QuorumAnswerKind, QuorumProbe},
+	client::{DdcClient, SharedMemoryAnswerKind, SharedMemoryProbe},
 	log, proto,
 };
 
@@ -156,7 +156,7 @@ fn discover_and_cache<
 
 /// Asks the first candidates in key order and returns the first usable
 /// answer. `probe` asks one node.
-pub fn discover<P: FnMut(&StorageNodeParams) -> QuorumProbe>(
+pub fn discover<P: FnMut(&StorageNodeParams) -> SharedMemoryProbe>(
 	cluster_id: &ClusterId,
 	registry: &[(NodePubKey, StorageNodeParams)],
 	mut probe: P,
@@ -168,7 +168,7 @@ pub fn discover<P: FnMut(&StorageNodeParams) -> QuorumProbe>(
 		.take(MAX_DISCOVERY_ATTEMPTS);
 	for (key, params) in candidates {
 		match probe(params) {
-			QuorumProbe::Answer { info, declared_deadline_ms } => {
+			SharedMemoryProbe::Answer { info, declared_deadline_ms } => {
 				check_deadline_coupling(key, declared_deadline_ms);
 				let members = accept_members(&info, registry);
 				if members.len() >= MEMBER_FLOOR {
@@ -180,9 +180,9 @@ pub fn discover<P: FnMut(&StorageNodeParams) -> QuorumProbe>(
 					);
 					return Ok(members);
 				}
-				seen.push(QuorumAnswerKind::Rejected);
+				seen.push(SharedMemoryAnswerKind::Rejected);
 			}
-			QuorumProbe::Refused(kind) => seen.push(kind),
+			SharedMemoryProbe::Refused(kind) => seen.push(kind),
 		}
 	}
 
@@ -269,14 +269,14 @@ pub fn validated_storage_nodes<
 	Ok(nodes)
 }
 
-fn probe_node(params: &StorageNodeParams) -> QuorumProbe {
+fn probe_node(params: &StorageNodeParams) -> SharedMemoryProbe {
 	let Ok(host) = core::str::from_utf8(&params.host) else {
-		return QuorumProbe::Refused(QuorumAnswerKind::Transport);
+		return SharedMemoryProbe::Refused(SharedMemoryAnswerKind::Transport);
 	};
 	// Plaintext over the registry host and published port, as every reader builds it.
 	let base_url = format!("http://{}:{}", host, params.http_port);
 	DdcClient::new(&base_url, Duration::from_millis(DISCOVERY_TIMEOUT_MS), DISCOVERY_RETRIES)
-		.probe_quorum_info(MEMBERSHIP_ERA)
+		.probe_shared_memory(MEMBERSHIP_ERA)
 }
 
 fn cached_shared_memory_nodes(cluster_id: &ClusterId) -> Option<Vec<SharedMemoryNode>> {
@@ -297,7 +297,7 @@ fn refresh_key(cluster_id: &ClusterId) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::client::classify_quorum_refusal;
+	use crate::client::classify_shared_memory_refusal;
 	use ddc_primitives::StorageNodePubKey;
 	use proto::inspection::{InspSyncQuorumInfo, InspSyncQuorumMember};
 
@@ -382,7 +382,7 @@ mod tests {
 		let mut asked = Vec::new();
 		let nodes = discover(&ClusterId::zero(), &registry(), |p| {
 			asked.push(p.host.clone());
-			QuorumProbe::Answer {
+			SharedMemoryProbe::Answer {
 				info: info(vec![member(KEY_B, "x"), member(KEY_C, "x")]),
 				declared_deadline_ms: None,
 			}
@@ -394,7 +394,7 @@ mod tests {
 
 	#[test]
 	fn an_answer_below_the_member_floor_is_not_usable() {
-		let result = discover(&ClusterId::zero(), &registry(), |_| QuorumProbe::Answer {
+		let result = discover(&ClusterId::zero(), &registry(), |_| SharedMemoryProbe::Answer {
 			info: info(vec![member(KEY_B, "x"), member(KEY_D, "x")]),
 			declared_deadline_ms: None,
 		});
@@ -412,7 +412,7 @@ mod tests {
 		let mut asked = 0;
 		let result = discover(&ClusterId::zero(), &wide, |_| {
 			asked += 1;
-			QuorumProbe::Refused(QuorumAnswerKind::Transport)
+			SharedMemoryProbe::Refused(SharedMemoryAnswerKind::Transport)
 		});
 		assert!(result.is_err());
 		assert_eq!(asked, MAX_DISCOVERY_ATTEMPTS);
@@ -421,20 +421,20 @@ mod tests {
 	#[test]
 	fn a_refusal_is_classified_by_its_reason() {
 		assert_eq!(
-			classify_quorum_refusal(503, br#"{"message":"m","reason":"no-client"}"#),
-			QuorumAnswerKind::NoClient
+			classify_shared_memory_refusal(503, br#"{"message":"m","reason":"no-client"}"#),
+			SharedMemoryAnswerKind::NoClient
 		);
 		assert_eq!(
-			classify_quorum_refusal(503, br#"{"message":"m","reason":"store-unreachable"}"#),
-			QuorumAnswerKind::StoreUnreachable
+			classify_shared_memory_refusal(503, br#"{"message":"m","reason":"store-unreachable"}"#),
+			SharedMemoryAnswerKind::StoreUnreachable
 		);
 		assert_eq!(
-			classify_quorum_refusal(
+			classify_shared_memory_refusal(
 				503,
 				br#"{"message":"Inspection sync is disabled on this node."}"#
 			),
-			QuorumAnswerKind::Predates
+			SharedMemoryAnswerKind::Predates
 		);
-		assert_eq!(classify_quorum_refusal(404, b""), QuorumAnswerKind::NoRoute);
+		assert_eq!(classify_shared_memory_refusal(404, b""), SharedMemoryAnswerKind::NoRoute);
 	}
 }
