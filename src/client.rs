@@ -499,6 +499,19 @@ impl<'a> DdcClient<'a> {
 	}
 
 	/// POST /itm/path - Submit inspection path results (protobuf)
+	pub fn post_era_nudge(
+		&self,
+		request: &proto::inspection::PostEraNudgeRequest,
+	) -> Result<proto::inspection::PostEraNudgeResponse, http::Error> {
+		let url = self.insp_mem_url("/itm/v1/nudge");
+		let body = request.encode_to_vec();
+
+		let response = self.post_proto(&url, body)?;
+		let body = response.body().collect::<Vec<u8>>();
+
+		decode_signed_proto::<proto::inspection::PostEraNudgeResponse>(&url, &body)
+	}
+
 	pub fn submit_inspection_result(
 		&self,
 		request: &proto::inspection::PostInspectionResultRequest,
