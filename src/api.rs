@@ -1555,3 +1555,279 @@ pub fn get_quorum_info<
 		client.get_quorum_info(era)
 	})
 }
+
+#[cfg(test)]
+mod tests {
+	use ddc_primitives::{
+		traits::ClusterQuery, ClusterNodeKind, ClusterNodeState, ClusterNodeStatus,
+		ClusterNodesStats, ClusterStatus, InspectionDryRunParams, StorageNodePubKey,
+	};
+	use polkadot_sdk::sp_core::{
+		ed25519,
+		offchain::{
+			testing::{PendingRequest, TestOffchainExt},
+			OffchainDbExt, OffchainWorkerExt,
+		},
+		Pair,
+	};
+	use polkadot_sdk::sp_io::TestExternalities;
+	use polkadot_sdk::sp_runtime::DispatchError;
+	use prost::Message;
+
+	use super::*;
+	use crate::proto::{
+		inspection::{
+			InspSyncQuorumInfo, InspSyncQuorumMember, InspectionPathResult, InspectionPathStatus,
+			InspectionState, PostInspectionResultRequest, PostInspectionResultResponse,
+		},
+		signature::{signature::Algorithm, Signature, SignedResponse},
+	};
+
+	type AccountId = u64;
+	type BlockNumber = u64;
+
+	const KEY_A: [u8; 32] = [0x11; 32];
+	const KEY_B: [u8; 32] = [0x22; 32];
+	const HOST_A: &str = "node-a";
+	const HOST_B: &str = "node-b";
+	const TEST_HTTP_PORT: u16 = 8080;
+	const TEST_ERA: EhdEra = 7;
+	const INSPECTOR: &[u8] = b"inspector-key";
+	const PATH_HASH: [u8; 2] = [0x01, 0x02];
+	const SIGNER_SEED: [u8; 32] = [0x07; 32];
+
+	fn node_key(bytes: [u8; 32]) -> NodePubKey {
+		NodePubKey::StoragePubKey(StorageNodePubKey::new(bytes))
+	}
+
+	struct MockCluster;
+
+	impl ClusterQuery<AccountId> for MockCluster {
+		fn cluster_exists(_: &ClusterId) -> bool {
+			unimplemented!()
+		}
+		fn get_cluster_status(_: &ClusterId) -> Result<ClusterStatus, DispatchError> {
+			unimplemented!()
+		}
+		fn get_manager_and_reserve_id(
+			_: &ClusterId,
+		) -> Result<(AccountId, AccountId), DispatchError> {
+			unimplemented!()
+		}
+	}
+
+	impl ClusterManager<AccountId, BlockNumber> for MockCluster {
+		fn get_manager_account_id(_: &ClusterId) -> Result<AccountId, DispatchError> {
+			unimplemented!()
+		}
+		fn contains_node(_: &ClusterId, _: &NodePubKey, _: Option<ClusterNodeStatus>) -> bool {
+			unimplemented!()
+		}
+		fn get_nodes(_: &ClusterId) -> Result<Vec<NodePubKey>, DispatchError> {
+			Ok(vec![node_key(KEY_A), node_key(KEY_B)])
+		}
+		fn add_node(
+			_: &ClusterId,
+			_: &NodePubKey,
+			_: &ClusterNodeKind,
+		) -> Result<(), DispatchError> {
+			unimplemented!()
+		}
+		fn remove_node(_: &ClusterId, _: &NodePubKey) -> Result<(), DispatchError> {
+			unimplemented!()
+		}
+		fn get_node_state(
+			_: &ClusterId,
+			_: &NodePubKey,
+		) -> Result<ClusterNodeState<BlockNumber>, DispatchError> {
+			Ok(ClusterNodeState {
+				kind: ClusterNodeKind::External,
+				status: ClusterNodeStatus::ValidationSucceeded,
+				added_at: 0,
+			})
+		}
+		fn get_nodes_stats(_: &ClusterId) -> Result<ClusterNodesStats, DispatchError> {
+			unimplemented!()
+		}
+		fn validate_node(_: &ClusterId, _: &NodePubKey, _: bool) -> Result<(), DispatchError> {
+			unimplemented!()
+		}
+		fn get_clusters(_: ClusterStatus) -> Result<Vec<ClusterId>, DispatchError> {
+			unimplemented!()
+		}
+		fn get_inspection_dry_run_params(
+			_: &ClusterId,
+		) -> Result<Option<InspectionDryRunParams>, DispatchError> {
+			Ok(None)
+		}
+	}
+
+	struct MockNodes;
+
+	impl NodeManager<AccountId> for MockNodes {
+		fn get_cluster_id(_: &NodePubKey) -> Result<Option<ClusterId>, DispatchError> {
+			unimplemented!()
+		}
+		fn exists(_: &NodePubKey) -> bool {
+			unimplemented!()
+		}
+		fn get_node_provider_id(_: &NodePubKey) -> Result<AccountId, DispatchError> {
+			unimplemented!()
+		}
+		fn get_node_params(key: &NodePubKey) -> Result<NodeParams, DispatchError> {
+			let host = if *key == node_key(KEY_A) { HOST_A } else { HOST_B };
+			Ok(NodeParams::StorageParams(StorageNodeParams {
+				mode: StorageNodeMode::Storage,
+				host: host.as_bytes().to_vec(),
+				http_port: TEST_HTTP_PORT,
+				..Default::default()
+			}))
+		}
+	}
+
+	fn signed<M: Message>(message: &M) -> Vec<u8> {
+		let pair = ed25519::Pair::from_seed(&SIGNER_SEED);
+		let payload = message.encode_to_vec();
+		let value = pair.sign(&payload).0.to_vec();
+		SignedResponse {
+			payload,
+			signature: Some(Signature {
+				algorithm: Algorithm::Ed25519 as i32,
+				value,
+				signer: pair.public().0.to_vec(),
+			}),
+		}
+		.encode_to_vec()
+	}
+
+	fn get(host: &str, path: &str, response: Vec<u8>) -> PendingRequest {
+		PendingRequest {
+			method: "GET".into(),
+			uri: format!("http://{}:{}{}", host, TEST_HTTP_PORT, path),
+			headers: vec![("Accept".into(), "application/protobuf".into())],
+			response: Some(response),
+			sent: true,
+			..Default::default()
+		}
+	}
+
+	fn post(host: &str, path: &str, body: Vec<u8>, response: Vec<u8>) -> PendingRequest {
+		PendingRequest {
+			method: "POST".into(),
+			uri: format!("http://{}:{}{}", host, TEST_HTTP_PORT, path),
+			headers: vec![
+				("content-type".into(), "application/protobuf".into()),
+				("Accept".into(), "application/protobuf".into()),
+			],
+			body,
+			response: Some(response),
+			sent: true,
+			..Default::default()
+		}
+	}
+
+	fn member(key: [u8; 32]) -> InspSyncQuorumMember {
+		InspSyncQuorumMember {
+			node_key: format!("0x{}", hex::encode(key)).into_bytes(),
+			..Default::default()
+		}
+	}
+
+	fn request() -> PostInspectionResultRequest {
+		PostInspectionResultRequest {
+			era_id: TEST_ERA,
+			inspector_key: INSPECTOR.to_vec(),
+			paths_results: vec![InspectionPathResult {
+				path_hash: PATH_HASH.to_vec(),
+				..Default::default()
+			}],
+			..Default::default()
+		}
+	}
+
+	fn state_listing(inspectors: Vec<Vec<u8>>) -> InspectionState {
+		let mut state = InspectionState { era_id: TEST_ERA, ..Default::default() };
+		state.paths.insert(
+			hex::encode(PATH_HASH),
+			InspectionPathStatus { inspectors, ..Default::default() },
+		);
+		state
+	}
+
+	fn accepted() -> PostInspectionResultResponse {
+		PostInspectionResultResponse { accepted_count: 1, ..Default::default() }
+	}
+
+	// Discovery asks the first candidate (A, lowest key) and both are named.
+	fn expect_discovery(requests: &mut Vec<PendingRequest>) {
+		let members = InspSyncQuorumInfo {
+			quorum_members: vec![member(KEY_A), member(KEY_B)],
+			..Default::default()
+		};
+		requests.push(get(HOST_A, "/itm/v1/quorum/0", signed(&members)));
+	}
+
+	fn run_with(requests: Vec<PendingRequest>, test: impl FnOnce()) {
+		let (offchain, state) = TestOffchainExt::new();
+		for request in requests {
+			state.write().expect_request(request);
+		}
+		let mut ext = TestExternalities::default();
+		ext.register_extension(OffchainDbExt::new(offchain.clone()));
+		ext.register_extension(OffchainWorkerExt::new(offchain));
+		ext.execute_with(test);
+	}
+
+	#[test]
+	fn a_submission_another_replica_reads_back_is_not_resubmitted() {
+		let mut requests = Vec::new();
+		expect_discovery(&mut requests);
+		requests.push(post(HOST_A, "/itm/v1/path", request().encode_to_vec(), signed(&accepted())));
+		requests.push(get(
+			HOST_B,
+			"/itm/v1/state/7",
+			signed(&state_listing(vec![INSPECTOR.to_vec()])),
+		));
+
+		run_with(requests, || {
+			let response = submit_inspection_result_read_back::<
+				AccountId,
+				BlockNumber,
+				MockCluster,
+				MockNodes,
+			>(&ClusterId::zero(), &request())
+			.unwrap();
+			assert_eq!(response.accepted_count, 1);
+		});
+	}
+
+	#[test]
+	fn a_submission_missing_on_read_back_is_resubmitted_to_the_reader_and_the_first_replica_dropped(
+	) {
+		let mut requests = Vec::new();
+		expect_discovery(&mut requests);
+		requests.push(post(HOST_A, "/itm/v1/path", request().encode_to_vec(), signed(&accepted())));
+		requests.push(get(HOST_B, "/itm/v1/state/7", signed(&state_listing(vec![]))));
+		requests.push(post(HOST_B, "/itm/v1/path", request().encode_to_vec(), signed(&accepted())));
+
+		run_with(requests, || {
+			submit_inspection_result_read_back::<AccountId, BlockNumber, MockCluster, MockNodes>(
+				&ClusterId::zero(),
+				&request(),
+			)
+			.unwrap();
+
+			let cached = crate::shared_memory::discovered_shared_memory_nodes::<
+				AccountId,
+				BlockNumber,
+				MockCluster,
+				MockNodes,
+			>(&ClusterId::zero())
+			.unwrap();
+			assert_eq!(
+				cached.iter().map(|n| n.key.clone()).collect::<Vec<_>>(),
+				vec![node_key(KEY_B)]
+			);
+		});
+	}
+}
