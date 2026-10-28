@@ -125,12 +125,14 @@ pub mod proto {
 					archived_at: 0,
 					archival_status: ArchivalStatus::Pending as i32,
 					builder_signature: vec![],
+					give_up_era_distance: 24,
 				};
 
 				let bytes = table.encode_to_vec();
 				let decoded = AssignmentTable::decode(bytes.as_slice()).unwrap();
 				assert_eq!(decoded.era, 42);
 				assert_eq!(decoded.irf, 3);
+				assert_eq!(decoded.give_up_era_distance, 24);
 				assert_eq!(decoded.paths.len(), 1);
 				let path = decoded.paths["path-001"].path.as_ref().unwrap();
 				assert_eq!(path.path_type, InspectionPathType::NodeAr as i32);
@@ -164,6 +166,7 @@ pub mod proto {
 						archived_at: 0,
 						archival_status: 0,
 						builder_signature: vec![],
+						give_up_era_distance: 0,
 					}),
 				};
 
