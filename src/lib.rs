@@ -125,12 +125,14 @@ pub mod proto {
 					archived_at: 0,
 					archival_status: ArchivalStatus::Pending as i32,
 					builder_signature: vec![],
+					give_up_era_distance: 24,
 				};
 
 				let bytes = table.encode_to_vec();
 				let decoded = AssignmentTable::decode(bytes.as_slice()).unwrap();
 				assert_eq!(decoded.era, 42);
 				assert_eq!(decoded.irf, 3);
+				assert_eq!(decoded.give_up_era_distance, 24);
 				assert_eq!(decoded.paths.len(), 1);
 				let path = decoded.paths["path-001"].path.as_ref().unwrap();
 				assert_eq!(path.path_type, InspectionPathType::NodeAr as i32);
@@ -164,6 +166,7 @@ pub mod proto {
 						archived_at: 0,
 						archival_status: 0,
 						builder_signature: vec![],
+						give_up_era_distance: 0,
 					}),
 				};
 
@@ -686,5 +689,235 @@ pub mod proto {
 				Self::decode(bytes).ok()
 			}
 		}
+	}
+}
+
+#[cfg(test)]
+mod result_hash_vectors {
+	use prost::Message;
+
+	use crate::proto::inspection::{
+		insp_path_exception::Kind, provenance_evidence, BucketARsSigUnverified,
+		BucketARsUnavailable, BucketAggregateMalformed, BucketIrfUnreached,
+		BucketTcaTreeNeedsDeepInspection, InspPathException, InspectionPathResult,
+		MultipleExceptions, NodeARsSigUnverified, NodeARsUnavailable, NodeAggregateMalformed,
+		NodeIrfUnreached, NodeProvenance, NodeTcaTreeNeedsDeepInspection, PathValue,
+		PostInspectionResultRequest, ProvenanceEvidence, TcaInspectionStage, UnverifiedUsage,
+	};
+
+	const FIXTURE: &str = include_str!("test_data/result_hash_vectors.json");
+	const FIXTURE_PATH: &str = "src/test_data/result_hash_vectors.json";
+	const REGENERATE_ENV: &str = "REGENERATE_RESULT_HASH_VECTORS";
+
+	fn usage() -> UnverifiedUsage {
+		UnverifiedUsage {
+			usage: Some(PathValue {
+				put_count: 3,
+				get_count: 5,
+				stored: -4096,
+				transferred: 1 << 40,
+				cpu_units: 7,
+				gpu_units: 0,
+				ram_units: u64::MAX,
+				compute_count: 2,
+			}),
+			evidence: Some(ProvenanceEvidence {
+				kind: Some(provenance_evidence::Kind::Signed(NodeProvenance {
+					node_key: vec![0xaa; 32],
+					response_signature: vec![0xbb; 64],
+				})),
+			}),
+		}
+	}
+
+	fn unavailable_usage() -> UnverifiedUsage {
+		UnverifiedUsage {
+			usage: Some(PathValue::default()),
+			evidence: Some(ProvenanceEvidence {
+				kind: Some(provenance_evidence::Kind::Unavailable(NodeProvenance {
+					node_key: vec![0xcc; 32],
+					response_signature: vec![],
+				})),
+			}),
+		}
+	}
+
+	fn exception(kind: Kind) -> Option<InspPathException> {
+		Some(InspPathException { kind: Some(kind) })
+	}
+
+	fn sources(count: u8) -> Vec<NodeProvenance> {
+		(0..count)
+			.map(|i| NodeProvenance { node_key: vec![i; 32], response_signature: vec![i ^ 0xff; 64] })
+			.collect()
+	}
+
+	fn cases() -> Vec<(&'static str, Option<InspPathException>, Vec<NodeProvenance>)> {
+		let node_key = vec![0x11; 32];
+		vec![
+			("no exception, no sources", None, vec![]),
+			("no exception, three sources", None, sources(3)),
+			("empty exception", Some(InspPathException::default()), sources(1)),
+			(
+				"node irf unreached",
+				exception(Kind::NodeIrfUnreached(NodeIrfUnreached {
+					node_key: node_key.clone(),
+					tca_id: 29807910,
+					unverified_usage: Some(usage()),
+				})),
+				sources(1),
+			),
+			(
+				"bucket irf unreached with empty usage",
+				exception(Kind::BucketIrfUnreached(BucketIrfUnreached {
+					bucket_id: u64::MAX,
+					tca_id: 0,
+					unverified_usage: Some(UnverifiedUsage::default()),
+				})),
+				vec![],
+			),
+			(
+				"node ars sig unverified",
+				exception(Kind::NodeArsSigUnverified(NodeARsSigUnverified {
+					node_key: node_key.clone(),
+					tca_id: 1,
+					bad_records_ids: vec![vec![1, 2, 3], vec![], vec![0xff; 16]],
+					unverified_usage: Some(usage()),
+				})),
+				sources(2),
+			),
+			(
+				"bucket ars sig unverified",
+				exception(Kind::BucketArsSigUnverified(BucketARsSigUnverified {
+					bucket_id: 42,
+					node_key: node_key.clone(),
+					tca_id: 2,
+					bad_records_ids: vec![vec![9; 8]],
+					unverified_usage: Some(unavailable_usage()),
+				})),
+				sources(1),
+			),
+			(
+				"node ars unavailable",
+				exception(Kind::NodeArsUnavailable(NodeARsUnavailable {
+					node_key: node_key.clone(),
+					tca_id: 3,
+					leaves_ids: vec![0, 1, 300, u64::MAX],
+					unverified_usage: Some(usage()),
+				})),
+				sources(1),
+			),
+			(
+				"bucket ars unavailable",
+				exception(Kind::BucketArsUnavailable(BucketARsUnavailable {
+					bucket_id: 7,
+					node_key: node_key.clone(),
+					tca_id: 4,
+					leaves_ids: vec![5],
+					unverified_usage: None,
+				})),
+				sources(1),
+			),
+			(
+				"node aggregate malformed",
+				exception(Kind::NodeAggregateMalformed(NodeAggregateMalformed {
+					node_key: node_key.clone(),
+					tca_id: 5,
+					unverified_usage: Some(usage()),
+				})),
+				sources(1),
+			),
+			(
+				"bucket aggregate malformed",
+				exception(Kind::BucketAggregateMalformed(BucketAggregateMalformed {
+					bucket_id: 8,
+					tca_id: 6,
+					unverified_usage: Some(usage()),
+				})),
+				sources(1),
+			),
+			(
+				"node tca tree needs deep inspection",
+				exception(Kind::NodeTcaTreeNeedsDeepInspection(NodeTcaTreeNeedsDeepInspection {
+					node_key: node_key.clone(),
+					tca_id: 7,
+					stage: TcaInspectionStage::RebuildMismatch as i32,
+					unverified_usage: Some(usage()),
+				})),
+				sources(1),
+			),
+			(
+				"bucket tca tree needs deep inspection",
+				exception(Kind::BucketTcaTreeNeedsDeepInspection(BucketTcaTreeNeedsDeepInspection {
+					bucket_id: 9,
+					node_key: node_key.clone(),
+					tca_id: 8,
+					stage: TcaInspectionStage::NoMatchingPair as i32,
+					unverified_usage: Some(usage()),
+				})),
+				sources(1),
+			),
+			(
+				"multiple exceptions, nested",
+				exception(Kind::MultipleExceptions(MultipleExceptions {
+					exceptions: vec![
+						InspPathException {
+							kind: Some(Kind::NodeIrfUnreached(NodeIrfUnreached {
+								node_key: node_key.clone(),
+								tca_id: 10,
+								unverified_usage: Some(usage()),
+							})),
+						},
+						InspPathException {
+							kind: Some(Kind::MultipleExceptions(MultipleExceptions {
+								exceptions: vec![InspPathException {
+									kind: Some(Kind::BucketAggregateMalformed(
+										BucketAggregateMalformed {
+											bucket_id: 11,
+											tca_id: 12,
+											unverified_usage: None,
+										},
+									)),
+								}],
+							})),
+						},
+					],
+				})),
+				sources(3),
+			),
+		]
+	}
+
+	fn render() -> String {
+		let vectors: Vec<serde_json::Value> = cases()
+			.into_iter()
+			.enumerate()
+			.map(|(i, (name, exception, source_nodes))| {
+				let path_hash = vec![i as u8 + 1; 32];
+				let result = InspectionPathResult::new(path_hash, exception, source_nodes);
+				let request = PostInspectionResultRequest {
+					era_id: 1,
+					inspector_key: vec![0x22; 32],
+					inspector_signature: vec![0x33; 64],
+					paths_results: vec![result.clone()],
+				};
+				serde_json::json!({
+					"name": name,
+					"request": hex::encode(request.encode_to_vec()),
+					"result_hash": hex::encode(&result.result_hash),
+				})
+			})
+			.collect();
+		serde_json::to_string_pretty(&vectors).unwrap() + "\n"
+	}
+
+	#[test]
+	fn result_hash_vectors_match_the_committed_fixture() {
+		let rendered = render();
+		if std::env::var(REGENERATE_ENV).is_ok() {
+			std::fs::write(FIXTURE_PATH, &rendered).unwrap();
+			return;
+		}
+		assert_eq!(rendered, FIXTURE, "regenerate with {}=1 cargo test", REGENERATE_ENV);
 	}
 }
