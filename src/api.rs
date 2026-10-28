@@ -1378,6 +1378,20 @@ pub fn get_assignments_table<
 	})
 }
 
+pub fn post_era_nudge<
+	AccountId,
+	BlockNumber,
+	CM: ClusterManager<AccountId, BlockNumber>,
+	NM: NodeManager<AccountId>,
+>(
+	cluster_id: &ClusterId,
+	request: &proto::inspection::PostEraNudgeRequest,
+) -> Result<proto::inspection::PostEraNudgeResponse, ApiError> {
+	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(cluster_id, "post era nudge", |client| {
+		client.post_era_nudge(request)
+	})
+}
+
 pub fn submit_inspection_result<
 	AccountId,
 	BlockNumber,
