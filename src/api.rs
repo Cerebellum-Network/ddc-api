@@ -1155,6 +1155,112 @@ pub fn fetch_processed_era<
 		.ok_or(ApiError::FailedToFetchEra { cluster_id: *cluster_id, era })
 }
 
+/// Statuses of an era that inspection is done with. The newest such era is the
+/// anchor the inspection cursor moves forward from.
+const INSPECTED_ERA_STATUSES: [proto::era::EraStatus; 2] =
+	[proto::era::EraStatus::EraInspected, proto::era::EraStatus::EraPaid];
+
+/// Statuses of the first non-empty era above the anchor: inspected when
+/// processed, waited for while still in progress. An empty era is stepped over.
+/// Leaving out in-progress would step over an era still being finalized, which
+/// would then fall below the anchor and never be inspected.
+const NEXT_ERA_STATUSES: [proto::era::EraStatus; 2] =
+	[proto::era::EraStatus::EraProcessed, proto::era::EraStatus::EraInProgress];
+
+/// Records asked for when reading the anchor. One would do, but two returned
+/// newest first prove the node applied the filter and the order, where a node
+/// that ignores them lists the oldest eras first.
+const ANCHOR_PROBE_LIMIT: u32 = 2;
+
+/// Records asked for when reading the era after the anchor.
+const NEXT_ERA_LIMIT: u32 = 1;
+
+/// The era to inspect next: the first era above the newest ERA_INSPECTED or
+/// ERA_PAID one that is not ERA_EMPTY, if it is ERA_PROCESSED. None while that
+/// era is still ERA_IN_PROGRESS or there is none. With no inspected era yet it
+/// is the oldest such era. Eras below the anchor are never reached.
+pub fn next_era_to_inspect(
+	client: &DdcClient,
+	dry_run: bool,
+) -> Result<Option<EhdEra>, http::Error> {
+	let list = |cursor: Option<&[u8]>,
+	            limit: u32,
+	            statuses: &[proto::era::EraStatus],
+	            newest_first: bool| {
+		if dry_run {
+			client.dry_run_eras_with_status(cursor, Some(limit), statuses, newest_first)
+		} else {
+			client.eras_with_status(cursor, Some(limit), statuses, newest_first)
+		}
+		.map(|r| r.response.records)
+	};
+
+	let anchors = list(None, ANCHOR_PROBE_LIMIT, &INSPECTED_ERA_STATUSES, true)?;
+	let filtered = anchors.iter().all(|era| has_status(era, &INSPECTED_ERA_STATUSES)) &&
+		anchors.windows(2).all(|pair| pair[0].id > pair[1].id);
+	if !filtered {
+		log!(error, "❌ Era listing ignored the status filter or order; the node predates them");
+		return Err(http::Error::Unknown);
+	}
+	let anchor = anchors.first().map(|era| era.id);
+
+	let cursor = anchor.map(|id| id.to_be_bytes().to_vec());
+	let next = list(cursor.as_deref(), NEXT_ERA_LIMIT, &NEXT_ERA_STATUSES, false)?;
+	let Some(era) = next.first() else {
+		return Ok(None);
+	};
+	if !has_status(era, &NEXT_ERA_STATUSES) || anchor.is_some_and(|id| era.id <= id) {
+		log!(error, "❌ Era listing ignored the status filter or cursor; the node predates them");
+		return Err(http::Error::Unknown);
+	}
+	Ok((era.status == proto::era::EraStatus::EraProcessed as i32).then_some(era.id))
+}
+
+fn has_status(era: &proto::era::Era, statuses: &[proto::era::EraStatus]) -> bool {
+	statuses.iter().any(|status| era.status == *status as i32)
+}
+
+/// The era a cluster should inspect next, read from its G-Collector, or from
+/// the dry-run sync node during a dry-run. See `next_era_to_inspect`.
+pub fn fetch_era_to_inspect_for_cluster<
+	AccountId,
+	BlockNumber,
+	CM: ClusterManager<AccountId, BlockNumber>,
+	NM: NodeManager<AccountId>,
+>(
+	cluster_id: &ClusterId,
+) -> Result<Option<EhdEra>, ApiError> {
+	// Era statuses are the G-Collector's; a dry-run sync node serves its own instead.
+	let configured = dry_run_shared_memory_node::<AccountId, BlockNumber, CM>(cluster_id)?;
+	let (params, dry_run) = match configured.filter(|node| node.dry_run) {
+		Some(dry_run_node) => (dry_run_node.params, true),
+		None => {
+			let (_, g_collector_params) =
+				get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|e| {
+					log!(
+						error,
+						"❌ Failed to fetch G-Collector node for cluster {:?}: {:?}",
+						cluster_id,
+						e
+					);
+					ApiError::FailedToFetchGCollectors { cluster_id: *cluster_id }
+				})?;
+			(g_collector_params, false)
+		},
+	};
+	let host = str::from_utf8(&params.host).map_err(|e| {
+		log!(error, "❌ Failed to parse era-list node host for cluster {:?}: {:?}", cluster_id, e);
+		ApiError::FailedToFetchProcessedEras { cluster_id: *cluster_id }
+	})?;
+	let base_url = format!("http://{}:{}", host, params.http_port);
+	let client =
+		DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+	next_era_to_inspect(&client, dry_run).map_err(|e| {
+		log!(error, "❌ Failed to read the era to inspect for cluster {:?}: {:?}", cluster_id, e);
+		ApiError::FailedToFetchProcessedEras { cluster_id: *cluster_id }
+	})
+}
+
 /// Fetch inspected EHD eras from a node via /activity/inspected-eras.
 #[allow(dead_code)]
 pub fn fetch_inspected_eras(
@@ -1842,6 +1948,103 @@ mod tests {
 				cached.iter().map(|n| n.key.clone()).collect::<Vec<_>>(),
 				vec![node_key(KEY_B)]
 			);
+		});
+	}
+
+	fn era(id: EhdEra, status: proto::era::EraStatus) -> proto::era::Era {
+		proto::era::Era { id, status: status as i32, ..Default::default() }
+	}
+
+	fn eras(records: Vec<proto::era::Era>) -> Vec<u8> {
+		signed(&proto::activity::GetErasResponse { records, ..Default::default() })
+	}
+
+	const ANCHOR_QUERY: &str =
+		"/activity/v1/eras?limit=2&status=ERA_INSPECTED&status=ERA_PAID&order=desc";
+
+	fn next_query(anchor: EhdEra) -> String {
+		format!(
+			"/activity/v1/eras?cursor={}&limit=1&status=ERA_PROCESSED&status=ERA_IN_PROGRESS",
+			hex::encode(anchor.to_be_bytes())
+		)
+	}
+
+	const HOST_A_URL: &str = "http://node-a:8080";
+
+	fn client_for_host_a() -> DdcClient<'static> {
+		DdcClient::new(HOST_A_URL, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT)
+	}
+
+	#[test]
+	fn the_next_era_is_the_processed_one_right_above_the_newest_inspected_or_paid_era() {
+		use proto::era::EraStatus::*;
+		let requests = vec![
+			get(HOST_A, ANCHOR_QUERY, eras(vec![era(6, EraPaid), era(4, EraInspected)])),
+			get(HOST_A, &next_query(6), eras(vec![era(8, EraProcessed)])),
+		];
+		run_with(requests, || {
+			assert_eq!(next_era_to_inspect(&client_for_host_a(), false), Ok(Some(8)));
+		});
+	}
+
+	#[test]
+	fn an_era_still_in_progress_right_above_the_anchor_is_waited_for() {
+		use proto::era::EraStatus::*;
+		let requests = vec![
+			get(HOST_A, ANCHOR_QUERY, eras(vec![era(6, EraInspected)])),
+			get(HOST_A, &next_query(6), eras(vec![era(7, EraInProgress)])),
+		];
+		run_with(requests, || {
+			assert_eq!(next_era_to_inspect(&client_for_host_a(), false), Ok(None));
+		});
+	}
+
+	#[test]
+	fn without_an_inspected_era_the_oldest_processed_era_is_next() {
+		use proto::era::EraStatus::*;
+		let requests = vec![
+			get(HOST_A, ANCHOR_QUERY, eras(vec![])),
+			get(
+				HOST_A,
+				"/activity/v1/eras?limit=1&status=ERA_PROCESSED&status=ERA_IN_PROGRESS",
+				eras(vec![era(3, EraProcessed)]),
+			),
+		];
+		run_with(requests, || {
+			assert_eq!(next_era_to_inspect(&client_for_host_a(), false), Ok(Some(3)));
+		});
+	}
+
+	#[test]
+	fn a_node_that_ignores_the_era_filter_is_an_error_not_an_era() {
+		use proto::era::EraStatus::*;
+		let requests = vec![get(
+			HOST_A,
+			ANCHOR_QUERY,
+			eras(vec![era(1, EraInspected), era(2, EraInspected)]),
+		)];
+		run_with(requests, || {
+			assert!(next_era_to_inspect(&client_for_host_a(), false).is_err());
+		});
+	}
+
+	#[test]
+	fn a_dry_run_reads_the_dry_run_era_listing() {
+		use proto::era::EraStatus::*;
+		let requests = vec![
+			get(
+				HOST_A,
+				"/itm/v1/dry-run/eras?limit=2&status=ERA_INSPECTED&status=ERA_PAID&order=desc",
+				eras(vec![]),
+			),
+			get(
+				HOST_A,
+				"/itm/v1/dry-run/eras?limit=1&status=ERA_PROCESSED&status=ERA_IN_PROGRESS",
+				eras(vec![era(100, EraProcessed)]),
+			),
+		];
+		run_with(requests, || {
+			assert_eq!(next_era_to_inspect(&client_for_host_a(), true), Ok(Some(100)));
 		});
 	}
 }

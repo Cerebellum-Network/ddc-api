@@ -264,6 +264,43 @@ impl<'a> DdcClient<'a> {
 		Ok(ApiResponse { response, signed_by })
 	}
 
+	/// Lists eras through `/activity/v1/eras`, keeping only `statuses` and
+	/// newest first when `newest_first` is set.
+	pub fn eras_with_status(
+		&self,
+		cursor: Option<&[u8]>,
+		limit: Option<u32>,
+		statuses: &[proto::era::EraStatus],
+		newest_first: bool,
+	) -> Result<ApiResponse<proto::activity::GetErasResponse>, http::Error> {
+		let mut url =
+			build_era_filter_url(&self.base_url, ERAS_PATH, cursor, limit, statuses, newest_first);
+		let (response, signed_by) =
+			fetch_and_parse_proto!(self, url, proto::activity::GetErasResponse)?;
+		Ok(ApiResponse { response, signed_by })
+	}
+
+	/// `eras_with_status` against a dry-run sync node's own eras.
+	pub fn dry_run_eras_with_status(
+		&self,
+		cursor: Option<&[u8]>,
+		limit: Option<u32>,
+		statuses: &[proto::era::EraStatus],
+		newest_first: bool,
+	) -> Result<ApiResponse<proto::activity::GetErasResponse>, http::Error> {
+		let mut url = build_era_filter_url(
+			&self.base_url,
+			DRY_RUN_ERAS_PATH,
+			cursor,
+			limit,
+			statuses,
+			newest_first,
+		);
+		let (response, signed_by) =
+			fetch_and_parse_proto!(self, url, proto::activity::GetErasResponse)?;
+		Ok(ApiResponse { response, signed_by })
+	}
+
 	pub fn inspected_eras(
 		&self,
 		cursor: Option<&[u8]>,
@@ -857,6 +894,32 @@ impl<'a> DdcClient<'a> {
 enum Accept {
 	Any,
 	Protobuf,
+}
+
+const ERAS_PATH: &str = "/activity/v1/eras";
+const DRY_RUN_ERAS_PATH: &str = "/itm/v1/dry-run/eras";
+/// `order` value of an era listing that puts the newest era first.
+const ERA_ORDER_NEWEST_FIRST: &str = "desc";
+
+fn build_era_filter_url(
+	base: &str,
+	path: &str,
+	cursor: Option<&[u8]>,
+	limit: Option<u32>,
+	statuses: &[proto::era::EraStatus],
+	newest_first: bool,
+) -> String {
+	let mut url = build_list_url(base, path, cursor, limit);
+	let mut params: Vec<String> =
+		statuses.iter().map(|status| format!("status={}", status.as_str_name())).collect();
+	if newest_first {
+		params.push(format!("order={}", ERA_ORDER_NEWEST_FIRST));
+	}
+	for param in params {
+		let separator = if url.contains('?') { "&" } else { "?" };
+		url = format!("{}{}{}", url, separator, param);
+	}
+	url
 }
 
 fn build_list_url(base: &str, path: &str, cursor: Option<&[u8]>, limit: Option<u32>) -> String {
