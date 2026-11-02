@@ -306,7 +306,6 @@ pub mod proto {
 					irf: 3,
 					paths,
 					submissions: vec![],
-					updated_at: 1700000000,
 					archived_cid: vec![],
 					archived_at: 0,
 					archival_status: 0,
@@ -352,6 +351,8 @@ pub mod proto {
 					archived_cid: vec![],
 					archived_at: 0,
 					archival_status: 0,
+					assignments_cid: vec![0x01, 0x02, 0x1e, 0x20],
+					state_cid: vec![0x01, 0x02, 0x1e, 0x20],
 				};
 
 				let bytes = receipt.encode_to_vec();
