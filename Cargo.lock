@@ -4031,7 +4031,7 @@ dependencies = [
 [[package]]
 name = "ddc-primitives"
 version = "7.3.4"
-source = "git+https://github.com/Cerebellum-Network/ddc-primitives.git?branch=dev#2c5e752ceff681f0ce8e8e7d5b0598ce3b0b5cf0"
+source = "git+https://github.com/Cerebellum-Network/ddc-primitives.git?branch=feat%2Finsp-receipt-cid#e8d7875b104960ad0a15bcd9ec39bf4277945ba9"
 dependencies = [
  "blake2 0.10.6",
  "hex",
