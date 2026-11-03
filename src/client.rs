@@ -147,6 +147,15 @@ macro_rules! fetch_and_parse_proto {
 /// return the inner proto. Used by every /v1/itm/* call (both POST and GET)
 /// that receives a SignedResponse-wrapped body.
 fn decode_signed_proto<R: Message + Default>(url: &str, body: &[u8]) -> Result<R, http::Error> {
+	decode_signed_proto_with_payload(url, body).map(|(message, _)| message)
+}
+
+/// Like `decode_signed_proto`, and also returns the payload exactly as the node
+/// signed it.
+fn decode_signed_proto_with_payload<R: Message + Default>(
+	url: &str,
+	body: &[u8],
+) -> Result<(R, Vec<u8>), http::Error> {
 	let signed = proto::signature::SignedResponse::decode(body).map_err(|e| {
 		log!(error, "❌ Failed to decode SignedResponse from {:?}: {:?}", url, e);
 		http::Error::Unknown
@@ -155,10 +164,11 @@ fn decode_signed_proto<R: Message + Default>(url: &str, body: &[u8]) -> Result<R
 		log!(error, "❌ Bad signature on response from {:?}", url);
 		return Err(http::Error::Unknown);
 	}
-	R::decode(signed.payload.as_slice()).map_err(|e| {
+	let message = R::decode(signed.payload.as_slice()).map_err(|e| {
 		log!(error, "❌ Failed to decode signed payload from {:?}: {:?}", url, e);
 		http::Error::Unknown
-	})
+	})?;
+	Ok((message, signed.payload))
 }
 
 impl<'a> DdcClient<'a> {
@@ -604,17 +614,20 @@ impl<'a> DdcClient<'a> {
 			.map_err(|_| ReadBackError::Unavailable)
 	}
 
-	/// GET /itm/receipt - Retrieve inspection receipt (protobuf)
+	/// GET /itm/receipt - Retrieve inspection receipt (protobuf), with the
+	/// receipt's bytes as the node sent them. Hash those bytes, not a re-encode
+	/// of the receipt: prost drops fields it does not know, so a re-encode can
+	/// differ from what the node stored.
 	pub fn get_inspection_receipt(
 		&self,
 		era: EhdEra,
-	) -> Result<proto::inspection::InspectionReceipt, http::Error> {
+	) -> Result<(proto::inspection::InspectionReceipt, Vec<u8>), http::Error> {
 		let url = self.insp_mem_url(&format!("/itm/v1/receipt/{}", era));
 
 		let response = self.get(&url, Accept::Protobuf)?;
 		let body = response.body().collect::<Vec<u8>>();
 
-		decode_signed_proto::<proto::inspection::InspectionReceipt>(&url, &body)
+		decode_signed_proto_with_payload::<proto::inspection::InspectionReceipt>(&url, &body)
 	}
 
 	/// GET /itm/quorum - Retrieve quorum information (protobuf)

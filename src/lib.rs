@@ -121,18 +121,15 @@ pub mod proto {
 					collective_seed: 12345,
 					builder: "0xabc123".into(),
 					submitted_at: 1700000000,
-					archived_cid: vec![],
-					archived_at: 0,
-					archival_status: ArchivalStatus::Pending as i32,
 					builder_signature: vec![],
-					give_up_era_distance: 24,
+					era_give_up_distance: 24,
 				};
 
 				let bytes = table.encode_to_vec();
 				let decoded = AssignmentTable::decode(bytes.as_slice()).unwrap();
 				assert_eq!(decoded.era, 42);
 				assert_eq!(decoded.irf, 3);
-				assert_eq!(decoded.give_up_era_distance, 24);
+				assert_eq!(decoded.era_give_up_distance, 24);
 				assert_eq!(decoded.paths.len(), 1);
 				let path = decoded.paths["path-001"].path.as_ref().unwrap();
 				assert_eq!(path.path_type, InspectionPathType::NodeAr as i32);
@@ -162,11 +159,8 @@ pub mod proto {
 						collective_seed: 0,
 						builder: "0xabc123".into(),
 						submitted_at: 0,
-						archived_cid: vec![],
-						archived_at: 0,
-						archival_status: 0,
 						builder_signature: vec![],
-						give_up_era_distance: 0,
+						era_give_up_distance: 0,
 					}),
 				};
 
@@ -306,10 +300,6 @@ pub mod proto {
 					irf: 3,
 					paths,
 					submissions: vec![],
-					updated_at: 1700000000,
-					archived_cid: vec![],
-					archived_at: 0,
-					archival_status: 0,
 				};
 
 				let bytes = state.encode_to_vec();
@@ -349,9 +339,8 @@ pub mod proto {
 					state_hash: vec![],
 					generated_at: 1700000000,
 					complete: true,
-					archived_cid: vec![],
-					archived_at: 0,
-					archival_status: 0,
+					assignments_cid: vec![0x01, 0x02, 0x1e, 0x20],
+					state_cid: vec![0x01, 0x02, 0x1e, 0x20],
 				};
 
 				let bytes = receipt.encode_to_vec();
