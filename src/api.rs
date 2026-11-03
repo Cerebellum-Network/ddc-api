@@ -1650,7 +1650,7 @@ pub fn get_inspection_receipt<
 >(
 	cluster_id: &ClusterId,
 	era: EhdEra,
-) -> Result<proto::inspection::InspectionReceipt, ApiError> {
+) -> Result<(proto::inspection::InspectionReceipt, Vec<u8>), ApiError> {
 	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(cluster_id, "get inspection receipt", |client| {
 		client.get_inspection_receipt(era)
 	})
@@ -1698,7 +1698,8 @@ mod tests {
 	use crate::proto::{
 		inspection::{
 			InspSyncQuorumInfo, InspSyncQuorumMember, InspectionPathResult, InspectionPathStatus,
-			InspectionState, PostInspectionResultRequest, PostInspectionResultResponse,
+			InspectionReceipt, InspectionState, PostInspectionResultRequest,
+			PostInspectionResultResponse,
 		},
 		signature::{signature::Algorithm, Signature, SignedResponse},
 	};
@@ -1715,6 +1716,8 @@ mod tests {
 	const INSPECTOR: &[u8] = b"inspector-key";
 	const PATH_HASH: [u8; 2] = [0x01, 0x02];
 	const SIGNER_SEED: [u8; 32] = [0x07; 32];
+	/// Field 99, varint 1: a field this build's InspectionReceipt does not know.
+	const UNKNOWN_RECEIPT_FIELD: [u8; 3] = [0x98, 0x06, 0x01];
 
 	fn node_key(bytes: [u8; 32]) -> NodePubKey {
 		NodePubKey::StoragePubKey(StorageNodePubKey::new(bytes))
@@ -1806,8 +1809,11 @@ mod tests {
 	}
 
 	fn signed<M: Message>(message: &M) -> Vec<u8> {
+		signed_payload(message.encode_to_vec())
+	}
+
+	fn signed_payload(payload: Vec<u8>) -> Vec<u8> {
 		let pair = ed25519::Pair::from_seed(&SIGNER_SEED);
-		let payload = message.encode_to_vec();
 		let value = pair.sign(&payload).0.to_vec();
 		SignedResponse {
 			payload,
@@ -1896,6 +1902,29 @@ mod tests {
 		ext.register_extension(OffchainDbExt::new(offchain.clone()));
 		ext.register_extension(OffchainWorkerExt::new(offchain));
 		ext.execute_with(test);
+	}
+
+	#[test]
+	fn a_receipt_comes_back_with_the_bytes_the_node_sent_including_fields_this_build_does_not_know(
+	) {
+		let receipt = InspectionReceipt { era_id: TEST_ERA, ..Default::default() };
+		let mut sent = receipt.encode_to_vec();
+		sent.extend_from_slice(&UNKNOWN_RECEIPT_FIELD);
+		let mut requests = Vec::new();
+		expect_discovery(&mut requests);
+		requests.push(get(HOST_A, "/itm/v1/receipt/7", signed_payload(sent.clone())));
+
+		run_with(requests, || {
+			let (decoded, bytes) =
+				get_inspection_receipt::<AccountId, BlockNumber, MockCluster, MockNodes>(
+					&ClusterId::zero(),
+					TEST_ERA,
+				)
+				.unwrap();
+			assert_eq!(decoded, receipt);
+			assert_eq!(bytes, sent);
+			assert_ne!(decoded.encode_to_vec(), sent);
+		});
 	}
 
 	#[test]
