@@ -285,7 +285,6 @@ pub mod proto {
 						exception: None,
 						submissions,
 						inspectors: vec!["insp1".into(), "insp2".into(), "insp3".into()],
-						remaining_inspectors: vec!["insp4".into()],
 					},
 				);
 
