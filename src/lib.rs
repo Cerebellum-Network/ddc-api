@@ -75,6 +75,7 @@ pub mod proto {
 					expires_at: 1700000000,
 					current_holder: vec![],
 					error_message: String::new(),
+					collective_seed: 0,
 				};
 
 				let bytes = res.encode_to_vec();
@@ -458,6 +459,7 @@ pub mod proto {
 					expires_at: 1700000060,
 					current_holder: vec![],
 					error_message: String::new(),
+					collective_seed: 0,
 				};
 
 				let bytes = result.encode_to_vec();
@@ -483,6 +485,7 @@ pub mod proto {
 					expires_at: 1700000120,
 					current_holder: "0xother_inspector_key".into(),
 					error_message: String::new(),
+					collective_seed: 0,
 				};
 
 				let bytes = result.encode_to_vec();
@@ -503,6 +506,7 @@ pub mod proto {
 					expires_at: 0,
 					current_holder: vec![],
 					error_message: "etcd cluster unavailable".into(),
+					collective_seed: 0,
 				};
 
 				let bytes = result.encode_to_vec();

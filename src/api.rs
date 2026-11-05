@@ -1498,6 +1498,22 @@ pub fn post_era_nudge<
 	})
 }
 
+pub fn post_seed_contribution<
+	AccountId,
+	BlockNumber,
+	CM: ClusterManager<AccountId, BlockNumber>,
+	NM: NodeManager<AccountId>,
+>(
+	cluster_id: &ClusterId,
+	request: &proto::inspection::PostSeedContributionRequest,
+) -> Result<proto::inspection::PostSeedContributionResponse, ApiError> {
+	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(
+		cluster_id,
+		"post seed contribution",
+		|client| client.post_seed_contribution(request),
+	)
+}
+
 pub fn submit_inspection_result<
 	AccountId,
 	BlockNumber,
