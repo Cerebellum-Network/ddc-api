@@ -563,7 +563,7 @@ impl<'a> DdcClient<'a> {
 		&self,
 		request: &proto::inspection::PostSeedContributionRequest,
 	) -> Result<proto::inspection::PostSeedContributionResponse, http::Error> {
-		let url = self.insp_mem_url("/itm/v1/seed-part");
+		let url = self.insp_mem_url("/itm/v1/collective-seed-part");
 		let body = request.encode_to_vec();
 
 		let response = self.post_proto(&url, body)?;
