@@ -75,8 +75,7 @@ pub mod proto {
 					expires_at: 1700000000,
 					current_holder: vec![],
 					error_message: String::new(),
-					seed_stamp: None,
-					seed_snapshot: vec![],
+					collective_seed: 0,
 				};
 
 				let bytes = res.encode_to_vec();
@@ -125,7 +124,6 @@ pub mod proto {
 					submitted_at: 1700000000,
 					builder_signature: vec![],
 					era_give_up_distance: 24,
-					seed_provenance: None,
 				};
 
 				let bytes = table.encode_to_vec();
@@ -164,7 +162,6 @@ pub mod proto {
 						submitted_at: 0,
 						builder_signature: vec![],
 						era_give_up_distance: 0,
-						seed_provenance: None,
 					}),
 				};
 
@@ -462,8 +459,7 @@ pub mod proto {
 					expires_at: 1700000060,
 					current_holder: vec![],
 					error_message: String::new(),
-					seed_stamp: None,
-					seed_snapshot: vec![],
+					collective_seed: 0,
 				};
 
 				let bytes = result.encode_to_vec();
@@ -489,8 +485,7 @@ pub mod proto {
 					expires_at: 1700000120,
 					current_holder: "0xother_inspector_key".into(),
 					error_message: String::new(),
-					seed_stamp: None,
-					seed_snapshot: vec![],
+					collective_seed: 0,
 				};
 
 				let bytes = result.encode_to_vec();
@@ -511,8 +506,7 @@ pub mod proto {
 					expires_at: 0,
 					current_holder: vec![],
 					error_message: "etcd cluster unavailable".into(),
-					seed_stamp: None,
-					seed_snapshot: vec![],
+					collective_seed: 0,
 				};
 
 				let bytes = result.encode_to_vec();
