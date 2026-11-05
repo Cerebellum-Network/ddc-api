@@ -559,6 +559,19 @@ impl<'a> DdcClient<'a> {
 		decode_signed_proto::<proto::inspection::PostEraNudgeResponse>(&url, &body)
 	}
 
+	pub fn post_seed_contribution(
+		&self,
+		request: &proto::inspection::PostSeedContributionRequest,
+	) -> Result<proto::inspection::PostSeedContributionResponse, http::Error> {
+		let url = self.insp_mem_url("/itm/v1/contribution");
+		let body = request.encode_to_vec();
+
+		let response = self.post_proto(&url, body)?;
+		let body = response.body().collect::<Vec<u8>>();
+
+		decode_signed_proto::<proto::inspection::PostSeedContributionResponse>(&url, &body)
+	}
+
 	pub fn submit_inspection_result(
 		&self,
 		request: &proto::inspection::PostInspectionResultRequest,
