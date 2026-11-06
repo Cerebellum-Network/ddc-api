@@ -4014,6 +4014,7 @@ name = "ddc-api"
 version = "7.3.3"
 dependencies = [
  "blake2 0.10.6",
+ "blake3",
  "ddc-primitives",
  "hex",
  "log",
