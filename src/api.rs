@@ -123,6 +123,15 @@ pub enum ApiError {
 		tca_id: TcaEra,
 		node_key: NodePubKey,
 	},
+	FailedToFetchSealedEHD {
+		cluster_id: ClusterId,
+		era: EhdEra,
+	},
+	FailedToFetchSealedPHD {
+		cluster_id: ClusterId,
+		era: EhdEra,
+		node_key: NodePubKey,
+	},
 }
 
 #[derive(
@@ -854,6 +863,107 @@ pub fn get_ehd_root<
 	)?;
 
 	Ok(ApiResponse { response: first_node, signed_by: api_response.signed_by })
+}
+
+/// Fetch the era's sealed EHD from the G-Collector, together with the key of
+/// the G-Collector that was asked.
+///
+/// Parameters:
+/// - `cluster_id`: Cluster Id
+/// - `era`: EHD era
+pub fn get_sealed_ehd<
+	AccountId,
+	BlockNumber,
+	CM: ClusterManager<AccountId, BlockNumber>,
+	NM: NodeManager<AccountId>,
+>(
+	cluster_id: &ClusterId,
+	era: EhdEra,
+) -> Result<(NodePubKey, ApiResponse<proto::activity_tree::SealedEhd>), ApiError> {
+	let (g_collector_key, g_collector_params) =
+		get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+	let host = str::from_utf8(&g_collector_params.host).map_err(|e| {
+		log!(
+			error,
+			"❌ Failed to parse G-Collector host for node {:?} in cluster {:?}: {:?}",
+			g_collector_key,
+			cluster_id,
+			e
+		);
+		ApiError::NodeHostParseError {
+			cluster_id: *cluster_id,
+			node_key: g_collector_key.clone(),
+			host: g_collector_params.host.clone(),
+		}
+	})?;
+
+	let base_url = format!("http://{}:{}", host, g_collector_params.http_port);
+	let client =
+		DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+
+	let sealed_ehd = client.get_sealed_ehd(era).map_err(|e| {
+		log!(
+			error,
+			"❌ Failed to fetch sealed EHD for era {:?} from G-Collector {:?} in cluster {:?}: {:?}",
+			era,
+			g_collector_key,
+			cluster_id,
+			e
+		);
+		ApiError::FailedToFetchSealedEHD { cluster_id: *cluster_id, era }
+	})?;
+
+	Ok((g_collector_key, sealed_ehd))
+}
+
+/// Fetch a collector's sealed PHD of the era.
+///
+/// Parameters:
+/// - `cluster_id`: Cluster Id
+/// - `era`: EHD era
+/// - `collector_key`: Collector node key
+pub fn get_sealed_phd<
+	AccountId,
+	BlockNumber,
+	CM: ClusterManager<AccountId, BlockNumber>,
+	NM: NodeManager<AccountId>,
+>(
+	cluster_id: &ClusterId,
+	era: EhdEra,
+	collector_key: NodePubKey,
+) -> Result<ApiResponse<proto::activity_tree::SealedPhd>, ApiError> {
+	let (collector_key, collector_params) =
+		get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
+	let host = str::from_utf8(&collector_params.host).map_err(|e| {
+		log!(
+			error,
+			"❌ Failed to parse collector host for node {:?} in cluster {:?}: {:?}",
+			collector_key,
+			cluster_id,
+			e
+		);
+		ApiError::NodeHostParseError {
+			cluster_id: *cluster_id,
+			node_key: collector_key.clone(),
+			host: collector_params.host.clone(),
+		}
+	})?;
+
+	let base_url = format!("http://{}:{}", host, collector_params.http_port);
+	let client =
+		DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+
+	client.get_sealed_phd(era).map_err(|e| {
+		log!(
+			error,
+			"❌ Failed to fetch sealed PHD for era {:?} from collector {:?} in cluster {:?}: {:?}",
+			era,
+			collector_key,
+			cluster_id,
+			e
+		);
+		ApiError::FailedToFetchSealedPHD { cluster_id: *cluster_id, era, node_key: collector_key }
+	})
 }
 
 /// Fetch PHD merkle root node.
@@ -1712,6 +1822,8 @@ mod tests {
 
 	use super::*;
 	use crate::proto::{
+		activity::GroupingCollectorsResponse,
+		activity_tree::{Ehd, Phd, SealedEhd, SealedPhd},
 		inspection::{
 			InspSyncQuorumInfo, InspSyncQuorumMember, InspectionPathResult, InspectionPathStatus,
 			InspectionReceipt, InspectionState, PostInspectionResultRequest,
@@ -1734,6 +1846,8 @@ mod tests {
 	const SIGNER_SEED: [u8; 32] = [0x07; 32];
 	/// Field 99, varint 1: a field this build's InspectionReceipt does not know.
 	const UNKNOWN_RECEIPT_FIELD: [u8; 3] = [0x98, 0x06, 0x01];
+	/// Field 99, varint 1: a field this build's Ehd does not know.
+	const UNKNOWN_DOCUMENT_FIELD: [u8; 3] = [0x98, 0x06, 0x01];
 
 	fn node_key(bytes: [u8; 32]) -> NodePubKey {
 		NodePubKey::StoragePubKey(StorageNodePubKey::new(bytes))
@@ -1940,6 +2054,75 @@ mod tests {
 			assert_eq!(decoded, receipt);
 			assert_eq!(bytes, sent);
 			assert_ne!(decoded.encode_to_vec(), sent);
+		});
+	}
+
+	#[test]
+	fn a_sealed_ehd_comes_from_the_g_collector_with_the_document_bytes_it_sealed_including_fields_this_build_does_not_know(
+	) {
+		let document = Ehd { era_id: TEST_ERA, ..Default::default() };
+		let mut sealed_document = document.encode_to_vec();
+		sealed_document.extend_from_slice(&UNKNOWN_DOCUMENT_FIELD);
+		let sealed = SealedEhd {
+			document: sealed_document.clone(),
+			builder_signature: Some(Signature {
+				algorithm: Algorithm::Ed25519 as i32,
+				signer: KEY_B.to_vec(),
+				value: vec![0x5a; 64],
+			}),
+		};
+		let grouping = GroupingCollectorsResponse {
+			keys: vec![format!("0x{}", hex::encode(KEY_B))],
+		};
+		let requests = vec![
+			get(HOST_A, "/activity/v1/grouping-collectors", signed(&grouping)),
+			get(HOST_B, "/activity/v1/ehds/7", signed(&sealed)),
+		];
+
+		run_with(requests, || {
+			let (asked, fetched) =
+				get_sealed_ehd::<AccountId, BlockNumber, MockCluster, MockNodes>(
+					&ClusterId::zero(),
+					TEST_ERA,
+				)
+				.unwrap();
+			assert_eq!(asked, node_key(KEY_B));
+			assert_eq!(fetched.response, sealed);
+			assert_eq!(fetched.response.document, sealed_document);
+			let decoded = Ehd::decode(fetched.response.document.as_slice()).unwrap();
+			assert_eq!(decoded, document);
+			assert_ne!(decoded.encode_to_vec(), fetched.response.document);
+		});
+	}
+
+	#[test]
+	fn a_sealed_phd_comes_from_the_collector_asked_with_the_document_bytes_it_sealed_including_fields_this_build_does_not_know(
+	) {
+		let document = Phd { era_id: TEST_ERA, node_key: KEY_B.to_vec(), ..Default::default() };
+		let mut sealed_document = document.encode_to_vec();
+		sealed_document.extend_from_slice(&UNKNOWN_DOCUMENT_FIELD);
+		let sealed = SealedPhd {
+			document: sealed_document.clone(),
+			builder_signature: Some(Signature {
+				algorithm: Algorithm::Ed25519 as i32,
+				signer: KEY_B.to_vec(),
+				value: vec![0x5a; 64],
+			}),
+		};
+		let requests = vec![get(HOST_B, "/activity/v1/phds/7", signed(&sealed))];
+
+		run_with(requests, || {
+			let fetched = get_sealed_phd::<AccountId, BlockNumber, MockCluster, MockNodes>(
+				&ClusterId::zero(),
+				TEST_ERA,
+				node_key(KEY_B),
+			)
+			.unwrap();
+			assert_eq!(fetched.response, sealed);
+			assert_eq!(fetched.response.document, sealed_document);
+			let decoded = Phd::decode(fetched.response.document.as_slice()).unwrap();
+			assert_eq!(decoded, document);
+			assert_ne!(decoded.encode_to_vec(), fetched.response.document);
 		});
 	}
 

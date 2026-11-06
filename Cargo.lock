@@ -4014,6 +4014,7 @@ name = "ddc-api"
 version = "7.3.3"
 dependencies = [
  "blake2 0.10.6",
+ "blake3",
  "ddc-primitives",
  "hex",
  "log",
@@ -4031,7 +4032,7 @@ dependencies = [
 [[package]]
 name = "ddc-primitives"
 version = "7.3.4"
-source = "git+https://github.com/Cerebellum-Network/ddc-primitives.git?branch=dev#2b2538b7879437dcadfe89ac61cf76cb1018c2e5"
+source = "git+https://github.com/Cerebellum-Network/ddc-primitives.git?branch=dev#8ea223dbd7e9fc608c9498bc57cf9f9f623bec75"
 dependencies = [
  "blake2 0.10.6",
  "hex",
