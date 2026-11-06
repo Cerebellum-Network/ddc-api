@@ -1768,7 +1768,7 @@ mod tests {
 	use super::*;
 	use crate::proto::{
 		activity::GroupingCollectorsResponse,
-		activity_tree::{EhdDocument, SealedEhd},
+		activity_tree::{Ehd, SealedEhd},
 		inspection::{
 			InspSyncQuorumInfo, InspSyncQuorumMember, InspectionPathResult, InspectionPathStatus,
 			InspectionReceipt, InspectionState, PostInspectionResultRequest,
@@ -1791,7 +1791,7 @@ mod tests {
 	const SIGNER_SEED: [u8; 32] = [0x07; 32];
 	/// Field 99, varint 1: a field this build's InspectionReceipt does not know.
 	const UNKNOWN_RECEIPT_FIELD: [u8; 3] = [0x98, 0x06, 0x01];
-	/// Field 99, varint 1: a field this build's EhdDocument does not know.
+	/// Field 99, varint 1: a field this build's Ehd does not know.
 	const UNKNOWN_DOCUMENT_FIELD: [u8; 3] = [0x98, 0x06, 0x01];
 
 	fn node_key(bytes: [u8; 32]) -> NodePubKey {
@@ -2005,7 +2005,7 @@ mod tests {
 	#[test]
 	fn a_sealed_ehd_comes_from_the_g_collector_with_the_document_bytes_it_sealed_including_fields_this_build_does_not_know(
 	) {
-		let document = EhdDocument { era_id: TEST_ERA, ..Default::default() };
+		let document = Ehd { era_id: TEST_ERA, ..Default::default() };
 		let mut sealed_document = document.encode_to_vec();
 		sealed_document.extend_from_slice(&UNKNOWN_DOCUMENT_FIELD);
 		let sealed = SealedEhd {
@@ -2034,7 +2034,7 @@ mod tests {
 			assert_eq!(asked, node_key(KEY_B));
 			assert_eq!(fetched.response, sealed);
 			assert_eq!(fetched.response.document, sealed_document);
-			let decoded = EhdDocument::decode(fetched.response.document.as_slice()).unwrap();
+			let decoded = Ehd::decode(fetched.response.document.as_slice()).unwrap();
 			assert_eq!(decoded, document);
 			assert_ne!(decoded.encode_to_vec(), fetched.response.document);
 		});
