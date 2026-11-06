@@ -422,6 +422,21 @@ impl<'a> DdcClient<'a> {
 		Ok(api_response)
 	}
 
+	/// GET the era's sealed EHD. `document` holds the bytes the node sealed:
+	/// hash those, not a re-encode of the decoded document, since prost drops
+	/// fields it does not know.
+	pub fn get_sealed_ehd(
+		&self,
+		era: EhdEra,
+	) -> Result<ApiResponse<proto::activity_tree::SealedEhd>, http::Error> {
+		let url = format!("{}/activity/v1/ehds/{}/sealed", self.base_url, era);
+
+		let (response, signed_by) =
+			fetch_and_parse_proto!(self, url, proto::activity_tree::SealedEhd)?;
+
+		Ok(ApiResponse { response, signed_by })
+	}
+
 	pub fn traverse_partial_historical_document(
 		&self,
 		era: EhdEra,
