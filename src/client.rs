@@ -429,10 +429,25 @@ impl<'a> DdcClient<'a> {
 		&self,
 		era: EhdEra,
 	) -> Result<ApiResponse<proto::activity_tree::SealedEhd>, http::Error> {
-		let url = format!("{}/activity/v1/ehds/{}/sealed", self.base_url, era);
+		let url = format!("{}/activity/v1/ehds/{}", self.base_url, era);
 
 		let (response, signed_by) =
 			fetch_and_parse_proto!(self, url, proto::activity_tree::SealedEhd)?;
+
+		Ok(ApiResponse { response, signed_by })
+	}
+
+	/// GET this collector's sealed PHD of the era. `document` holds the bytes the
+	/// node sealed: hash those, not a re-encode of the decoded document, since
+	/// prost drops fields it does not know.
+	pub fn get_sealed_phd(
+		&self,
+		era: EhdEra,
+	) -> Result<ApiResponse<proto::activity_tree::SealedPhd>, http::Error> {
+		let url = format!("{}/activity/v1/phds/{}", self.base_url, era);
+
+		let (response, signed_by) =
+			fetch_and_parse_proto!(self, url, proto::activity_tree::SealedPhd)?;
 
 		Ok(ApiResponse { response, signed_by })
 	}
