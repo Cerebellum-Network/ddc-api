@@ -3,6 +3,7 @@ use polkadot_sdk::sp_core::{
 	sr25519::{Public as PublicSr25519, Signature as SignatureSr25519},
 };
 use polkadot_sdk::sp_io::crypto::{ed25519_verify, sr25519_verify};
+use polkadot_sdk::sp_std::vec::Vec;
 use prost::Message;
 
 use codec::{Decode, Encode};
