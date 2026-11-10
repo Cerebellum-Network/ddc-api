@@ -585,9 +585,26 @@ pub mod proto {
 		}
 	}
 
+	/// Separates a result hash from any other BLAKE2b-256 digest, as ddc-dac's
+	/// `inspection.ResultHashTag`.
+	pub const RESULT_HASH_TAG: &[u8] = b"ddc-insp/result/v1";
+
+	/// Separates an inspector's submission signature from anything else its key
+	/// signs, as ddc-dac's `inspection.SubmissionSigningTag`.
+	pub const SUBMISSION_SIGNING_TAG: &[u8] = b"ddc-insp/submission/v1";
+
+	fn push_len_bytes(out: &mut polkadot_sdk::sp_std::vec::Vec<u8>, bytes: &[u8]) {
+		out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+		out.extend_from_slice(bytes);
+	}
+
 	impl inspection::InspectionPathResult {
 		/// Creates a new `InspectionPathResult` with `result_hash` computed as
-		/// Blake2b-256(path_hash || exception_bytes || source_nodes).
+		/// ddc-dac's `inspection.ResultHash`: BLAKE2b-256 of the tag, the path
+		/// hash, the exception bytes, then each source node's key and response
+		/// signature, every field length-prefixed with a 4-byte little-endian
+		/// length. Without the framing, bytes moved from the exception into a
+		/// source key land on the same hash.
 		pub fn new(
 			path_hash: polkadot_sdk::sp_std::vec::Vec<u8>,
 			exception: Option<inspection::InspPathException>,
@@ -595,18 +612,61 @@ pub mod proto {
 		) -> Self {
 			use blake2::digest::{consts::U32, Digest};
 			use prost::Message;
-			let mut data = polkadot_sdk::sp_std::vec::Vec::new();
-			data.extend_from_slice(&path_hash);
-			if let Some(ref exc) = exception {
-				data.extend_from_slice(&exc.encode_to_vec());
-			}
+			let exception_bytes = exception.as_ref().map(|exc| exc.encode_to_vec()).unwrap_or_default();
+			let mut data = RESULT_HASH_TAG.to_vec();
+			push_len_bytes(&mut data, &path_hash);
+			push_len_bytes(&mut data, &exception_bytes);
+			data.extend_from_slice(&(source_nodes.len() as u32).to_le_bytes());
 			for node in &source_nodes {
-				data.extend_from_slice(&node.node_key);
-				data.extend_from_slice(&node.response_signature);
+				push_len_bytes(&mut data, &node.node_key);
+				push_len_bytes(&mut data, &node.response_signature);
 			}
 			let hash: [u8; 32] = blake2::Blake2b::<U32>::digest(&data).into();
 			Self { path_hash, result_hash: hash.to_vec(), exception, source_nodes }
 		}
+	}
+
+	/// The bytes an inspector signs for one submission, as ddc-dac's
+	/// `inspection.SubmissionSigningMessage` builds them: the tag, the cluster,
+	/// the era and the inspector key, then one entry per result,
+	/// path_hash ‖ BLAKE2b-256(exception bytes) ‖ result_hash, in ascending
+	/// byte order. Variable-length fields carry a 4-byte little-endian length.
+	/// `exceptions[i]` is result `i`'s exception bytes, empty for none.
+	pub fn submission_signing_message(
+		cluster_id: &[u8],
+		era_id: u32,
+		inspector_key: &[u8],
+		path_hashes: &[polkadot_sdk::sp_std::vec::Vec<u8>],
+		result_hashes: &[polkadot_sdk::sp_std::vec::Vec<u8>],
+		exceptions: &[polkadot_sdk::sp_std::vec::Vec<u8>],
+	) -> Option<polkadot_sdk::sp_std::vec::Vec<u8>> {
+		use blake2::digest::{consts::U32, Digest};
+		if result_hashes.len() != path_hashes.len() || exceptions.len() != path_hashes.len() {
+			return None;
+		}
+		let mut entries: polkadot_sdk::sp_std::vec::Vec<polkadot_sdk::sp_std::vec::Vec<u8>> = path_hashes
+			.iter()
+			.zip(result_hashes)
+			.zip(exceptions)
+			.map(|((path_hash, result_hash), exception)| {
+				let digest: [u8; 32] = blake2::Blake2b::<U32>::digest(exception).into();
+				let mut entry = polkadot_sdk::sp_std::vec::Vec::new();
+				push_len_bytes(&mut entry, path_hash);
+				entry.extend_from_slice(&digest);
+				push_len_bytes(&mut entry, result_hash);
+				entry
+			})
+			.collect();
+		entries.sort();
+		let mut message = SUBMISSION_SIGNING_TAG.to_vec();
+		push_len_bytes(&mut message, cluster_id);
+		message.extend_from_slice(&era_id.to_le_bytes());
+		push_len_bytes(&mut message, inspector_key);
+		message.extend_from_slice(&(entries.len() as u32).to_le_bytes());
+		for entry in entries {
+			message.extend_from_slice(&entry);
+		}
+		Some(message)
 	}
 
 	pub mod activity_wasm {
@@ -901,6 +961,74 @@ mod result_hash_vectors {
 			})
 			.collect();
 		serde_json::to_string_pretty(&vectors).unwrap() + "\n"
+	}
+
+	#[test]
+	fn a_result_hash_matches_ddc_dacs_pinned_encoding() {
+		let exception = InspPathException {
+			kind: Some(Kind::NodeAggregateMalformed(NodeAggregateMalformed {
+				node_key: vec![],
+				tca_id: 1,
+				unverified_usage: None,
+			})),
+		};
+		assert_eq!(exception.encode_to_vec(), vec![0x42, 0x02, 0x10, 0x01]);
+		let sources = vec![
+			NodeProvenance { node_key: vec![0x33; 32], response_signature: vec![0x44; 64] },
+			NodeProvenance { node_key: vec![0x55; 32], response_signature: vec![] },
+		];
+		let framed = InspectionPathResult::new(vec![0x11; 32], Some(exception), sources);
+		assert_eq!(
+			hex::encode(&framed.result_hash),
+			"8689d061cbf4ed8650e9d96cc9b6f32c39fcbbba5a4dcffd0af30c1dc37fa669"
+		);
+		let bare = InspectionPathResult::new(vec![0x11; 32], None, vec![]);
+		assert_eq!(
+			hex::encode(&bare.result_hash),
+			"10cf76eff7571c249ebd971cafff37d9e47efb011bbae834a2668c5566338745"
+		);
+	}
+
+	#[test]
+	fn an_exception_moved_into_a_source_key_changes_the_result_hash() {
+		let exception = InspPathException {
+			kind: Some(Kind::NodeIrfUnreached(NodeIrfUnreached {
+				node_key: vec![0x22; 32],
+				tca_id: 1,
+				unverified_usage: Some(usage()),
+			})),
+		};
+		let source = NodeProvenance { node_key: vec![0x33; 32], response_signature: vec![0x44; 64] };
+		let mut shifted = exception.encode_to_vec();
+		shifted.extend_from_slice(&source.node_key);
+		shifted.extend_from_slice(&source.response_signature);
+
+		let honest = InspectionPathResult::new(vec![0x11; 32], Some(exception), vec![source]);
+		let forged = InspectionPathResult::new(
+			vec![0x11; 32],
+			None,
+			vec![NodeProvenance { node_key: shifted, response_signature: vec![] }],
+		);
+		assert_ne!(honest.result_hash, forged.result_hash);
+	}
+
+	#[test]
+	fn a_submission_signing_message_matches_ddc_dacs_pinned_encoding() {
+		let message = crate::proto::submission_signing_message(
+			b"cluster-1",
+			1495203,
+			&[0x0c; 32],
+			&[vec![0x02; 32], vec![0x01; 32]],
+			&[vec![0xbb; 32], vec![0xaa; 32]],
+			&[vec![0x0a, 0x02, 0x08, 0x01], vec![]],
+		)
+		.unwrap();
+		assert_eq!(hex::encode(message), "6464632d696e73702f7375626d697373696f6e2f763109000000636c75737465722d31a3d01600200000000c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c020000002000000001010101010101010101010101010101010101010101010101010101010101010e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a820000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2000000002020202020202020202020202020202020202020202020202020202020202026862d269447d0413e07bbb23be38dea34b151ff6a9898fa6dd34657e6f909a3820000000bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+	}
+
+	#[test]
+	fn a_submission_signing_message_needs_one_exception_and_result_per_path() {
+		assert!(crate::proto::submission_signing_message(b"c", 1, b"k", &[vec![1]], &[vec![2]], &[]).is_none());
 	}
 
 	#[test]

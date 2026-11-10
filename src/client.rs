@@ -422,34 +422,42 @@ impl<'a> DdcClient<'a> {
 		Ok(api_response)
 	}
 
-	/// GET the era's sealed EHD. `document` holds the bytes the node sealed:
-	/// hash those, not a re-encode of the decoded document, since prost drops
+	/// GET the era's sealed EHD: the envelope bytes exactly as the node signed
+	/// them. Its address is the raw-piece CID of those bytes, so hand them on
+	/// as they are: a decode and re-encode changes them, since prost drops
 	/// fields it does not know.
-	pub fn get_sealed_ehd(
-		&self,
-		era: EhdEra,
-	) -> Result<ApiResponse<proto::activity_tree::SealedEhd>, http::Error> {
+	pub fn get_sealed_ehd(&self, era: EhdEra) -> Result<ApiResponse<Vec<u8>>, http::Error> {
 		let url = format!("{}/activity/v1/ehds/{}", self.base_url, era);
-
-		let (response, signed_by) =
-			fetch_and_parse_proto!(self, url, proto::activity_tree::SealedEhd)?;
-
-		Ok(ApiResponse { response, signed_by })
+		self.get_signed_payload(&url)
 	}
 
-	/// GET this collector's sealed PHD of the era. `document` holds the bytes the
-	/// node sealed: hash those, not a re-encode of the decoded document, since
-	/// prost drops fields it does not know.
-	pub fn get_sealed_phd(
-		&self,
-		era: EhdEra,
-	) -> Result<ApiResponse<proto::activity_tree::SealedPhd>, http::Error> {
+	/// GET this collector's sealed PHD of the era: the envelope bytes exactly
+	/// as the node signed them, for the same reason as `get_sealed_ehd`.
+	pub fn get_sealed_phd(&self, era: EhdEra) -> Result<ApiResponse<Vec<u8>>, http::Error> {
 		let url = format!("{}/activity/v1/phds/{}", self.base_url, era);
+		self.get_signed_payload(&url)
+	}
 
-		let (response, signed_by) =
-			fetch_and_parse_proto!(self, url, proto::activity_tree::SealedPhd)?;
-
-		Ok(ApiResponse { response, signed_by })
+	/// GETs a signed response and returns its payload undecoded, with its signer.
+	fn get_signed_payload(&self, url: &str) -> Result<ApiResponse<Vec<u8>>, http::Error> {
+		let response = self.get(url, Accept::Protobuf)?;
+		let body = response.body().collect::<Vec<u8>>();
+		let signed = proto::signature::SignedResponse::decode(body.as_slice()).map_err(|e| {
+			log!(error, "❌ Failed to decode SignedResponse from {:?}: {:?}", url, e);
+			http::Error::Unknown
+		})?;
+		if !signed.verify() {
+			log!(error, "❌ Bad signature on response from {:?}", url);
+			return Err(http::Error::Unknown);
+		}
+		let signed_by = signed
+			.signature
+			.map(|v| SignedBy { signer: v.signer, signature: v.value })
+			.ok_or_else(|| {
+				log!(error, "❌ Missing signature in signed proto response");
+				http::Error::Unknown
+			})?;
+		Ok(ApiResponse { response: signed.payload, signed_by: Some(signed_by) })
 	}
 
 	pub fn traverse_partial_historical_document(
