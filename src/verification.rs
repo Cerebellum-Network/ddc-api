@@ -233,6 +233,7 @@ pub enum SealedDocumentRejection {
 	DocumentDoesNotDecode,
 	AnotherEraOrCluster,
 	NoTotals,
+	EnvelopeDoesNotDecode,
 }
 
 impl SealedDocumentRejection {
@@ -241,10 +242,11 @@ impl SealedDocumentRejection {
 			Self::NoBuilderSignature => "no builder signature",
 			Self::SignedByAnotherNode => "signed by another node than the one asked",
 			Self::SignatureDoesNotVerify =>
-				"builder signature does not verify over the document CID",
+				"builder signature does not verify for this kind, cluster, era and document",
 			Self::DocumentDoesNotDecode => "document does not decode",
 			Self::AnotherEraOrCluster => "document names another era or cluster",
 			Self::NoTotals => "document has no totals",
+			Self::EnvelopeDoesNotDecode => "sealed envelope does not decode",
 		}
 	}
 }
@@ -259,17 +261,50 @@ pub fn raw_piece_cid(bytes: &[u8]) -> [u8; CERE_RAW_CID_LEN] {
 	cid
 }
 
-/// Opens an era's sealed EHD as the G-Collector sent it. Its CID is computed over the document
-/// bytes as received, never a re-encode, and the builder signature over that CID must be the
-/// asked G-Collector's. The era's root node is rebuilt from the document's totals.
+/// The tags a seal signs ahead of its cluster, era and document CID, as ddc-dac's
+/// `processing.EhdSealTag` and `processing.PhdSealTag`.
+pub const EHD_SEAL_TAG: &[u8] = b"ddc-dac/ehd-seal/v1";
+pub const PHD_SEAL_TAG: &[u8] = b"ddc-dac/phd-seal/v1";
+
+/// The message a seal signs, as ddc-dac's `processing.SealSigningMessage` builds it: the kind's
+/// tag, the cluster, the era and the document's CID, each variable-length field with a 4-byte
+/// little-endian length and the era little-endian.
+pub fn seal_signing_message(
+	tag: &[u8],
+	cluster_id: &[u8],
+	era: EhdEra,
+	document_cid: &[u8],
+) -> Vec<u8> {
+	let mut message = tag.to_vec();
+	message.extend_from_slice(&(cluster_id.len() as u32).to_le_bytes());
+	message.extend_from_slice(cluster_id);
+	message.extend_from_slice(&era.to_le_bytes());
+	message.extend_from_slice(&(document_cid.len() as u32).to_le_bytes());
+	message.extend_from_slice(document_cid);
+	message
+}
+
+/// Opens an era's sealed EHD envelope as the G-Collector sent it. Its address is the raw-piece
+/// CID of those envelope bytes, never of a re-encode and never of the document inside: that is
+/// the `ehd_cid` the EHD is archived under. The builder signature must be the asked
+/// G-Collector's, under the EHD tag, for this cluster and era. The era's root node is rebuilt
+/// from the document's totals.
 pub fn open_sealed_ehd(
-	sealed: &proto::activity_tree::SealedEhd,
+	envelope: &[u8],
 	g_collector: &NodePubKey,
 	cluster_id: &ClusterId,
 	era: EhdEra,
 ) -> Result<(EhdCid, proto::activity_tree::EhdTreeTraversedNode), SealedDocumentRejection> {
-	let ehd_cid =
-		check_builder_signature(&sealed.document, sealed.builder_signature.as_ref(), g_collector)?;
+	let sealed = proto::activity_tree::SealedEhd::decode(envelope)
+		.map_err(|_| SealedDocumentRejection::EnvelopeDoesNotDecode)?;
+	check_builder_signature(
+		EHD_SEAL_TAG,
+		cluster_id.as_bytes(),
+		era,
+		&sealed.document,
+		sealed.builder_signature.as_ref(),
+		g_collector,
+	)?;
 
 	let document = proto::activity_tree::Ehd::decode(sealed.document.as_slice())
 		.map_err(|_| SealedDocumentRejection::DocumentDoesNotDecode)?;
@@ -279,7 +314,7 @@ pub fn open_sealed_ehd(
 	let totals = document.totals.ok_or(SealedDocumentRejection::NoTotals)?;
 
 	Ok((
-		ehd_cid,
+		raw_piece_cid(envelope),
 		proto::activity_tree::EhdTreeTraversedNode {
 			era_id: era,
 			phd_collectors: totals.phd_collectors,
@@ -290,23 +325,26 @@ pub fn open_sealed_ehd(
 	))
 }
 
-/// The raw-piece CID of a sealed document's bytes as received, once its builder signature over
-/// that CID is the asked builder's.
+/// Checks a seal's builder signature: it is the asked builder's, over
+/// `seal_signing_message(tag, cluster_id, era, raw_piece_cid(document))`.
 fn check_builder_signature(
+	tag: &[u8],
+	cluster_id: &[u8],
+	era: EhdEra,
 	document: &[u8],
 	signature: Option<&proto::signature::Signature>,
 	builder: &NodePubKey,
-) -> Result<[u8; CERE_RAW_CID_LEN], SealedDocumentRejection> {
-	let cid = raw_piece_cid(document);
+) -> Result<(), SealedDocumentRejection> {
 	let signature = signature.ok_or(SealedDocumentRejection::NoBuilderSignature)?;
 	let NodePubKey::StoragePubKey(builder) = builder;
 	if signature.signer.as_slice() != AsRef::<[u8]>::as_ref(builder) {
 		return Err(SealedDocumentRejection::SignedByAnotherNode);
 	}
-	if !verify_builder_signature(signature, &cid) {
+	let message = seal_signing_message(tag, cluster_id, era, &raw_piece_cid(document));
+	if !verify_builder_signature(signature, &message) {
 		return Err(SealedDocumentRejection::SignatureDoesNotVerify);
 	}
-	Ok(cid)
+	Ok(())
 }
 
 fn verify_builder_signature(signature: &proto::signature::Signature, message: &[u8]) -> bool {
@@ -423,35 +461,46 @@ mod tests {
 		}
 	}
 
+	fn seal_message(era: EhdEra, document: &[u8]) -> Vec<u8> {
+		seal_signing_message(EHD_SEAL_TAG, &SEALED_EHD_CLUSTER, era, &raw_piece_cid(document))
+	}
+
 	fn sealed(document: Vec<u8>) -> proto::activity_tree::SealedEhd {
-		let cid = raw_piece_cid(&document);
-		sealed_by(G_COLLECTOR_SEED, document, &cid)
+		let message = seal_message(SEALED_EHD_ERA, &document);
+		sealed_by(G_COLLECTOR_SEED, document, &message)
 	}
 
 	fn open(
-		sealed: &proto::activity_tree::SealedEhd,
+		envelope: &[u8],
 	) -> Result<(EhdCid, proto::activity_tree::EhdTreeTraversedNode), SealedDocumentRejection> {
 		let g_collector = NodePubKey::StoragePubKey(polkadot_sdk::sp_runtime::AccountId32::from(
 			g_collector_pair(G_COLLECTOR_SEED).public().0,
 		));
-		open_sealed_ehd(sealed, &g_collector, &ClusterId::from(SEALED_EHD_CLUSTER), SEALED_EHD_ERA)
+		open_sealed_ehd(envelope, &g_collector, &ClusterId::from(SEALED_EHD_CLUSTER), SEALED_EHD_ERA)
 	}
 
 	#[test]
-	fn a_sealed_ehd_opens_to_its_totals_addressed_by_its_bytes_as_received() {
-		let mut received = ehd_document(SEALED_EHD_ERA, Some(ehd_totals()));
+	fn a_sealed_ehd_is_addressed_by_its_envelope_bytes_as_received() {
+		let document = ehd_document(SEALED_EHD_ERA, Some(ehd_totals()));
+		let mut received = sealed(document.clone()).encode_to_vec();
 		received.extend_from_slice(&UNKNOWN_DOCUMENT_FIELD);
 		let reencoded =
-			proto::activity_tree::Ehd::decode(received.as_slice()).unwrap().encode_to_vec();
+			proto::activity_tree::SealedEhd::decode(received.as_slice()).unwrap().encode_to_vec();
 		assert_ne!(reencoded, received);
 
-		let (ehd_cid, ehd) = open(&sealed(received.clone())).unwrap();
+		let (ehd_cid, ehd) = open(&received).unwrap();
 
 		assert_eq!(ehd_cid, raw_piece_cid(&received));
 		assert_ne!(ehd_cid, raw_piece_cid(&reencoded));
+		assert_ne!(ehd_cid, raw_piece_cid(&document));
 		assert_eq!(ehd_cid[..CERE_RAW_CID_PREFIX.len()], CERE_RAW_CID_PREFIX);
 		assert_eq!(ehd.era_id, SEALED_EHD_ERA);
 		assert_eq!(ehd.phd_collectors, ehd_totals().phd_collectors);
+	}
+
+	#[test]
+	fn a_sealed_ehd_whose_envelope_does_not_decode_is_refused_as_such() {
+		assert_eq!(open(&[0xff; 8]), Err(SealedDocumentRejection::EnvelopeDoesNotDecode));
 	}
 
 	#[test]
@@ -460,15 +509,15 @@ mod tests {
 			document: ehd_document(SEALED_EHD_ERA, Some(ehd_totals())),
 			builder_signature: None,
 		};
-		assert_eq!(open(&unsigned), Err(SealedDocumentRejection::NoBuilderSignature));
+		assert_eq!(open(&unsigned.encode_to_vec()), Err(SealedDocumentRejection::NoBuilderSignature));
 	}
 
 	#[test]
 	fn a_sealed_ehd_signed_by_another_node_is_refused_as_such() {
 		let document = ehd_document(SEALED_EHD_ERA, Some(ehd_totals()));
-		let cid = raw_piece_cid(&document);
+		let message = seal_message(SEALED_EHD_ERA, &document);
 		assert_eq!(
-			open(&sealed_by(OTHER_NODE_SEED, document, &cid)),
+			open(&sealed_by(OTHER_NODE_SEED, document, &message).encode_to_vec()),
 			Err(SealedDocumentRejection::SignedByAnotherNode)
 		);
 	}
@@ -479,20 +528,58 @@ mod tests {
 		let mut changed = signed.clone();
 		changed.extend_from_slice(&UNKNOWN_DOCUMENT_FIELD);
 		assert_eq!(
-			open(&sealed_by(G_COLLECTOR_SEED, changed, &raw_piece_cid(&signed))),
+			open(&sealed_by(G_COLLECTOR_SEED, changed, &seal_message(SEALED_EHD_ERA, &signed)).encode_to_vec()),
 			Err(SealedDocumentRejection::SignatureDoesNotVerify)
 		);
 	}
 
 	#[test]
-	fn a_sealed_ehd_whose_document_does_not_decode_is_refused_as_such() {
-		assert_eq!(open(&sealed(vec![0xff; 8])), Err(SealedDocumentRejection::DocumentDoesNotDecode));
+	fn a_seal_over_the_bare_document_cid_is_refused() {
+		let document = ehd_document(SEALED_EHD_ERA, Some(ehd_totals()));
+		let cid = raw_piece_cid(&document);
+		assert_eq!(
+			open(&sealed_by(G_COLLECTOR_SEED, document, &cid).encode_to_vec()),
+			Err(SealedDocumentRejection::SignatureDoesNotVerify)
+		);
 	}
 
 	#[test]
-	fn a_sealed_ehd_of_another_era_is_refused_as_such() {
+	fn a_seal_under_the_phd_tag_is_refused() {
+		let document = ehd_document(SEALED_EHD_ERA, Some(ehd_totals()));
+		let message =
+			seal_signing_message(PHD_SEAL_TAG, &SEALED_EHD_CLUSTER, SEALED_EHD_ERA, &raw_piece_cid(&document));
 		assert_eq!(
-			open(&sealed(ehd_document(SEALED_EHD_ERA + 1, Some(ehd_totals())))),
+			open(&sealed_by(G_COLLECTOR_SEED, document, &message).encode_to_vec()),
+			Err(SealedDocumentRejection::SignatureDoesNotVerify)
+		);
+	}
+
+	#[test]
+	fn a_seal_made_for_another_era_or_cluster_is_refused() {
+		let document = ehd_document(SEALED_EHD_ERA, Some(ehd_totals()));
+		let other_era = seal_message(SEALED_EHD_ERA + 1, &document);
+		let other_cluster =
+			seal_signing_message(EHD_SEAL_TAG, &[8; 20], SEALED_EHD_ERA, &raw_piece_cid(&document));
+		for message in [other_era, other_cluster] {
+			assert_eq!(
+				open(&sealed_by(G_COLLECTOR_SEED, document.clone(), &message).encode_to_vec()),
+				Err(SealedDocumentRejection::SignatureDoesNotVerify)
+			);
+		}
+	}
+
+	#[test]
+	fn a_sealed_ehd_whose_document_does_not_decode_is_refused_as_such() {
+		assert_eq!(
+			open(&sealed(vec![0xff; 8]).encode_to_vec()),
+			Err(SealedDocumentRejection::DocumentDoesNotDecode)
+		);
+	}
+
+	#[test]
+	fn a_sealed_ehd_whose_document_names_another_era_is_refused_as_such() {
+		assert_eq!(
+			open(&sealed(ehd_document(SEALED_EHD_ERA + 1, Some(ehd_totals()))).encode_to_vec()),
 			Err(SealedDocumentRejection::AnotherEraOrCluster)
 		);
 	}
@@ -500,8 +587,23 @@ mod tests {
 	#[test]
 	fn a_sealed_ehd_without_totals_is_refused_as_such() {
 		assert_eq!(
-			open(&sealed(ehd_document(SEALED_EHD_ERA, None))),
+			open(&sealed(ehd_document(SEALED_EHD_ERA, None)).encode_to_vec()),
 			Err(SealedDocumentRejection::NoTotals)
+		);
+	}
+
+	#[test]
+	fn a_seal_signing_message_matches_ddc_dacs_pinned_encoding() {
+		let cluster = [0x0c; 20];
+		let mut document_cid = vec![0x01, 0x02, 0x1e, 0x20];
+		document_cid.extend_from_slice(&[0x22; 32]);
+		assert_eq!(
+			hex::encode(seal_signing_message(PHD_SEAL_TAG, &cluster, 1495203, &document_cid)),
+			"6464632d6461632f7068642d7365616c2f7631140000000c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0ca3d016002400000001021e202222222222222222222222222222222222222222222222222222222222222222"
+		);
+		assert_eq!(
+			hex::encode(seal_signing_message(EHD_SEAL_TAG, &cluster, 1495203, &document_cid)),
+			"6464632d6461632f6568642d7365616c2f7631140000000c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0ca3d016002400000001021e202222222222222222222222222222222222222222222222222222222222222222"
 		);
 	}
 
@@ -514,6 +616,7 @@ mod tests {
 			SealedDocumentRejection::DocumentDoesNotDecode,
 			SealedDocumentRejection::AnotherEraOrCluster,
 			SealedDocumentRejection::NoTotals,
+			SealedDocumentRejection::EnvelopeDoesNotDecode,
 		]
 		.map(|rejection| rejection.reason());
 		let distinct: std::collections::BTreeSet<_> = reasons.iter().collect();
