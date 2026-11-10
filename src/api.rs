@@ -134,31 +134,31 @@ pub enum ApiError {
 	},
 	/// The shared memory served an inspection receipt, state or table that names another
 	/// cluster or era than the one asked for.
-	InspectionDocumentOfAnotherEraOrCluster {
+	AnotherEraOrCluster {
 		cluster_id: ClusterId,
 		era: EhdEra,
 	},
 }
 
-/// Refuses an inspection document whose own cluster and era are not the ones asked for. The
-/// fetcher is the only place that holds both: settlement takes its era from the receipt
-/// itself, so a check further on would compare the receipt with itself.
+/// Refuses an inspection receipt, state or table whose own cluster and era are not the ones
+/// asked for. The fetcher is the only place that holds both: settlement takes its era from the
+/// receipt itself, so a check further on would compare the receipt with itself.
 fn require_era_and_cluster(
 	cluster_id: &ClusterId,
 	era: EhdEra,
-	document_cluster: &[u8],
-	document_era: EhdEra,
+	served_cluster: &[u8],
+	served_era: EhdEra,
 ) -> Result<(), ApiError> {
-	if document_cluster != cluster_id.as_bytes() || document_era != era {
+	if served_cluster != cluster_id.as_bytes() || served_era != era {
 		log!(
 			error,
-			"❌ Inspection document names cluster 0x{} era {}, asked for cluster {:?} era {}",
-			hex::encode(document_cluster),
-			document_era,
+			"❌ Shared memory served cluster 0x{} era {}, asked for cluster {:?} era {}",
+			hex::encode(served_cluster),
+			served_era,
 			cluster_id,
 			era
 		);
-		return Err(ApiError::InspectionDocumentOfAnotherEraOrCluster { cluster_id: *cluster_id, era });
+		return Err(ApiError::AnotherEraOrCluster { cluster_id: *cluster_id, era });
 	}
 	Ok(())
 }
@@ -2133,7 +2133,7 @@ mod tests {
 	fn a_receipt_naming_another_cluster_or_era_is_refused() {
 		let asked = ClusterId::zero().as_bytes().to_vec();
 		assert_eq!(fetch_receipt_naming(asked.clone(), TEST_ERA), Ok(()));
-		let refused = Err(ApiError::InspectionDocumentOfAnotherEraOrCluster {
+		let refused = Err(ApiError::AnotherEraOrCluster {
 			cluster_id: ClusterId::zero(),
 			era: TEST_ERA,
 		});
@@ -2153,7 +2153,7 @@ mod tests {
 					&ClusterId::zero(),
 					TEST_ERA,
 				),
-				Err(ApiError::InspectionDocumentOfAnotherEraOrCluster {
+				Err(ApiError::AnotherEraOrCluster {
 					cluster_id: ClusterId::zero(),
 					era: TEST_ERA,
 				})
