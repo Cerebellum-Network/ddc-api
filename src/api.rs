@@ -132,6 +132,35 @@ pub enum ApiError {
 		era: EhdEra,
 		node_key: NodePubKey,
 	},
+	/// The shared memory served an inspection receipt, state or table that names another
+	/// cluster or era than the one asked for.
+	InspectionDocumentOfAnotherEraOrCluster {
+		cluster_id: ClusterId,
+		era: EhdEra,
+	},
+}
+
+/// Refuses an inspection document whose own cluster and era are not the ones asked for. The
+/// fetcher is the only place that holds both: settlement takes its era from the receipt
+/// itself, so a check further on would compare the receipt with itself.
+fn require_era_and_cluster(
+	cluster_id: &ClusterId,
+	era: EhdEra,
+	document_cluster: &[u8],
+	document_era: EhdEra,
+) -> Result<(), ApiError> {
+	if document_cluster != cluster_id.as_bytes() || document_era != era {
+		log!(
+			error,
+			"❌ Inspection document names cluster 0x{} era {}, asked for cluster {:?} era {}",
+			hex::encode(document_cluster),
+			document_era,
+			cluster_id,
+			era
+		);
+		return Err(ApiError::InspectionDocumentOfAnotherEraOrCluster { cluster_id: *cluster_id, era });
+	}
+	Ok(())
 }
 
 #[derive(
@@ -865,8 +894,8 @@ pub fn get_ehd_root<
 	Ok(ApiResponse { response: first_node, signed_by: api_response.signed_by })
 }
 
-/// Fetch the era's sealed EHD from the G-Collector, together with the key of
-/// the G-Collector that was asked.
+/// Fetch the era's sealed EHD envelope from the G-Collector, as the bytes it
+/// signed, together with the key of the G-Collector that was asked.
 ///
 /// Parameters:
 /// - `cluster_id`: Cluster Id
@@ -879,7 +908,7 @@ pub fn get_sealed_ehd<
 >(
 	cluster_id: &ClusterId,
 	era: EhdEra,
-) -> Result<(NodePubKey, ApiResponse<proto::activity_tree::SealedEhd>), ApiError> {
+) -> Result<(NodePubKey, ApiResponse<Vec<u8>>), ApiError> {
 	let (g_collector_key, g_collector_params) =
 		get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
 	let host = str::from_utf8(&g_collector_params.host).map_err(|e| {
@@ -916,7 +945,7 @@ pub fn get_sealed_ehd<
 	Ok((g_collector_key, sealed_ehd))
 }
 
-/// Fetch a collector's sealed PHD of the era.
+/// Fetch a collector's sealed PHD envelope of the era, as the bytes it signed.
 ///
 /// Parameters:
 /// - `cluster_id`: Cluster Id
@@ -931,7 +960,7 @@ pub fn get_sealed_phd<
 	cluster_id: &ClusterId,
 	era: EhdEra,
 	collector_key: NodePubKey,
-) -> Result<ApiResponse<proto::activity_tree::SealedPhd>, ApiError> {
+) -> Result<ApiResponse<Vec<u8>>, ApiError> {
 	let (collector_key, collector_params) =
 		get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
 	let host = str::from_utf8(&collector_params.host).map_err(|e| {
@@ -1589,9 +1618,21 @@ pub fn get_assignments_table<
 	cluster_id: &ClusterId,
 	era: EhdEra,
 ) -> Result<proto::inspection::GetAssignmentTableResponse, ApiError> {
-	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(cluster_id, "get assignments table", |client| {
-		client.get_assignments_table(era)
-	})
+	let response = with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(
+		cluster_id,
+		"get assignments table",
+		|client| client.get_assignments_table(era),
+	)?;
+	if response.status == proto::inspection::GetAssignmentTableStatus::Found as i32 {
+		let table = response.table.as_ref();
+		require_era_and_cluster(
+			cluster_id,
+			era,
+			table.map(|t| t.cluster_id.as_slice()).unwrap_or_default(),
+			table.map(|t| t.era).unwrap_or_default(),
+		)?;
+	}
+	Ok(response)
 }
 
 pub fn post_era_nudge<
@@ -1763,9 +1804,13 @@ pub fn get_inspection_state<
 	cluster_id: &ClusterId,
 	era: EhdEra,
 ) -> Result<proto::inspection::InspectionState, ApiError> {
-	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(cluster_id, "get inspection state", |client| {
-		client.get_inspection_state(era)
-	})
+	let state = with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(
+		cluster_id,
+		"get inspection state",
+		|client| client.get_inspection_state(era),
+	)?;
+	require_era_and_cluster(cluster_id, era, &state.cluster_id, state.era_id)?;
+	Ok(state)
 }
 
 pub fn get_inspection_receipt<
@@ -1785,6 +1830,10 @@ pub fn get_inspection_receipt<
 			ApiError::FailedToFetchInspSummary { cluster_id: *cluster_id, era }
 		},
 		other => other,
+	})
+	.and_then(|(receipt, bytes)| {
+		require_era_and_cluster(cluster_id, era, &receipt.cluster_id, receipt.era_id)?;
+		Ok((receipt, bytes))
 	})
 }
 
@@ -1826,7 +1875,8 @@ mod tests {
 		activity_tree::{Ehd, Phd, SealedEhd, SealedPhd},
 		inspection::{
 			InspSyncQuorumInfo, InspSyncQuorumMember, InspectionPathResult, InspectionPathStatus,
-			InspectionReceipt, InspectionState, PostInspectionResultRequest,
+			AssignmentTable, GetAssignmentTableResponse, GetAssignmentTableStatus, InspectionReceipt,
+			InspectionState, PostInspectionResultRequest,
 			PostInspectionResultResponse,
 		},
 		signature::{signature::Algorithm, Signature, SignedResponse},
@@ -2037,7 +2087,11 @@ mod tests {
 	#[test]
 	fn a_receipt_comes_back_with_the_bytes_the_node_sent_including_fields_this_build_does_not_know(
 	) {
-		let receipt = InspectionReceipt { era_id: TEST_ERA, ..Default::default() };
+		let receipt = InspectionReceipt {
+			cluster_id: ClusterId::zero().as_bytes().to_vec(),
+			era_id: TEST_ERA,
+			..Default::default()
+		};
 		let mut sent = receipt.encode_to_vec();
 		sent.extend_from_slice(&UNKNOWN_RECEIPT_FIELD);
 		let mut requests = Vec::new();
@@ -2057,8 +2111,89 @@ mod tests {
 		});
 	}
 
+	fn fetch_receipt_naming(cluster: Vec<u8>, era: EhdEra) -> Result<(), ApiError> {
+		let receipt = InspectionReceipt { cluster_id: cluster, era_id: era, ..Default::default() };
+		let mut requests = Vec::new();
+		expect_discovery(&mut requests);
+		requests.push(get(HOST_A, "/itm/v1/receipt/7", signed(&receipt)));
+		let mut result = None;
+		run_with(requests, || {
+			result = Some(
+				get_inspection_receipt::<AccountId, BlockNumber, MockCluster, MockNodes>(
+					&ClusterId::zero(),
+					TEST_ERA,
+				)
+				.map(|_| ()),
+			);
+		});
+		result.unwrap()
+	}
+
 	#[test]
-	fn a_sealed_ehd_comes_from_the_g_collector_with_the_document_bytes_it_sealed_including_fields_this_build_does_not_know(
+	fn a_receipt_naming_another_cluster_or_era_is_refused() {
+		let asked = ClusterId::zero().as_bytes().to_vec();
+		assert_eq!(fetch_receipt_naming(asked.clone(), TEST_ERA), Ok(()));
+		let refused = Err(ApiError::InspectionDocumentOfAnotherEraOrCluster {
+			cluster_id: ClusterId::zero(),
+			era: TEST_ERA,
+		});
+		assert_eq!(fetch_receipt_naming(vec![1; 20], TEST_ERA), refused);
+		assert_eq!(fetch_receipt_naming(asked, TEST_ERA + 1), refused);
+	}
+
+	#[test]
+	fn a_state_naming_another_cluster_is_refused() {
+		let state = InspectionState { cluster_id: vec![1; 20], era_id: TEST_ERA, ..Default::default() };
+		let mut requests = Vec::new();
+		expect_discovery(&mut requests);
+		requests.push(get(HOST_A, "/itm/v1/state/7", signed(&state)));
+		run_with(requests, || {
+			assert_eq!(
+				get_inspection_state::<AccountId, BlockNumber, MockCluster, MockNodes>(
+					&ClusterId::zero(),
+					TEST_ERA,
+				),
+				Err(ApiError::InspectionDocumentOfAnotherEraOrCluster {
+					cluster_id: ClusterId::zero(),
+					era: TEST_ERA,
+				})
+			);
+		});
+	}
+
+	#[test]
+	fn a_found_table_naming_another_era_is_refused_and_a_missing_one_is_not_checked() {
+		let found = GetAssignmentTableResponse {
+			status: GetAssignmentTableStatus::Found as i32,
+			era_id: TEST_ERA,
+			table: Some(AssignmentTable {
+				cluster_id: ClusterId::zero().as_bytes().to_vec(),
+				era: TEST_ERA + 1,
+				..Default::default()
+			}),
+			..Default::default()
+		};
+		let missing = GetAssignmentTableResponse {
+			status: GetAssignmentTableStatus::NotFound as i32,
+			era_id: TEST_ERA,
+			..Default::default()
+		};
+		for (response, refused) in [(found, true), (missing, false)] {
+			let mut requests = Vec::new();
+			expect_discovery(&mut requests);
+			requests.push(get(HOST_A, "/itm/v1/table/7", signed(&response)));
+			run_with(requests, || {
+				let result = get_assignments_table::<AccountId, BlockNumber, MockCluster, MockNodes>(
+					&ClusterId::zero(),
+					TEST_ERA,
+				);
+				assert_eq!(result.is_err(), refused, "{:?}", result);
+			});
+		}
+	}
+
+	#[test]
+	fn a_sealed_ehd_comes_from_the_g_collector_as_the_envelope_bytes_it_signed_including_fields_this_build_does_not_know(
 	) {
 		let document = Ehd { era_id: TEST_ERA, ..Default::default() };
 		let mut sealed_document = document.encode_to_vec();
@@ -2074,9 +2209,11 @@ mod tests {
 		let grouping = GroupingCollectorsResponse {
 			keys: vec![format!("0x{}", hex::encode(KEY_B))],
 		};
+		let mut envelope = sealed.encode_to_vec();
+		envelope.extend_from_slice(&UNKNOWN_DOCUMENT_FIELD);
 		let requests = vec![
 			get(HOST_A, "/activity/v1/grouping-collectors", signed(&grouping)),
-			get(HOST_B, "/activity/v1/ehds/7", signed(&sealed)),
+			get(HOST_B, "/activity/v1/ehds/7", signed_payload(envelope.clone())),
 		];
 
 		run_with(requests, || {
@@ -2087,16 +2224,16 @@ mod tests {
 				)
 				.unwrap();
 			assert_eq!(asked, node_key(KEY_B));
-			assert_eq!(fetched.response, sealed);
-			assert_eq!(fetched.response.document, sealed_document);
-			let decoded = Ehd::decode(fetched.response.document.as_slice()).unwrap();
-			assert_eq!(decoded, document);
-			assert_ne!(decoded.encode_to_vec(), fetched.response.document);
+			assert_eq!(fetched.response, envelope);
+			let decoded = SealedEhd::decode(fetched.response.as_slice()).unwrap();
+			assert_eq!(decoded, sealed);
+			assert_ne!(decoded.encode_to_vec(), fetched.response);
+			assert_eq!(decoded.document, sealed_document);
 		});
 	}
 
 	#[test]
-	fn a_sealed_phd_comes_from_the_collector_asked_with_the_document_bytes_it_sealed_including_fields_this_build_does_not_know(
+	fn a_sealed_phd_comes_from_the_collector_asked_as_the_envelope_bytes_it_signed_including_fields_this_build_does_not_know(
 	) {
 		let document = Phd { era_id: TEST_ERA, node_key: KEY_B.to_vec(), ..Default::default() };
 		let mut sealed_document = document.encode_to_vec();
@@ -2109,7 +2246,9 @@ mod tests {
 				value: vec![0x5a; 64],
 			}),
 		};
-		let requests = vec![get(HOST_B, "/activity/v1/phds/7", signed(&sealed))];
+		let mut envelope = sealed.encode_to_vec();
+		envelope.extend_from_slice(&UNKNOWN_DOCUMENT_FIELD);
+		let requests = vec![get(HOST_B, "/activity/v1/phds/7", signed_payload(envelope.clone()))];
 
 		run_with(requests, || {
 			let fetched = get_sealed_phd::<AccountId, BlockNumber, MockCluster, MockNodes>(
@@ -2118,11 +2257,11 @@ mod tests {
 				node_key(KEY_B),
 			)
 			.unwrap();
-			assert_eq!(fetched.response, sealed);
-			assert_eq!(fetched.response.document, sealed_document);
-			let decoded = Phd::decode(fetched.response.document.as_slice()).unwrap();
-			assert_eq!(decoded, document);
-			assert_ne!(decoded.encode_to_vec(), fetched.response.document);
+			assert_eq!(fetched.response, envelope);
+			let decoded = SealedPhd::decode(fetched.response.as_slice()).unwrap();
+			assert_eq!(decoded, sealed);
+			assert_ne!(decoded.encode_to_vec(), fetched.response);
+			assert_eq!(decoded.document, sealed_document);
 		});
 	}
 
