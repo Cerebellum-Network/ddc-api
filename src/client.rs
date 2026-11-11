@@ -97,7 +97,6 @@ pub struct DdcClient<'a> {
 	pub base_url: &'a str,
 	timeout: Duration,
 	retries: u32,
-	dry_run: bool,
 }
 
 /// fetch_and_parse_proto fetches a proto-envelope response, verifies the
@@ -173,25 +172,11 @@ fn decode_signed_proto_with_payload<R: Message + Default>(
 
 impl<'a> DdcClient<'a> {
 	pub fn new(base_url: &'a str, timeout: Duration, retries: u32) -> Self {
-		Self { base_url, timeout, retries, dry_run: false }
-	}
-
-	pub fn with_dry_run(mut self, dry_run: bool) -> Self {
-		self.dry_run = dry_run;
-		self
+		Self { base_url, timeout, retries }
 	}
 
 	fn insp_mem_url(&self, path: &str) -> String {
-		let url = format!("{}{}", self.base_url, path);
-		if self.dry_run {
-			if url.contains('?') {
-				format!("{}&dryRun=true", url)
-			} else {
-				format!("{}?dryRun=true", url)
-			}
-		} else {
-			url
-		}
+		format!("{}{}", self.base_url, path)
 	}
 
 	pub fn buckets_aggregates(
@@ -290,27 +275,6 @@ impl<'a> DdcClient<'a> {
 		Ok(ApiResponse { response, signed_by })
 	}
 
-	/// `eras_with_status` against a dry-run sync node's own eras.
-	pub fn dry_run_eras_with_status(
-		&self,
-		cursor: Option<&[u8]>,
-		limit: Option<u32>,
-		statuses: &[proto::era::EraStatus],
-		newest_first: bool,
-	) -> Result<ApiResponse<proto::activity::GetErasResponse>, http::Error> {
-		let mut url = build_era_filter_url(
-			&self.base_url,
-			DRY_RUN_ERAS_PATH,
-			cursor,
-			limit,
-			statuses,
-			newest_first,
-		);
-		let (response, signed_by) =
-			fetch_and_parse_proto!(self, url, proto::activity::GetErasResponse)?;
-		Ok(ApiResponse { response, signed_by })
-	}
-
 	pub fn inspected_eras(
 		&self,
 		cursor: Option<&[u8]>,
@@ -336,30 +300,6 @@ impl<'a> DdcClient<'a> {
 	pub fn get_tca(&self, tca_id: TcaEra) -> Result<ApiResponse<proto::era::Tca>, http::Error> {
 		let mut url = format!("{}/activity/v1/tcas/{}", self.base_url, tca_id);
 		let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::era::Tca)?;
-		Ok(ApiResponse { response, signed_by })
-	}
-
-	pub fn dry_run_inspected_eras(
-		&self,
-		cursor: Option<&[u8]>,
-		limit: Option<u32>,
-	) -> Result<ApiResponse<proto::activity::GetErasResponse>, http::Error> {
-		let mut url =
-			build_list_url(&self.base_url, "/itm/v1/dry-run/inspected-eras", cursor, limit);
-		let (response, signed_by) =
-			fetch_and_parse_proto!(self, url, proto::activity::GetErasResponse)?;
-		Ok(ApiResponse { response, signed_by })
-	}
-
-	pub fn dry_run_processed_eras(
-		&self,
-		cursor: Option<&[u8]>,
-		limit: Option<u32>,
-	) -> Result<ApiResponse<proto::activity::GetErasResponse>, http::Error> {
-		let mut url =
-			build_list_url(&self.base_url, "/itm/v1/dry-run/processed-eras", cursor, limit);
-		let (response, signed_by) =
-			fetch_and_parse_proto!(self, url, proto::activity::GetErasResponse)?;
 		Ok(ApiResponse { response, signed_by })
 	}
 
@@ -961,7 +901,6 @@ enum Accept {
 }
 
 const ERAS_PATH: &str = "/activity/v1/eras";
-const DRY_RUN_ERAS_PATH: &str = "/itm/v1/dry-run/eras";
 /// `order` value of an era listing that puts the newest era first.
 const ERA_ORDER_NEWEST_FIRST: &str = "desc";
 
