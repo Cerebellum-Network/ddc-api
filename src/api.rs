@@ -1854,9 +1854,6 @@ mod tests {
 		fn get_nodes_stats(_: &ClusterId) -> Result<ClusterNodesStats, DispatchError> {
 			unimplemented!()
 		}
-		fn validate_node(_: &ClusterId, _: &NodePubKey, _: bool) -> Result<(), DispatchError> {
-			unimplemented!()
-		}
 		fn get_clusters(_: ClusterStatus) -> Result<Vec<ClusterId>, DispatchError> {
 			unimplemented!()
 		}
