@@ -4032,7 +4032,7 @@ dependencies = [
 [[package]]
 name = "ddc-primitives"
 version = "7.3.4"
-source = "git+https://github.com/Cerebellum-Network/ddc-primitives.git?branch=chore%2Fremove-dry-run#ab2b669f31f5c5bddb27cbdd1ff0a49700e408f1"
+source = "git+https://github.com/Cerebellum-Network/ddc-primitives.git?branch=chore%2Fremove-dry-run#16efbcc354368bca47096a2239d7ce6a49661b8b"
 dependencies = [
  "blake2 0.10.6",
  "hex",
