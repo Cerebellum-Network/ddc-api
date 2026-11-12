@@ -17,7 +17,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
 	client::{DdcClient, ReadBackError},
 	proto::{self},
-	shared_memory::{dry_run_shared_memory_node, SharedMemoryNode},
+	read_auth::ReadSigner,
+	shared_memory::SharedMemoryNode,
 };
 
 #[macro_export]
@@ -113,9 +114,6 @@ pub enum ApiError {
 		cluster_id: ClusterId,
 	},
 	FailedToFetchProcessedEras {
-		cluster_id: ClusterId,
-	},
-	FailedToFetchInspectionDryRunParams {
 		cluster_id: ClusterId,
 	},
 	FailedToFetchRecordsRange {
@@ -1126,38 +1124,6 @@ pub fn fetch_processed_eras_for_cluster<
 	cursor: Option<&[u8]>,
 	limit: Option<u32>,
 ) -> Result<proto::activity::GetErasResponse, ApiError> {
-	// Era statuses are the G-Collector's; a dry-run sync node serves its own instead.
-	let configured = dry_run_shared_memory_node::<AccountId, BlockNumber, CM>(cluster_id)?;
-	if let Some(dry_run_node) = configured.filter(|node| node.dry_run) {
-		let host = str::from_utf8(&dry_run_node.params.host).map_err(|e| {
-			log!(
-				error,
-				"❌ Failed to parse dry-run node host for node {:?} in cluster {:?}: {:?}",
-				dry_run_node.key,
-				cluster_id,
-				e
-			);
-			ApiError::NodeHostParseError {
-				cluster_id: *cluster_id,
-				node_key: dry_run_node.key.clone(),
-				host: dry_run_node.params.host.clone(),
-			}
-		})?;
-		let base_url = format!("http://{}:{}", host, dry_run_node.params.http_port);
-		let client =
-			DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
-
-		return client.dry_run_processed_eras(cursor, limit).map(|r| r.response).map_err(|e| {
-			log!(
-				error,
-				"❌ Failed to fetch dry-run processed eras for cluster {:?}: {:?}",
-				cluster_id,
-				e
-			);
-			ApiError::FailedToFetchProcessedEras { cluster_id: *cluster_id }
-		});
-	}
-
 	let (_, g_collector_params) =
 		get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|e| {
 			log!(
@@ -1190,8 +1156,7 @@ pub fn fetch_processed_eras(
 	Ok(client.processed_eras(cursor, limit)?.response)
 }
 
-/// Fetch inspected EHD eras of a cluster from its G-Collector, or from the
-/// dry-run sync node during a dry-run.
+/// Fetch inspected EHD eras of a cluster from its G-Collector.
 #[allow(dead_code)]
 pub fn fetch_inspected_eras_for_cluster<
 	AccountId,
@@ -1203,38 +1168,6 @@ pub fn fetch_inspected_eras_for_cluster<
 	cursor: Option<&[u8]>,
 	limit: Option<u32>,
 ) -> Result<proto::activity::GetErasResponse, ApiError> {
-	// Era statuses are the G-Collector's; a dry-run sync node serves its own instead.
-	let configured = dry_run_shared_memory_node::<AccountId, BlockNumber, CM>(cluster_id)?;
-	if let Some(dry_run_node) = configured.filter(|node| node.dry_run) {
-		let host = str::from_utf8(&dry_run_node.params.host).map_err(|e| {
-			log!(
-				error,
-				"❌ Failed to parse dry-run node host for node {:?} in cluster {:?}: {:?}",
-				dry_run_node.key,
-				cluster_id,
-				e
-			);
-			ApiError::NodeHostParseError {
-				cluster_id: *cluster_id,
-				node_key: dry_run_node.key.clone(),
-				host: dry_run_node.params.host.clone(),
-			}
-		})?;
-		let base_url = format!("http://{}:{}", host, dry_run_node.params.http_port);
-		let client =
-			DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
-
-		return client.dry_run_inspected_eras(cursor, limit).map(|r| r.response).map_err(|e| {
-			log!(
-				error,
-				"❌ Failed to fetch dry-run inspected eras for cluster {:?}: {:?}",
-				cluster_id,
-				e
-			);
-			ApiError::FailedToFetchInspectedEras { cluster_id: *cluster_id }
-		});
-	}
-
 	let (_, g_collector_params) =
 		get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|e| {
 			log!(
@@ -1318,20 +1251,14 @@ const NEXT_ERA_LIMIT: u32 = 1;
 /// ERA_PAID one that is not ERA_EMPTY, if it is ERA_PROCESSED. None while that
 /// era is still ERA_IN_PROGRESS or there is none. With no inspected era yet it
 /// is the oldest such era. Eras below the anchor are never reached.
-pub fn next_era_to_inspect(
-	client: &DdcClient,
-	dry_run: bool,
-) -> Result<Option<EhdEra>, http::Error> {
+pub fn next_era_to_inspect(client: &DdcClient) -> Result<Option<EhdEra>, http::Error> {
 	let list = |cursor: Option<&[u8]>,
 	            limit: u32,
 	            statuses: &[proto::era::EraStatus],
 	            newest_first: bool| {
-		if dry_run {
-			client.dry_run_eras_with_status(cursor, Some(limit), statuses, newest_first)
-		} else {
-			client.eras_with_status(cursor, Some(limit), statuses, newest_first)
-		}
-		.map(|r| r.response.records)
+		client
+			.eras_with_status(cursor, Some(limit), statuses, newest_first)
+			.map(|r| r.response.records)
 	};
 
 	let anchors = list(None, ANCHOR_PROBE_LIMIT, &INSPECTED_ERA_STATUSES, true)?;
@@ -1359,8 +1286,8 @@ fn has_status(era: &proto::era::Era, statuses: &[proto::era::EraStatus]) -> bool
 	statuses.iter().any(|status| era.status == *status as i32)
 }
 
-/// The era a cluster should inspect next, read from its G-Collector, or from
-/// the dry-run sync node during a dry-run. See `next_era_to_inspect`.
+/// The era a cluster should inspect next, read from its G-Collector. See
+/// `next_era_to_inspect`.
 pub fn fetch_era_to_inspect_for_cluster<
 	AccountId,
 	BlockNumber,
@@ -1369,24 +1296,11 @@ pub fn fetch_era_to_inspect_for_cluster<
 >(
 	cluster_id: &ClusterId,
 ) -> Result<Option<EhdEra>, ApiError> {
-	// Era statuses are the G-Collector's; a dry-run sync node serves its own instead.
-	let configured = dry_run_shared_memory_node::<AccountId, BlockNumber, CM>(cluster_id)?;
-	let (params, dry_run) = match configured.filter(|node| node.dry_run) {
-		Some(dry_run_node) => (dry_run_node.params, true),
-		None => {
-			let (_, g_collector_params) =
-				get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|e| {
-					log!(
-						error,
-						"❌ Failed to fetch G-Collector node for cluster {:?}: {:?}",
-						cluster_id,
-						e
-					);
-					ApiError::FailedToFetchGCollectors { cluster_id: *cluster_id }
-				})?;
-			(g_collector_params, false)
-		},
-	};
+	let (_, params) =
+		get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|e| {
+			log!(error, "❌ Failed to fetch G-Collector node for cluster {:?}: {:?}", cluster_id, e);
+			ApiError::FailedToFetchGCollectors { cluster_id: *cluster_id }
+		})?;
 	let host = str::from_utf8(&params.host).map_err(|e| {
 		log!(error, "❌ Failed to parse era-list node host for cluster {:?}: {:?}", cluster_id, e);
 		ApiError::FailedToFetchProcessedEras { cluster_id: *cluster_id }
@@ -1394,7 +1308,7 @@ pub fn fetch_era_to_inspect_for_cluster<
 	let base_url = format!("http://{}:{}", host, params.http_port);
 	let client =
 		DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
-	next_era_to_inspect(&client, dry_run).map_err(|e| {
+	next_era_to_inspect(&client).map_err(|e| {
 		log!(error, "❌ Failed to read the era to inspect for cluster {:?}: {:?}", cluster_id, e);
 		ApiError::FailedToFetchProcessedEras { cluster_id: *cluster_id }
 	})
@@ -1499,8 +1413,7 @@ pub fn fetch_eras_all(
 /// Runs one operation on the inspectors' shared memory: the cluster's sync
 /// store. Which replica answers is a storage detail; replicas are tried in key
 /// order, each at its registry endpoint, and when none answers the cluster is
-/// asked again in the same tick. A configured dry-run sync node is the only
-/// one tried.
+/// asked again in the same tick.
 fn with_shared_memory<
 	AccountId,
 	BlockNumber,
@@ -1509,15 +1422,12 @@ fn with_shared_memory<
 	R,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 	operation: &str,
 	mut call: impl FnMut(&DdcClient) -> Result<R, http::Error>,
 ) -> Result<R, ApiError> {
-	if let Some(node) = dry_run_shared_memory_node::<AccountId, BlockNumber, CM>(cluster_id)? {
-		return try_shared_memory_replicas(cluster_id, operation, &[node], &mut call);
-	}
-
 	let nodes = crate::shared_memory::discovered_shared_memory_nodes::<AccountId, BlockNumber, CM, NM>(
-		cluster_id,
+		cluster_id, signer,
 	)?;
 	if let Ok(result) = try_shared_memory_replicas(cluster_id, operation, &nodes, &mut call) {
 		return Ok(result);
@@ -1525,7 +1435,7 @@ fn with_shared_memory<
 
 	log!(warn, "No cached shared-memory replica of cluster {:?} answered; discovering again", cluster_id);
 	let nodes =
-		crate::shared_memory::rediscover_shared_memory_nodes::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+		crate::shared_memory::rediscover_shared_memory_nodes::<AccountId, BlockNumber, CM, NM>(cluster_id, signer)?;
 	try_shared_memory_replicas(cluster_id, operation, &nodes, &mut call)
 }
 
@@ -1542,7 +1452,7 @@ fn try_shared_memory_replicas<R>(
 			Err(e) => {
 				log!(
 					error,
-					"❌ Failed to parse dry-run node host for node {:?} in cluster {:?}: {:?}",
+					"❌ Failed to parse shared-memory node host for node {:?} in cluster {:?}: {:?}",
 					node.key,
 					cluster_id,
 					e
@@ -1557,8 +1467,7 @@ fn try_shared_memory_replicas<R>(
 		};
 		let base_url = format!("http://{}:{}", host, node.params.http_port);
 		let client =
-			DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT)
-				.with_dry_run(node.dry_run);
+			DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
 
 		match call(&client) {
 			Ok(result) => return Ok(result),
@@ -1586,9 +1495,10 @@ pub fn post_itm_lease<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 	request: &proto::inspection::LeaseRequest,
 ) -> Result<proto::inspection::LeaseResult, ApiError> {
-	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(cluster_id, "post ITM lease", |client| {
+	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(cluster_id, signer, "post ITM lease", |client| {
 		client.post_itm_lease(request)
 	})
 }
@@ -1600,10 +1510,12 @@ pub fn submit_assignments_table<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 	request: &proto::inspection::PostAssignmentTableRequest,
 ) -> Result<proto::inspection::PostAssignmentTableResponse, ApiError> {
 	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(
 		cluster_id,
+		signer,
 		"submit assignments table",
 		|client| client.submit_assignments_table(request),
 	)
@@ -1616,12 +1528,14 @@ pub fn get_assignments_table<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 	era: EhdEra,
 ) -> Result<proto::inspection::GetAssignmentTableResponse, ApiError> {
 	let response = with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(
 		cluster_id,
+		signer,
 		"get assignments table",
-		|client| client.get_assignments_table(era),
+		|client| client.get_assignments_table(era, signer),
 	)?;
 	if response.status == proto::inspection::GetAssignmentTableStatus::Found as i32 {
 		let table = response.table.as_ref();
@@ -1642,9 +1556,10 @@ pub fn post_era_nudge<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 	request: &proto::inspection::PostEraNudgeRequest,
 ) -> Result<proto::inspection::PostEraNudgeResponse, ApiError> {
-	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(cluster_id, "post era nudge", |client| {
+	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(cluster_id, signer, "post era nudge", |client| {
 		client.post_era_nudge(request)
 	})
 }
@@ -1656,10 +1571,12 @@ pub fn post_seed_contribution<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 	request: &proto::inspection::PostSeedContributionRequest,
 ) -> Result<proto::inspection::PostSeedContributionResponse, ApiError> {
 	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(
 		cluster_id,
+		signer,
 		"post seed contribution",
 		|client| client.post_seed_contribution(request),
 	)
@@ -1672,10 +1589,12 @@ pub fn submit_inspection_result<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 	request: &proto::inspection::PostInspectionResultRequest,
 ) -> Result<proto::inspection::PostInspectionResultResponse, ApiError> {
 	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(
 		cluster_id,
+		signer,
 		"submit inspection result",
 		|client| client.submit_inspection_result(request),
 	)
@@ -1690,8 +1609,7 @@ pub fn submit_inspection_result<
 /// again through the reader and the first replica is dropped from the cached
 /// list. A replica that turns out not to hold the shared memory proves the
 /// list false and drops it. A replica that cannot answer is no evidence either
-/// way and the next one reads back. A configured dry-run sync node has no
-/// second replica to read back from and is written to as usual.
+/// way and the next one reads back.
 pub fn submit_inspection_result_read_back<
 	AccountId,
 	BlockNumber,
@@ -1699,14 +1617,11 @@ pub fn submit_inspection_result_read_back<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 	request: &proto::inspection::PostInspectionResultRequest,
 ) -> Result<proto::inspection::PostInspectionResultResponse, ApiError> {
-	if dry_run_shared_memory_node::<AccountId, BlockNumber, CM>(cluster_id)?.is_some() {
-		return submit_inspection_result::<AccountId, BlockNumber, CM, NM>(cluster_id, request);
-	}
-
 	let nodes = crate::shared_memory::discovered_shared_memory_nodes::<AccountId, BlockNumber, CM, NM>(
-		cluster_id,
+		cluster_id, signer,
 	)?;
 	let mut submit = |client: &DdcClient| client.submit_inspection_result(request);
 
@@ -1720,7 +1635,7 @@ pub fn submit_inspection_result_read_back<
 		}
 	}
 	let Some((submitter_index, response)) = submitted else {
-		return submit_inspection_result::<AccountId, BlockNumber, CM, NM>(cluster_id, request);
+		return submit_inspection_result::<AccountId, BlockNumber, CM, NM>(cluster_id, signer, request);
 	};
 	let submitter = &nodes[submitter_index];
 
@@ -1738,7 +1653,7 @@ pub fn submit_inspection_result_read_back<
 		let client =
 			DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
 
-		match client.read_back_inspection_state(request.era_id) {
+		match client.read_back_inspection_state(request.era_id, signer) {
 			Ok(state) => {
 				let missing =
 					crate::shared_memory::uncommitted_paths(&state, &request.inspector_key, &expected);
@@ -1802,12 +1717,14 @@ pub fn get_inspection_state<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 	era: EhdEra,
 ) -> Result<proto::inspection::InspectionState, ApiError> {
 	let state = with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(
 		cluster_id,
+		signer,
 		"get inspection state",
-		|client| client.get_inspection_state(era),
+		|client| client.get_inspection_state(era, signer),
 	)?;
 	require_era_and_cluster(cluster_id, era, &state.cluster_id, state.era_id)?;
 	Ok(state)
@@ -1820,10 +1737,11 @@ pub fn get_inspection_receipt<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 	era: EhdEra,
 ) -> Result<(proto::inspection::InspectionReceipt, Vec<u8>), ApiError> {
-	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(cluster_id, "get inspection receipt", |client| {
-		client.get_inspection_receipt(era)
+	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(cluster_id, signer, "get inspection receipt", |client| {
+		client.get_inspection_receipt(era, signer)
 	})
 	.map_err(|e| match e {
 		ApiError::HttpClientError { .. } => {
@@ -1844,10 +1762,11 @@ pub fn get_quorum_info<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 	era: EhdEra,
 ) -> Result<proto::inspection::InspSyncQuorumInfo, ApiError> {
-	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(cluster_id, "get quorum info", |client| {
-		client.get_quorum_info(era)
+	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(cluster_id, signer, "get quorum info", |client| {
+		client.get_quorum_info(era, signer)
 	})
 }
 
@@ -1855,7 +1774,7 @@ pub fn get_quorum_info<
 mod tests {
 	use ddc_primitives::{
 		traits::ClusterQuery, ClusterNodeKind, ClusterNodeState, ClusterNodeStatus,
-		ClusterNodesStats, ClusterStatus, InspectionDryRunParams, StorageNodePubKey,
+		ClusterNodesStats, ClusterStatus, StorageNodePubKey,
 	};
 	use polkadot_sdk::sp_core::{
 		ed25519,
@@ -1865,9 +1784,12 @@ mod tests {
 		},
 		Pair,
 	};
+	use polkadot_sdk::sp_core::crypto::KeyTypeId;
 	use polkadot_sdk::sp_io::TestExternalities;
+	use polkadot_sdk::sp_keystore::{testing::MemoryKeystore, KeystoreExt};
 	use polkadot_sdk::sp_runtime::DispatchError;
 	use prost::Message;
+	use std::sync::Arc;
 
 	use super::*;
 	use crate::proto::{
@@ -1892,6 +1814,7 @@ mod tests {
 	const TEST_HTTP_PORT: u16 = 8080;
 	const TEST_ERA: EhdEra = 7;
 	const INSPECTOR: &[u8] = b"inspector-key";
+	const READ_KEY_TYPE: KeyTypeId = KeyTypeId(*b"insp");
 	const PATH_HASH: [u8; 2] = [0x01, 0x02];
 	const SIGNER_SEED: [u8; 32] = [0x07; 32];
 	/// Field 99, varint 1: a field this build's InspectionReceipt does not know.
@@ -1952,16 +1875,8 @@ mod tests {
 		fn get_nodes_stats(_: &ClusterId) -> Result<ClusterNodesStats, DispatchError> {
 			unimplemented!()
 		}
-		fn validate_node(_: &ClusterId, _: &NodePubKey, _: bool) -> Result<(), DispatchError> {
-			unimplemented!()
-		}
 		fn get_clusters(_: ClusterStatus) -> Result<Vec<ClusterId>, DispatchError> {
 			unimplemented!()
-		}
-		fn get_inspection_dry_run_params(
-			_: &ClusterId,
-		) -> Result<Option<InspectionDryRunParams>, DispatchError> {
-			Ok(None)
 		}
 	}
 
@@ -2073,6 +1988,12 @@ mod tests {
 		requests.push(get(HOST_A, "/itm/v1/quorum/0", signed(&members)));
 	}
 
+	// The keystore holds no key for it, so its reads go unsigned, as a node in
+	// counting mode serves them.
+	fn signer() -> ReadSigner {
+		ReadSigner { cluster_id: ClusterId::zero(), key_type: READ_KEY_TYPE, key: [0x77; 32], block: 0 }
+	}
+
 	fn run_with(requests: Vec<PendingRequest>, test: impl FnOnce()) {
 		let (offchain, state) = TestOffchainExt::new();
 		for request in requests {
@@ -2081,6 +2002,7 @@ mod tests {
 		let mut ext = TestExternalities::default();
 		ext.register_extension(OffchainDbExt::new(offchain.clone()));
 		ext.register_extension(OffchainWorkerExt::new(offchain));
+		ext.register_extension(KeystoreExt(Arc::new(MemoryKeystore::new())));
 		ext.execute_with(test);
 	}
 
@@ -2102,6 +2024,7 @@ mod tests {
 			let (decoded, bytes) =
 				get_inspection_receipt::<AccountId, BlockNumber, MockCluster, MockNodes>(
 					&ClusterId::zero(),
+					&signer(),
 					TEST_ERA,
 				)
 				.unwrap();
@@ -2121,6 +2044,7 @@ mod tests {
 			result = Some(
 				get_inspection_receipt::<AccountId, BlockNumber, MockCluster, MockNodes>(
 					&ClusterId::zero(),
+					&signer(),
 					TEST_ERA,
 				)
 				.map(|_| ()),
@@ -2151,6 +2075,7 @@ mod tests {
 			assert_eq!(
 				get_inspection_state::<AccountId, BlockNumber, MockCluster, MockNodes>(
 					&ClusterId::zero(),
+					&signer(),
 					TEST_ERA,
 				),
 				Err(ApiError::AnotherEraOrCluster {
@@ -2185,6 +2110,7 @@ mod tests {
 			run_with(requests, || {
 				let result = get_assignments_table::<AccountId, BlockNumber, MockCluster, MockNodes>(
 					&ClusterId::zero(),
+					&signer(),
 					TEST_ERA,
 				);
 				assert_eq!(result.is_err(), refused, "{:?}", result);
@@ -2282,7 +2208,7 @@ mod tests {
 				BlockNumber,
 				MockCluster,
 				MockNodes,
-			>(&ClusterId::zero(), &request())
+			>(&ClusterId::zero(), &signer(), &request())
 			.unwrap();
 			assert_eq!(response.accepted_count, 1);
 		});
@@ -2300,6 +2226,7 @@ mod tests {
 		run_with(requests, || {
 			submit_inspection_result_read_back::<AccountId, BlockNumber, MockCluster, MockNodes>(
 				&ClusterId::zero(),
+				&signer(),
 				&request(),
 			)
 			.unwrap();
@@ -2309,7 +2236,7 @@ mod tests {
 				BlockNumber,
 				MockCluster,
 				MockNodes,
-			>(&ClusterId::zero())
+			>(&ClusterId::zero(), &signer())
 			.unwrap();
 			assert_eq!(
 				cached.iter().map(|n| n.key.clone()).collect::<Vec<_>>(),
@@ -2350,7 +2277,7 @@ mod tests {
 			get(HOST_A, &next_query(6), eras(vec![era(8, EraProcessed)])),
 		];
 		run_with(requests, || {
-			assert_eq!(next_era_to_inspect(&client_for_host_a(), false), Ok(Some(8)));
+			assert_eq!(next_era_to_inspect(&client_for_host_a()), Ok(Some(8)));
 		});
 	}
 
@@ -2362,7 +2289,7 @@ mod tests {
 			get(HOST_A, &next_query(6), eras(vec![era(7, EraInProgress)])),
 		];
 		run_with(requests, || {
-			assert_eq!(next_era_to_inspect(&client_for_host_a(), false), Ok(None));
+			assert_eq!(next_era_to_inspect(&client_for_host_a()), Ok(None));
 		});
 	}
 
@@ -2378,7 +2305,7 @@ mod tests {
 			),
 		];
 		run_with(requests, || {
-			assert_eq!(next_era_to_inspect(&client_for_host_a(), false), Ok(Some(3)));
+			assert_eq!(next_era_to_inspect(&client_for_host_a()), Ok(Some(3)));
 		});
 	}
 
@@ -2391,27 +2318,7 @@ mod tests {
 			eras(vec![era(1, EraInspected), era(2, EraInspected)]),
 		)];
 		run_with(requests, || {
-			assert!(next_era_to_inspect(&client_for_host_a(), false).is_err());
-		});
-	}
-
-	#[test]
-	fn a_dry_run_reads_the_dry_run_era_listing() {
-		use proto::era::EraStatus::*;
-		let requests = vec![
-			get(
-				HOST_A,
-				"/itm/v1/dry-run/eras?limit=2&status=ERA_INSPECTED&status=ERA_PAID&order=desc",
-				eras(vec![]),
-			),
-			get(
-				HOST_A,
-				"/itm/v1/dry-run/eras?limit=1&status=ERA_PROCESSED&status=ERA_IN_PROGRESS",
-				eras(vec![era(100, EraProcessed)]),
-			),
-		];
-		run_with(requests, || {
-			assert_eq!(next_era_to_inspect(&client_for_host_a(), true), Ok(Some(100)));
+			assert!(next_era_to_inspect(&client_for_host_a()).is_err());
 		});
 	}
 }

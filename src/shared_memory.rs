@@ -26,6 +26,7 @@ use crate::{
 	api::ApiError,
 	client::{DdcClient, SharedMemoryAnswerKind, SharedMemoryProbe},
 	log, proto,
+	read_auth::ReadSigner,
 };
 
 /// A usable answer names at least this many registry-confirmed members.
@@ -42,33 +43,13 @@ pub const REFRESH_INTERVAL_MS: u64 = 600_000;
 /// Membership does not depend on the era; the route takes one.
 const MEMBERSHIP_ERA: EhdEra = 0;
 const DISCOVERY_RETRIES: u32 = 1;
-const CACHE_KEY_PREFIX: &[u8] = b"ddc-api::shared-memory-nodes::";
+const CACHE_KEY_PREFIX: &[u8] = b"ddc-api::shared-memory-nodes::v2::";
 const REFRESH_KEY_PREFIX: &[u8] = b"ddc-api::shared-memory-refresh::";
 
 #[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
 pub struct SharedMemoryNode {
-	pub dry_run: bool,
 	pub key: NodePubKey,
 	pub params: StorageNodeParams,
-}
-
-/// The nodes holding a cluster's shared memory, in key order.
-///
-/// A sync node configured in the cluster's dry-run parameters overrides
-/// discovery and is not checked against the registry: a dry-run sync node
-/// sits outside the inspected cluster by design.
-pub fn shared_memory_nodes<
-	AccountId,
-	BlockNumber,
-	CM: ClusterManager<AccountId, BlockNumber>,
-	NM: NodeManager<AccountId>,
->(
-	cluster_id: &ClusterId,
-) -> Result<Vec<SharedMemoryNode>, ApiError> {
-	match dry_run_shared_memory_node::<AccountId, BlockNumber, CM>(cluster_id)? {
-		Some(node) => Ok(vec![node]),
-		None => discovered_shared_memory_nodes::<AccountId, BlockNumber, CM, NM>(cluster_id),
-	}
 }
 
 /// The discovered sync members of a cluster: the cached list while the
@@ -80,6 +61,7 @@ pub fn discovered_shared_memory_nodes<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 ) -> Result<Vec<SharedMemoryNode>, ApiError> {
 	let refresh_key = refresh_key(cluster_id);
 	let mut lock = StorageLock::<Time>::with_deadline(
@@ -88,7 +70,7 @@ pub fn discovered_shared_memory_nodes<
 	);
 	let nodes = match lock.try_lock() {
 		Ok(guard) => {
-			let nodes = discover_and_cache::<AccountId, BlockNumber, CM, NM>(cluster_id);
+			let nodes = discover_and_cache::<AccountId, BlockNumber, CM, NM>(cluster_id, signer);
 			// Only a successful answer leaves the mark; a failure asks again next tick.
 			if nodes.is_ok() {
 				guard.forget();
@@ -97,7 +79,7 @@ pub fn discovered_shared_memory_nodes<
 		}
 		Err(_) => match cached_shared_memory_nodes(cluster_id) {
 			Some(nodes) => Ok(nodes),
-			None => discover_and_cache::<AccountId, BlockNumber, CM, NM>(cluster_id),
+			None => discover_and_cache::<AccountId, BlockNumber, CM, NM>(cluster_id, signer),
 		},
 	};
 	nodes
@@ -112,32 +94,9 @@ pub fn rediscover_shared_memory_nodes<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 ) -> Result<Vec<SharedMemoryNode>, ApiError> {
-	discover_and_cache::<AccountId, BlockNumber, CM, NM>(cluster_id)
-}
-
-/// The sync node named in the cluster's dry-run parameters, if any.
-pub fn dry_run_shared_memory_node<
-	AccountId,
-	BlockNumber,
-	CM: ClusterManager<AccountId, BlockNumber>,
->(
-	cluster_id: &ClusterId,
-) -> Result<Option<SharedMemoryNode>, ApiError> {
-	let params = CM::get_inspection_dry_run_params(cluster_id).map_err(|e| {
-		log!(
-			error,
-			"❌ Failed to fetch inspection dry run params for cluster {:?}: {:?}",
-			cluster_id,
-			e
-		);
-		ApiError::FailedToFetchInspectionDryRunParams { cluster_id: *cluster_id }
-	})?;
-	Ok(params.map(|p| SharedMemoryNode {
-		dry_run: p.enabled,
-		key: p.sync_node_key,
-		params: p.sync_node_params,
-	}))
+	discover_and_cache::<AccountId, BlockNumber, CM, NM>(cluster_id, signer)
 }
 
 fn discover_and_cache<
@@ -147,9 +106,10 @@ fn discover_and_cache<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 ) -> Result<Vec<SharedMemoryNode>, ApiError> {
 	let registry = validated_storage_nodes::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
-	let nodes = discover(cluster_id, &registry, probe_node)?;
+	let nodes = discover(cluster_id, &registry, |params| probe_node(params, signer))?;
 	StorageValueRef::persistent(&cache_key(cluster_id)).set(&nodes);
 	Ok(nodes)
 }
@@ -208,7 +168,7 @@ pub fn accept_members(
 			.filter_map(|member| decode_member_key(&member.node_key))
 			.filter_map(|key| {
 				registry.iter().find(|(registered, _)| *registered == key).map(|(_, params)| {
-					SharedMemoryNode { dry_run: false, key, params: params.clone() }
+					SharedMemoryNode { key, params: params.clone() }
 				})
 			})
 			.collect();
@@ -269,14 +229,14 @@ pub fn validated_storage_nodes<
 	Ok(nodes)
 }
 
-fn probe_node(params: &StorageNodeParams) -> SharedMemoryProbe {
+fn probe_node(params: &StorageNodeParams, signer: &ReadSigner) -> SharedMemoryProbe {
 	let Ok(host) = core::str::from_utf8(&params.host) else {
 		return SharedMemoryProbe::Refused(SharedMemoryAnswerKind::Transport);
 	};
 	// Plaintext over the registry host and published port, as every reader builds it.
 	let base_url = format!("http://{}:{}", host, params.http_port);
 	DdcClient::new(&base_url, Duration::from_millis(DISCOVERY_TIMEOUT_MS), DISCOVERY_RETRIES)
-		.probe_shared_memory(MEMBERSHIP_ERA)
+		.probe_shared_memory(MEMBERSHIP_ERA, signer)
 }
 
 /// Drops one node from the cached shared-memory list, so later calls stop going to it.

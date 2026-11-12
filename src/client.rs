@@ -10,7 +10,11 @@ use prost::Message;
 use scale_info::prelude::{format, string::String, vec::Vec};
 
 use super::*;
-use crate::{log, verification::Verify};
+use crate::{
+	log,
+	read_auth::{ReadRoute, ReadSigner},
+	verification::Verify,
+};
 
 /// Header in which a node declares the deadline it bounds the shared-memory
 /// membership route (`/itm/v1/quorum`) to.
@@ -97,7 +101,6 @@ pub struct DdcClient<'a> {
 	pub base_url: &'a str,
 	timeout: Duration,
 	retries: u32,
-	dry_run: bool,
 }
 
 /// fetch_and_parse_proto fetches a proto-envelope response, verifies the
@@ -107,7 +110,7 @@ pub struct DdcClient<'a> {
 /// protocol error, not a configurable client behaviour.
 macro_rules! fetch_and_parse_proto {
 	($self:expr, $url:expr, $response_ty:ty) => {{
-		let response = $self.get(&$url, Accept::Protobuf)?;
+		let response = $self.get(&$url, Accept::Protobuf, &[])?;
 		let body = response.body().collect::<Vec<u8>>();
 
 		let proto_signed_response = proto::signature::SignedResponse::decode(body.as_slice())
@@ -171,27 +174,24 @@ fn decode_signed_proto_with_payload<R: Message + Default>(
 	Ok((message, signed.payload))
 }
 
+/// Adds headers to a request, in order.
+fn with_headers<'a>(
+	mut request: http::Request<'a>,
+	headers: &'a [(&'static str, String)],
+) -> http::Request<'a> {
+	for (name, value) in headers {
+		request = request.add_header(name, value);
+	}
+	request
+}
+
 impl<'a> DdcClient<'a> {
 	pub fn new(base_url: &'a str, timeout: Duration, retries: u32) -> Self {
-		Self { base_url, timeout, retries, dry_run: false }
-	}
-
-	pub fn with_dry_run(mut self, dry_run: bool) -> Self {
-		self.dry_run = dry_run;
-		self
+		Self { base_url, timeout, retries }
 	}
 
 	fn insp_mem_url(&self, path: &str) -> String {
-		let url = format!("{}{}", self.base_url, path);
-		if self.dry_run {
-			if url.contains('?') {
-				format!("{}&dryRun=true", url)
-			} else {
-				format!("{}?dryRun=true", url)
-			}
-		} else {
-			url
-		}
+		format!("{}{}", self.base_url, path)
 	}
 
 	pub fn buckets_aggregates(
@@ -290,27 +290,6 @@ impl<'a> DdcClient<'a> {
 		Ok(ApiResponse { response, signed_by })
 	}
 
-	/// `eras_with_status` against a dry-run sync node's own eras.
-	pub fn dry_run_eras_with_status(
-		&self,
-		cursor: Option<&[u8]>,
-		limit: Option<u32>,
-		statuses: &[proto::era::EraStatus],
-		newest_first: bool,
-	) -> Result<ApiResponse<proto::activity::GetErasResponse>, http::Error> {
-		let mut url = build_era_filter_url(
-			&self.base_url,
-			DRY_RUN_ERAS_PATH,
-			cursor,
-			limit,
-			statuses,
-			newest_first,
-		);
-		let (response, signed_by) =
-			fetch_and_parse_proto!(self, url, proto::activity::GetErasResponse)?;
-		Ok(ApiResponse { response, signed_by })
-	}
-
 	pub fn inspected_eras(
 		&self,
 		cursor: Option<&[u8]>,
@@ -336,30 +315,6 @@ impl<'a> DdcClient<'a> {
 	pub fn get_tca(&self, tca_id: TcaEra) -> Result<ApiResponse<proto::era::Tca>, http::Error> {
 		let mut url = format!("{}/activity/v1/tcas/{}", self.base_url, tca_id);
 		let (response, signed_by) = fetch_and_parse_proto!(self, url, proto::era::Tca)?;
-		Ok(ApiResponse { response, signed_by })
-	}
-
-	pub fn dry_run_inspected_eras(
-		&self,
-		cursor: Option<&[u8]>,
-		limit: Option<u32>,
-	) -> Result<ApiResponse<proto::activity::GetErasResponse>, http::Error> {
-		let mut url =
-			build_list_url(&self.base_url, "/itm/v1/dry-run/inspected-eras", cursor, limit);
-		let (response, signed_by) =
-			fetch_and_parse_proto!(self, url, proto::activity::GetErasResponse)?;
-		Ok(ApiResponse { response, signed_by })
-	}
-
-	pub fn dry_run_processed_eras(
-		&self,
-		cursor: Option<&[u8]>,
-		limit: Option<u32>,
-	) -> Result<ApiResponse<proto::activity::GetErasResponse>, http::Error> {
-		let mut url =
-			build_list_url(&self.base_url, "/itm/v1/dry-run/processed-eras", cursor, limit);
-		let (response, signed_by) =
-			fetch_and_parse_proto!(self, url, proto::activity::GetErasResponse)?;
 		Ok(ApiResponse { response, signed_by })
 	}
 
@@ -440,7 +395,7 @@ impl<'a> DdcClient<'a> {
 
 	/// GETs a signed response and returns its payload undecoded, with its signer.
 	fn get_signed_payload(&self, url: &str) -> Result<ApiResponse<Vec<u8>>, http::Error> {
-		let response = self.get(url, Accept::Protobuf)?;
+		let response = self.get(url, Accept::Protobuf, &[])?;
 		let body = response.body().collect::<Vec<u8>>();
 		let signed = proto::signature::SignedResponse::decode(body.as_slice()).map_err(|e| {
 			log!(error, "❌ Failed to decode SignedResponse from {:?}: {:?}", url, e);
@@ -574,10 +529,11 @@ impl<'a> DdcClient<'a> {
 	pub fn get_assignments_table(
 		&self,
 		era: EhdEra,
+		signer: &ReadSigner,
 	) -> Result<proto::inspection::GetAssignmentTableResponse, http::Error> {
 		let url = self.insp_mem_url(&format!("/itm/v1/table/{}", era));
 
-		let response = self.get(&url, Accept::Protobuf)?;
+		let response = self.get(&url, Accept::Protobuf, &signer.headers(ReadRoute::Table, era))?;
 		let body = response.body().collect::<Vec<u8>>();
 
 		decode_signed_proto::<proto::inspection::GetAssignmentTableResponse>(&url, &body)
@@ -627,10 +583,11 @@ impl<'a> DdcClient<'a> {
 	pub fn get_inspection_state(
 		&self,
 		era: EhdEra,
+		signer: &ReadSigner,
 	) -> Result<proto::inspection::InspectionState, http::Error> {
 		let url = self.insp_mem_url(&format!("/itm/v1/state/{}", era));
 
-		let response = self.get(&url, Accept::Protobuf)?;
+		let response = self.get(&url, Accept::Protobuf, &signer.headers(ReadRoute::State, era))?;
 		let body = response.body().collect::<Vec<u8>>();
 
 		decode_signed_proto::<proto::inspection::InspectionState>(&url, &body)
@@ -642,11 +599,15 @@ impl<'a> DdcClient<'a> {
 	pub fn read_back_inspection_state(
 		&self,
 		era: EhdEra,
+		signer: &ReadSigner,
 	) -> Result<proto::inspection::InspectionState, ReadBackError> {
 		let url = format!("{}/itm/v1/state/{}", self.base_url, era);
 		let deadline = timestamp().add(self.timeout);
-		let request =
-			http::Request::get(&url).deadline(deadline).add_header("Accept", "application/protobuf");
+		let headers = signer.headers(ReadRoute::State, era);
+		let request = with_headers(
+			http::Request::get(&url).deadline(deadline).add_header("Accept", "application/protobuf"),
+			&headers,
+		);
 		let response = match request.send().map(|pending| pending.try_wait(deadline)) {
 			Ok(Ok(Ok(response))) => response,
 			_ => return Err(ReadBackError::Unavailable),
@@ -672,10 +633,11 @@ impl<'a> DdcClient<'a> {
 	pub fn get_inspection_receipt(
 		&self,
 		era: EhdEra,
+		signer: &ReadSigner,
 	) -> Result<(proto::inspection::InspectionReceipt, Vec<u8>), http::Error> {
 		let url = self.insp_mem_url(&format!("/itm/v1/receipt/{}", era));
 
-		let response = self.get(&url, Accept::Protobuf)?;
+		let response = self.get(&url, Accept::Protobuf, &signer.headers(ReadRoute::Receipt, era))?;
 		let body = response.body().collect::<Vec<u8>>();
 
 		decode_signed_proto_with_payload::<proto::inspection::InspectionReceipt>(&url, &body)
@@ -685,10 +647,11 @@ impl<'a> DdcClient<'a> {
 	pub fn get_quorum_info(
 		&self,
 		era: EhdEra,
+		signer: &ReadSigner,
 	) -> Result<proto::inspection::InspSyncQuorumInfo, http::Error> {
 		let url = format!("{}/itm/v1/quorum/{}", self.base_url, era);
 
-		let response = self.get(&url, Accept::Protobuf)?;
+		let response = self.get(&url, Accept::Protobuf, &signer.headers(ReadRoute::Quorum, era))?;
 		let body = response.body().collect::<Vec<u8>>();
 
 		decode_signed_proto::<proto::inspection::InspSyncQuorumInfo>(&url, &body)
@@ -696,11 +659,14 @@ impl<'a> DdcClient<'a> {
 
 	/// Asks once, with no retry, who the sync members are. Retrying is the
 	/// caller's next tick, not this request's.
-	pub fn probe_shared_memory(&self, era: EhdEra) -> SharedMemoryProbe {
+	pub fn probe_shared_memory(&self, era: EhdEra, signer: &ReadSigner) -> SharedMemoryProbe {
 		let url = format!("{}/itm/v1/quorum/{}", self.base_url, era);
 		let deadline = timestamp().add(self.timeout);
-		let request =
-			http::Request::get(&url).deadline(deadline).add_header("Accept", "application/protobuf");
+		let headers = signer.headers(ReadRoute::Quorum, era);
+		let request = with_headers(
+			http::Request::get(&url).deadline(deadline).add_header("Accept", "application/protobuf"),
+			&headers,
+		);
 		let mut response = match request.send().map(|pending| pending.try_wait(deadline)) {
 			Ok(Ok(Ok(response))) => response,
 			_ => {
@@ -731,7 +697,12 @@ impl<'a> DdcClient<'a> {
 		Ok(ApiResponse { response, signed_by })
 	}
 
-	fn get(&self, url: &str, accept: Accept) -> Result<http::Response, http::Error> {
+	fn get(
+		&self,
+		url: &str,
+		accept: Accept,
+		headers: &[(&'static str, String)],
+	) -> Result<http::Response, http::Error> {
 		let mut maybe_response = None;
 
 		let deadline = timestamp().add(self.timeout);
@@ -744,6 +715,7 @@ impl<'a> DdcClient<'a> {
 				Accept::Any => request,
 				Accept::Protobuf => request.add_header("Accept", "application/protobuf"),
 			};
+			request = with_headers(request, headers);
 
 			let pending = match request.send() {
 				Ok(p) => p,
@@ -961,7 +933,6 @@ enum Accept {
 }
 
 const ERAS_PATH: &str = "/activity/v1/eras";
-const DRY_RUN_ERAS_PATH: &str = "/itm/v1/dry-run/eras";
 /// `order` value of an era listing that puts the newest era first.
 const ERA_ORDER_NEWEST_FIRST: &str = "desc";
 

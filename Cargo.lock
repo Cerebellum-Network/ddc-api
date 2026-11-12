@@ -4032,7 +4032,7 @@ dependencies = [
 [[package]]
 name = "ddc-primitives"
 version = "7.3.4"
-source = "git+https://github.com/Cerebellum-Network/ddc-primitives.git?branch=dev#8ea223dbd7e9fc608c9498bc57cf9f9f623bec75"
+source = "git+https://github.com/Cerebellum-Network/ddc-primitives.git?branch=dev#a3680cac38252590e1fe0e70c3ebafb390d9c635"
 dependencies = [
  "blake2 0.10.6",
  "hex",
