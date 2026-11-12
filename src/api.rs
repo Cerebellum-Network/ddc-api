@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
 	client::{DdcClient, ReadBackError},
 	proto::{self},
+	read_auth::ReadSigner,
 	shared_memory::SharedMemoryNode,
 };
 
@@ -1421,11 +1422,12 @@ fn with_shared_memory<
 	R,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 	operation: &str,
 	mut call: impl FnMut(&DdcClient) -> Result<R, http::Error>,
 ) -> Result<R, ApiError> {
 	let nodes = crate::shared_memory::discovered_shared_memory_nodes::<AccountId, BlockNumber, CM, NM>(
-		cluster_id,
+		cluster_id, signer,
 	)?;
 	if let Ok(result) = try_shared_memory_replicas(cluster_id, operation, &nodes, &mut call) {
 		return Ok(result);
@@ -1433,7 +1435,7 @@ fn with_shared_memory<
 
 	log!(warn, "No cached shared-memory replica of cluster {:?} answered; discovering again", cluster_id);
 	let nodes =
-		crate::shared_memory::rediscover_shared_memory_nodes::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+		crate::shared_memory::rediscover_shared_memory_nodes::<AccountId, BlockNumber, CM, NM>(cluster_id, signer)?;
 	try_shared_memory_replicas(cluster_id, operation, &nodes, &mut call)
 }
 
@@ -1493,9 +1495,10 @@ pub fn post_itm_lease<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 	request: &proto::inspection::LeaseRequest,
 ) -> Result<proto::inspection::LeaseResult, ApiError> {
-	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(cluster_id, "post ITM lease", |client| {
+	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(cluster_id, signer, "post ITM lease", |client| {
 		client.post_itm_lease(request)
 	})
 }
@@ -1507,10 +1510,12 @@ pub fn submit_assignments_table<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 	request: &proto::inspection::PostAssignmentTableRequest,
 ) -> Result<proto::inspection::PostAssignmentTableResponse, ApiError> {
 	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(
 		cluster_id,
+		signer,
 		"submit assignments table",
 		|client| client.submit_assignments_table(request),
 	)
@@ -1523,12 +1528,14 @@ pub fn get_assignments_table<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 	era: EhdEra,
 ) -> Result<proto::inspection::GetAssignmentTableResponse, ApiError> {
 	let response = with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(
 		cluster_id,
+		signer,
 		"get assignments table",
-		|client| client.get_assignments_table(era),
+		|client| client.get_assignments_table(era, signer),
 	)?;
 	if response.status == proto::inspection::GetAssignmentTableStatus::Found as i32 {
 		let table = response.table.as_ref();
@@ -1549,9 +1556,10 @@ pub fn post_era_nudge<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 	request: &proto::inspection::PostEraNudgeRequest,
 ) -> Result<proto::inspection::PostEraNudgeResponse, ApiError> {
-	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(cluster_id, "post era nudge", |client| {
+	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(cluster_id, signer, "post era nudge", |client| {
 		client.post_era_nudge(request)
 	})
 }
@@ -1563,10 +1571,12 @@ pub fn post_seed_contribution<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 	request: &proto::inspection::PostSeedContributionRequest,
 ) -> Result<proto::inspection::PostSeedContributionResponse, ApiError> {
 	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(
 		cluster_id,
+		signer,
 		"post seed contribution",
 		|client| client.post_seed_contribution(request),
 	)
@@ -1579,10 +1589,12 @@ pub fn submit_inspection_result<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 	request: &proto::inspection::PostInspectionResultRequest,
 ) -> Result<proto::inspection::PostInspectionResultResponse, ApiError> {
 	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(
 		cluster_id,
+		signer,
 		"submit inspection result",
 		|client| client.submit_inspection_result(request),
 	)
@@ -1605,10 +1617,11 @@ pub fn submit_inspection_result_read_back<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 	request: &proto::inspection::PostInspectionResultRequest,
 ) -> Result<proto::inspection::PostInspectionResultResponse, ApiError> {
 	let nodes = crate::shared_memory::discovered_shared_memory_nodes::<AccountId, BlockNumber, CM, NM>(
-		cluster_id,
+		cluster_id, signer,
 	)?;
 	let mut submit = |client: &DdcClient| client.submit_inspection_result(request);
 
@@ -1622,7 +1635,7 @@ pub fn submit_inspection_result_read_back<
 		}
 	}
 	let Some((submitter_index, response)) = submitted else {
-		return submit_inspection_result::<AccountId, BlockNumber, CM, NM>(cluster_id, request);
+		return submit_inspection_result::<AccountId, BlockNumber, CM, NM>(cluster_id, signer, request);
 	};
 	let submitter = &nodes[submitter_index];
 
@@ -1640,7 +1653,7 @@ pub fn submit_inspection_result_read_back<
 		let client =
 			DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
 
-		match client.read_back_inspection_state(request.era_id) {
+		match client.read_back_inspection_state(request.era_id, signer) {
 			Ok(state) => {
 				let missing =
 					crate::shared_memory::uncommitted_paths(&state, &request.inspector_key, &expected);
@@ -1704,12 +1717,14 @@ pub fn get_inspection_state<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 	era: EhdEra,
 ) -> Result<proto::inspection::InspectionState, ApiError> {
 	let state = with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(
 		cluster_id,
+		signer,
 		"get inspection state",
-		|client| client.get_inspection_state(era),
+		|client| client.get_inspection_state(era, signer),
 	)?;
 	require_era_and_cluster(cluster_id, era, &state.cluster_id, state.era_id)?;
 	Ok(state)
@@ -1722,10 +1737,11 @@ pub fn get_inspection_receipt<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 	era: EhdEra,
 ) -> Result<(proto::inspection::InspectionReceipt, Vec<u8>), ApiError> {
-	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(cluster_id, "get inspection receipt", |client| {
-		client.get_inspection_receipt(era)
+	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(cluster_id, signer, "get inspection receipt", |client| {
+		client.get_inspection_receipt(era, signer)
 	})
 	.map_err(|e| match e {
 		ApiError::HttpClientError { .. } => {
@@ -1746,10 +1762,11 @@ pub fn get_quorum_info<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 	era: EhdEra,
 ) -> Result<proto::inspection::InspSyncQuorumInfo, ApiError> {
-	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(cluster_id, "get quorum info", |client| {
-		client.get_quorum_info(era)
+	with_shared_memory::<AccountId, BlockNumber, CM, NM, _>(cluster_id, signer, "get quorum info", |client| {
+		client.get_quorum_info(era, signer)
 	})
 }
 
@@ -1767,9 +1784,12 @@ mod tests {
 		},
 		Pair,
 	};
+	use polkadot_sdk::sp_core::crypto::KeyTypeId;
 	use polkadot_sdk::sp_io::TestExternalities;
+	use polkadot_sdk::sp_keystore::{testing::MemoryKeystore, KeystoreExt};
 	use polkadot_sdk::sp_runtime::DispatchError;
 	use prost::Message;
+	use std::sync::Arc;
 
 	use super::*;
 	use crate::proto::{
@@ -1794,6 +1814,7 @@ mod tests {
 	const TEST_HTTP_PORT: u16 = 8080;
 	const TEST_ERA: EhdEra = 7;
 	const INSPECTOR: &[u8] = b"inspector-key";
+	const READ_KEY_TYPE: KeyTypeId = KeyTypeId(*b"insp");
 	const PATH_HASH: [u8; 2] = [0x01, 0x02];
 	const SIGNER_SEED: [u8; 32] = [0x07; 32];
 	/// Field 99, varint 1: a field this build's InspectionReceipt does not know.
@@ -1967,6 +1988,12 @@ mod tests {
 		requests.push(get(HOST_A, "/itm/v1/quorum/0", signed(&members)));
 	}
 
+	// The keystore holds no key for it, so its reads go unsigned, as a node in
+	// counting mode serves them.
+	fn signer() -> ReadSigner {
+		ReadSigner { cluster_id: ClusterId::zero(), key_type: READ_KEY_TYPE, key: [0x77; 32], block: 0 }
+	}
+
 	fn run_with(requests: Vec<PendingRequest>, test: impl FnOnce()) {
 		let (offchain, state) = TestOffchainExt::new();
 		for request in requests {
@@ -1975,6 +2002,7 @@ mod tests {
 		let mut ext = TestExternalities::default();
 		ext.register_extension(OffchainDbExt::new(offchain.clone()));
 		ext.register_extension(OffchainWorkerExt::new(offchain));
+		ext.register_extension(KeystoreExt(Arc::new(MemoryKeystore::new())));
 		ext.execute_with(test);
 	}
 
@@ -1996,6 +2024,7 @@ mod tests {
 			let (decoded, bytes) =
 				get_inspection_receipt::<AccountId, BlockNumber, MockCluster, MockNodes>(
 					&ClusterId::zero(),
+					&signer(),
 					TEST_ERA,
 				)
 				.unwrap();
@@ -2015,6 +2044,7 @@ mod tests {
 			result = Some(
 				get_inspection_receipt::<AccountId, BlockNumber, MockCluster, MockNodes>(
 					&ClusterId::zero(),
+					&signer(),
 					TEST_ERA,
 				)
 				.map(|_| ()),
@@ -2045,6 +2075,7 @@ mod tests {
 			assert_eq!(
 				get_inspection_state::<AccountId, BlockNumber, MockCluster, MockNodes>(
 					&ClusterId::zero(),
+					&signer(),
 					TEST_ERA,
 				),
 				Err(ApiError::AnotherEraOrCluster {
@@ -2079,6 +2110,7 @@ mod tests {
 			run_with(requests, || {
 				let result = get_assignments_table::<AccountId, BlockNumber, MockCluster, MockNodes>(
 					&ClusterId::zero(),
+					&signer(),
 					TEST_ERA,
 				);
 				assert_eq!(result.is_err(), refused, "{:?}", result);
@@ -2176,7 +2208,7 @@ mod tests {
 				BlockNumber,
 				MockCluster,
 				MockNodes,
-			>(&ClusterId::zero(), &request())
+			>(&ClusterId::zero(), &signer(), &request())
 			.unwrap();
 			assert_eq!(response.accepted_count, 1);
 		});
@@ -2194,6 +2226,7 @@ mod tests {
 		run_with(requests, || {
 			submit_inspection_result_read_back::<AccountId, BlockNumber, MockCluster, MockNodes>(
 				&ClusterId::zero(),
+				&signer(),
 				&request(),
 			)
 			.unwrap();
@@ -2203,7 +2236,7 @@ mod tests {
 				BlockNumber,
 				MockCluster,
 				MockNodes,
-			>(&ClusterId::zero())
+			>(&ClusterId::zero(), &signer())
 			.unwrap();
 			assert_eq!(
 				cached.iter().map(|n| n.key.clone()).collect::<Vec<_>>(),

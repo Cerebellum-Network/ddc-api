@@ -26,6 +26,7 @@ use crate::{
 	api::ApiError,
 	client::{DdcClient, SharedMemoryAnswerKind, SharedMemoryProbe},
 	log, proto,
+	read_auth::ReadSigner,
 };
 
 /// A usable answer names at least this many registry-confirmed members.
@@ -60,6 +61,7 @@ pub fn discovered_shared_memory_nodes<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 ) -> Result<Vec<SharedMemoryNode>, ApiError> {
 	let refresh_key = refresh_key(cluster_id);
 	let mut lock = StorageLock::<Time>::with_deadline(
@@ -68,7 +70,7 @@ pub fn discovered_shared_memory_nodes<
 	);
 	let nodes = match lock.try_lock() {
 		Ok(guard) => {
-			let nodes = discover_and_cache::<AccountId, BlockNumber, CM, NM>(cluster_id);
+			let nodes = discover_and_cache::<AccountId, BlockNumber, CM, NM>(cluster_id, signer);
 			// Only a successful answer leaves the mark; a failure asks again next tick.
 			if nodes.is_ok() {
 				guard.forget();
@@ -77,7 +79,7 @@ pub fn discovered_shared_memory_nodes<
 		}
 		Err(_) => match cached_shared_memory_nodes(cluster_id) {
 			Some(nodes) => Ok(nodes),
-			None => discover_and_cache::<AccountId, BlockNumber, CM, NM>(cluster_id),
+			None => discover_and_cache::<AccountId, BlockNumber, CM, NM>(cluster_id, signer),
 		},
 	};
 	nodes
@@ -92,8 +94,9 @@ pub fn rediscover_shared_memory_nodes<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 ) -> Result<Vec<SharedMemoryNode>, ApiError> {
-	discover_and_cache::<AccountId, BlockNumber, CM, NM>(cluster_id)
+	discover_and_cache::<AccountId, BlockNumber, CM, NM>(cluster_id, signer)
 }
 
 fn discover_and_cache<
@@ -103,9 +106,10 @@ fn discover_and_cache<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	signer: &ReadSigner,
 ) -> Result<Vec<SharedMemoryNode>, ApiError> {
 	let registry = validated_storage_nodes::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
-	let nodes = discover(cluster_id, &registry, probe_node)?;
+	let nodes = discover(cluster_id, &registry, |params| probe_node(params, signer))?;
 	StorageValueRef::persistent(&cache_key(cluster_id)).set(&nodes);
 	Ok(nodes)
 }
@@ -225,14 +229,14 @@ pub fn validated_storage_nodes<
 	Ok(nodes)
 }
 
-fn probe_node(params: &StorageNodeParams) -> SharedMemoryProbe {
+fn probe_node(params: &StorageNodeParams, signer: &ReadSigner) -> SharedMemoryProbe {
 	let Ok(host) = core::str::from_utf8(&params.host) else {
 		return SharedMemoryProbe::Refused(SharedMemoryAnswerKind::Transport);
 	};
 	// Plaintext over the registry host and published port, as every reader builds it.
 	let base_url = format!("http://{}:{}", host, params.http_port);
 	DdcClient::new(&base_url, Duration::from_millis(DISCOVERY_TIMEOUT_MS), DISCOVERY_RETRIES)
-		.probe_shared_memory(MEMBERSHIP_ERA)
+		.probe_shared_memory(MEMBERSHIP_ERA, signer)
 }
 
 /// Drops one node from the cached shared-memory list, so later calls stop going to it.

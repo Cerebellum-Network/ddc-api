@@ -29,6 +29,9 @@ ddc-primitives = { git = "https://github.com/Cerebellum-Network/ddc-primitives.g
 [build-dependencies]
 prost-build = "0.13.2"
 
+[dev-dependencies]
+polkadot-sdk = { version = "=2512.3.2", features = ["sp-keystore"] }
+
 [features]
 default = ["std"]
 std = [
