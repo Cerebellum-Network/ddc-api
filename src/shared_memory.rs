@@ -109,14 +109,15 @@ fn discover_and_cache<
 	signer: &ReadSigner,
 ) -> Result<Vec<SharedMemoryNode>, ApiError> {
 	let registry = validated_storage_nodes::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
-	let nodes = discover(cluster_id, &registry, |params| probe_node(params, signer))?;
+	let nodes = discover(cluster_id, &registry, |key, params| probe_node(key, params, signer))?;
 	StorageValueRef::persistent(&cache_key(cluster_id)).set(&nodes);
 	Ok(nodes)
 }
 
 /// Asks the first candidates in key order and returns the first usable
-/// answer. `probe` asks one node.
-pub fn discover<P: FnMut(&StorageNodeParams) -> SharedMemoryProbe>(
+/// answer: one that names at least `MEMBER_FLOOR` validated members and is
+/// signed by one of them. `probe` asks one node.
+pub fn discover<P: FnMut(&NodePubKey, &StorageNodeParams) -> SharedMemoryProbe>(
 	cluster_id: &ClusterId,
 	registry: &[(NodePubKey, StorageNodeParams)],
 	mut probe: P,
@@ -127,11 +128,21 @@ pub fn discover<P: FnMut(&StorageNodeParams) -> SharedMemoryProbe>(
 		.filter(|(_, params)| params.mode != StorageNodeMode::Compute)
 		.take(MAX_DISCOVERY_ATTEMPTS);
 	for (key, params) in candidates {
-		match probe(params) {
-			SharedMemoryProbe::Answer { info, declared_deadline_ms } => {
+		match probe(key, params) {
+			SharedMemoryProbe::Answer { info, declared_deadline_ms, signer } => {
 				check_deadline_coupling(key, declared_deadline_ms);
 				let members = accept_members(&info, registry);
-				if members.len() >= MEMBER_FLOOR {
+				let signed_by_member =
+					members.iter().any(|m| node_key_bytes(&m.key) == signer.as_slice());
+				if !signed_by_member {
+					log!(
+						error,
+						"❌ Shared-memory answer from node {:?} is signed by 0x{}, which is not among its validated members",
+						key,
+						hex::encode(&signer)
+					);
+				}
+				if members.len() >= MEMBER_FLOOR && signed_by_member {
 					log!(
 						debug,
 						"Shared memory of cluster {:?} discovered from node {:?}",
@@ -180,7 +191,7 @@ pub fn accept_members(
 /// A member's name is the text form of its chain key ("0x" + hex) carried in a
 /// bytes field. Decoding those bytes as a raw key fails on every real member,
 /// so the text is decoded first.
-fn decode_member_key(name: &[u8]) -> Option<NodePubKey> {
+pub(crate) fn decode_member_key(name: &[u8]) -> Option<NodePubKey> {
 	let text = core::str::from_utf8(name).ok()?;
 	NodePubKey::try_from(String::from(text)).ok()
 }
@@ -229,14 +240,29 @@ pub fn validated_storage_nodes<
 	Ok(nodes)
 }
 
-fn probe_node(params: &StorageNodeParams, signer: &ReadSigner) -> SharedMemoryProbe {
+/// The raw bytes of a node key, as a response envelope names its signer.
+pub(crate) fn node_key_bytes(key: &NodePubKey) -> &[u8] {
+	let NodePubKey::StoragePubKey(key) = key;
+	key.as_ref()
+}
+
+fn probe_node(
+	key: &NodePubKey,
+	params: &StorageNodeParams,
+	signer: &ReadSigner,
+) -> SharedMemoryProbe {
 	let Ok(host) = core::str::from_utf8(&params.host) else {
 		return SharedMemoryProbe::Refused(SharedMemoryAnswerKind::Transport);
 	};
 	// Plaintext over the registry host and published port, as every reader builds it.
 	let base_url = format!("http://{}:{}", host, params.http_port);
-	DdcClient::new(&base_url, Duration::from_millis(DISCOVERY_TIMEOUT_MS), DISCOVERY_RETRIES)
-		.probe_shared_memory(MEMBERSHIP_ERA, signer)
+	DdcClient::new(
+		key.clone(),
+		&base_url,
+		Duration::from_millis(DISCOVERY_TIMEOUT_MS),
+		DISCOVERY_RETRIES,
+	)
+	.probe_shared_memory(MEMBERSHIP_ERA, signer)
 }
 
 /// Drops one node from the cached shared-memory list, so later calls stop going to it.
@@ -373,11 +399,12 @@ mod tests {
 	#[test]
 	fn discovery_skips_compute_nodes_and_stops_at_the_first_usable_answer() {
 		let mut asked = Vec::new();
-		let nodes = discover(&ClusterId::zero(), &registry(), |p| {
+		let nodes = discover(&ClusterId::zero(), &registry(), |_, p| {
 			asked.push(p.host.clone());
 			SharedMemoryProbe::Answer {
 				info: info(vec![member(KEY_B, "x"), member(KEY_C, "x")]),
 				declared_deadline_ms: None,
+				signer: KEY_B.to_vec(),
 			}
 		})
 		.unwrap();
@@ -387,13 +414,67 @@ mod tests {
 
 	#[test]
 	fn an_answer_below_the_member_floor_is_not_usable() {
-		let result = discover(&ClusterId::zero(), &registry(), |_| SharedMemoryProbe::Answer {
+		let result = discover(&ClusterId::zero(), &registry(), |_, _| SharedMemoryProbe::Answer {
 			info: info(vec![member(KEY_B, "x"), member(KEY_D, "x")]),
 			declared_deadline_ms: None,
+			signer: KEY_B.to_vec(),
 		});
 		assert_eq!(
 			result,
 			Err(ApiError::FailedToFetchSharedMemoryNodes { cluster_id: ClusterId::zero() })
+		);
+	}
+
+	#[test]
+	fn a_forwarded_answer_signed_by_a_member_it_names_is_usable() {
+		let nodes = discover(&ClusterId::zero(), &registry(), |_, _| SharedMemoryProbe::Answer {
+			info: info(vec![member(KEY_B, "x"), member(KEY_C, "x")]),
+			declared_deadline_ms: None,
+			signer: KEY_C.to_vec(),
+		})
+		.unwrap();
+		assert_eq!(nodes.len(), 2);
+	}
+
+	#[test]
+	fn an_answer_signed_by_a_node_it_does_not_name_is_rejected_and_discovery_moves_on() {
+		let mut asked = 0;
+		let result = discover(&ClusterId::zero(), &registry(), |_, _| {
+			asked += 1;
+			SharedMemoryProbe::Answer {
+				info: info(vec![member(KEY_B, "x"), member(KEY_C, "x")]),
+				declared_deadline_ms: None,
+				signer: KEY_A.to_vec(),
+			}
+		});
+		assert_eq!(
+			result,
+			Err(ApiError::FailedToFetchSharedMemoryNodes { cluster_id: ClusterId::zero() })
+		);
+		assert_eq!(asked, 2, "both storage candidates are asked");
+	}
+
+	#[test]
+	fn an_answer_signed_by_a_named_member_outside_the_registry_is_rejected() {
+		let result = discover(&ClusterId::zero(), &registry(), |_, _| SharedMemoryProbe::Answer {
+			info: info(vec![member(KEY_B, "x"), member(KEY_C, "x"), member(KEY_D, "x")]),
+			declared_deadline_ms: None,
+			signer: KEY_D.to_vec(),
+		});
+		assert_eq!(
+			result,
+			Err(ApiError::FailedToFetchSharedMemoryNodes { cluster_id: ClusterId::zero() })
+		);
+	}
+
+	#[test]
+	fn a_refusal_naming_unreachable_members_is_classified_as_such() {
+		assert_eq!(
+			classify_shared_memory_refusal(
+				503,
+				br#"{"message":"m","reason":"members-unreachable"}"#
+			),
+			SharedMemoryAnswerKind::MembersUnreachable
 		);
 	}
 
@@ -403,7 +484,7 @@ mod tests {
 			.map(|i| (key([i; 32]), params("storage", StorageNodeMode::Storage)))
 			.collect();
 		let mut asked = 0;
-		let result = discover(&ClusterId::zero(), &wide, |_| {
+		let result = discover(&ClusterId::zero(), &wide, |_, _| {
 			asked += 1;
 			SharedMemoryProbe::Refused(SharedMemoryAnswerKind::Transport)
 		});

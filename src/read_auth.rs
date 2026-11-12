@@ -117,6 +117,12 @@ mod tests {
 	const TEST_BLOCK: u32 = 42;
 	const BASE_URL: &str = "http://192.0.2.1:8080";
 
+	fn test_node_key() -> ddc_primitives::NodePubKey {
+		ddc_primitives::NodePubKey::StoragePubKey(ddc_primitives::StorageNodePubKey::new(
+			[0xbb; 32],
+		))
+	}
+
 	fn keystore_with_key() -> (MemoryKeystore, [u8; 32]) {
 		let keystore = MemoryKeystore::new();
 		let public = keystore.sr25519_generate_new(READ_KEY_TYPE, None).unwrap();
@@ -198,7 +204,7 @@ mod tests {
 		ext.register_extension(OffchainWorkerExt::new(offchain));
 		ext.execute_with(|| {
 			let signer = signer(key);
-			let client = DdcClient::new(BASE_URL, Duration::from_millis(1_000), 1);
+			let client = DdcClient::new(test_node_key(), BASE_URL, Duration::from_millis(1_000), 1);
 			let reads: [(&str, ReadRoute, Box<dyn Fn()>); 6] = [
 				("/itm/v1/table/7", ReadRoute::Table, Box::new(|| drop(client.get_assignments_table(TEST_ERA, &signer)))),
 				("/itm/v1/state/7", ReadRoute::State, Box::new(|| drop(client.get_inspection_state(TEST_ERA, &signer)))),
