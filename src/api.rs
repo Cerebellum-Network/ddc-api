@@ -259,8 +259,12 @@ pub fn get_grouping_collectors_keys(
 		}
 	})?;
 	let base_url: String = format!("http://{}:{}", host, node_params.http_port);
-	let client =
-		DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+	let client = DdcClient::new(
+		node_key.clone(),
+		&base_url,
+		Duration::from_millis(RESPONSE_TIMEOUT),
+		MAX_RETRIES_COUNT,
+	);
 
 	let api_response = client.get_grouping_collectors().map_err(|e| {
 		log!(
@@ -382,14 +386,18 @@ pub fn fetch_bucket_aggregates<
 		);
 		ApiError::NodeHostParseError {
 			cluster_id: *cluster_id,
-			node_key: collector_key,
+			node_key: collector_key.clone(),
 			host: collector_params.host.clone(),
 		}
 	})?;
 
 	let base_url = format!("http://{}:{}", host, collector_params.http_port);
-	let client =
-		DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+	let client = DdcClient::new(
+		collector_key.clone(),
+		&base_url,
+		Duration::from_millis(RESPONSE_TIMEOUT),
+		MAX_RETRIES_COUNT,
+	);
 
 	let mut buckets_aggregates: Vec<proto::activity_tree::BucketAggregate> = Vec::new();
 	let mut prev_token = None;
@@ -455,14 +463,18 @@ pub fn fetch_bucket_aggregate<
 		);
 		ApiError::NodeHostParseError {
 			cluster_id: *cluster_id,
-			node_key: collector_key,
+			node_key: collector_key.clone(),
 			host: collector_params.host.clone(),
 		}
 	})?;
 
 	let base_url = format!("http://{}:{}", host, collector_params.http_port);
-	let client =
-		DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+	let client = DdcClient::new(
+		collector_key.clone(),
+		&base_url,
+		Duration::from_millis(RESPONSE_TIMEOUT),
+		MAX_RETRIES_COUNT,
+	);
 
 	let api_response = client.bucket_aggregate(tca_id, bucket_id).map_err(|e| {
 		log!(
@@ -510,14 +522,18 @@ pub fn fetch_node_aggregate<
 		);
 		ApiError::NodeHostParseError {
 			cluster_id: *cluster_id,
-			node_key: collector_key,
+			node_key: collector_key.clone(),
 			host: collector_params.host.clone(),
 		}
 	})?;
 
 	let base_url = format!("http://{}:{}", host, collector_params.http_port);
-	let client =
-		DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+	let client = DdcClient::new(
+		collector_key.clone(),
+		&base_url,
+		Duration::from_millis(RESPONSE_TIMEOUT),
+		MAX_RETRIES_COUNT,
+	);
 
 	let api_response = client.node_aggregate(tca_id, node_key.clone()).map_err(|e| {
 		log!(
@@ -580,8 +596,12 @@ pub fn fetch_traversed_partial_historical_document<
 	})?;
 
 	let base_url = format!("http://{}:{}", host, collector_params.http_port);
-	let client =
-		DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+	let client = DdcClient::new(
+		collector_key.clone(),
+		&base_url,
+		Duration::from_millis(RESPONSE_TIMEOUT),
+		MAX_RETRIES_COUNT,
+	);
 
 	let traversed_phd = client.traverse_partial_historical_document(
         era,
@@ -637,8 +657,12 @@ pub fn fetch_traversed_node_aggregate<
 	})?;
 
 	let base_url = format!("http://{}:{}", host, collector_params.http_port);
-	let client =
-		DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+	let client = DdcClient::new(
+		collector_key.clone(),
+		&base_url,
+		Duration::from_millis(RESPONSE_TIMEOUT),
+		MAX_RETRIES_COUNT,
+	);
 
 	let traversed_node_aggregate = client.traverse_node_aggregate(
         tca_id,
@@ -709,8 +733,12 @@ pub fn fetch_records_range<
 	})?;
 
 	let base_url = format!("http://{}:{}", host, node_params.http_port);
-	let client =
-		DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+	let client = DdcClient::new(
+		node_key.clone(),
+		&base_url,
+		Duration::from_millis(RESPONSE_TIMEOUT),
+		MAX_RETRIES_COUNT,
+	);
 
 	client
         .fetch_records_range(tca_id, node_key.as_ref(), bucket_id, record_id_gte, record_id_lte, cursor, limit, indexes)
@@ -762,8 +790,12 @@ pub fn fetch_traversed_bucket_sub_aggregate<
 	})?;
 
 	let base_url = format!("http://{}:{}", host, collector_params.http_port);
-	let client =
-		DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+	let client = DdcClient::new(
+		collector_key.clone(),
+		&base_url,
+		Duration::from_millis(RESPONSE_TIMEOUT),
+		MAX_RETRIES_COUNT,
+	);
 
 	let traversed_bucket_sub_aggregate = client.traverse_bucket_sub_aggregate(
         tca_id,
@@ -836,8 +868,12 @@ pub fn fetch_traversed_era_historical_document<
 	})?;
 
 	let base_url = format!("http://{}:{}", host, g_collector_params.http_port);
-	let client =
-		DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+	let client = DdcClient::new(
+		g_collector_key.clone(),
+		&base_url,
+		Duration::from_millis(RESPONSE_TIMEOUT),
+		MAX_RETRIES_COUNT,
+	);
 
 	let traversed_ehd = client.traverse_era_historical_document(
         era,
@@ -925,8 +961,12 @@ pub fn get_sealed_ehd<
 	})?;
 
 	let base_url = format!("http://{}:{}", host, g_collector_params.http_port);
-	let client =
-		DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+	let client = DdcClient::new(
+		g_collector_key.clone(),
+		&base_url,
+		Duration::from_millis(RESPONSE_TIMEOUT),
+		MAX_RETRIES_COUNT,
+	);
 
 	let sealed_ehd = client.get_sealed_ehd(era).map_err(|e| {
 		log!(
@@ -977,8 +1017,12 @@ pub fn get_sealed_phd<
 	})?;
 
 	let base_url = format!("http://{}:{}", host, collector_params.http_port);
-	let client =
-		DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+	let client = DdcClient::new(
+		collector_key.clone(),
+		&base_url,
+		Duration::from_millis(RESPONSE_TIMEOUT),
+		MAX_RETRIES_COUNT,
+	);
 
 	client.get_sealed_phd(era).map_err(|e| {
 		log!(
@@ -1124,17 +1168,17 @@ pub fn fetch_processed_eras_for_cluster<
 	cursor: Option<&[u8]>,
 	limit: Option<u32>,
 ) -> Result<proto::activity::GetErasResponse, ApiError> {
-	let (_, g_collector_params) =
-		get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|e| {
-			log!(
-				error,
-				"❌ Failed to fetch G-Collector node for cluster {:?}: {:?}",
-				cluster_id,
-				e
-			);
-			ApiError::FailedToFetchGCollectors { cluster_id: *cluster_id }
-		})?;
-	fetch_processed_eras(&g_collector_params, cursor, limit).map_err(|e| {
+	let (g_collector_key, g_collector_params) = get_g_collector_node::<
+		AccountId,
+		BlockNumber,
+		CM,
+		NM,
+	>(cluster_id)
+	.map_err(|e| {
+		log!(error, "❌ Failed to fetch G-Collector node for cluster {:?}: {:?}", cluster_id, e);
+		ApiError::FailedToFetchGCollectors { cluster_id: *cluster_id }
+	})?;
+	fetch_processed_eras(&g_collector_key, &g_collector_params, cursor, limit).map_err(|e| {
 		log!(error, "❌ Failed to fetch processed eras for cluster {:?}: {:?}", cluster_id, e);
 		ApiError::FailedToFetchProcessedEras { cluster_id: *cluster_id }
 	})
@@ -1142,6 +1186,7 @@ pub fn fetch_processed_eras_for_cluster<
 
 /// Fetch processed payment eras from global collector via /activity/processed-eras.
 pub fn fetch_processed_eras(
+	node_key: &NodePubKey,
 	node_params: &StorageNodeParams,
 	cursor: Option<&[u8]>,
 	limit: Option<u32>,
@@ -1151,8 +1196,12 @@ pub fn fetch_processed_eras(
 		http::Error::Unknown
 	})?;
 	let base_url = format!("http://{}:{}", host, node_params.http_port);
-	let client =
-		DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+	let client = DdcClient::new(
+		node_key.clone(),
+		&base_url,
+		Duration::from_millis(RESPONSE_TIMEOUT),
+		MAX_RETRIES_COUNT,
+	);
 	Ok(client.processed_eras(cursor, limit)?.response)
 }
 
@@ -1168,17 +1217,17 @@ pub fn fetch_inspected_eras_for_cluster<
 	cursor: Option<&[u8]>,
 	limit: Option<u32>,
 ) -> Result<proto::activity::GetErasResponse, ApiError> {
-	let (_, g_collector_params) =
-		get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|e| {
-			log!(
-				error,
-				"❌ Failed to fetch G-Collector node for cluster {:?}: {:?}",
-				cluster_id,
-				e
-			);
-			ApiError::FailedToFetchGCollectors { cluster_id: *cluster_id }
-		})?;
-	fetch_inspected_eras(&g_collector_params, cursor, limit).map_err(|e| {
+	let (g_collector_key, g_collector_params) = get_g_collector_node::<
+		AccountId,
+		BlockNumber,
+		CM,
+		NM,
+	>(cluster_id)
+	.map_err(|e| {
+		log!(error, "❌ Failed to fetch G-Collector node for cluster {:?}: {:?}", cluster_id, e);
+		ApiError::FailedToFetchGCollectors { cluster_id: *cluster_id }
+	})?;
+	fetch_inspected_eras(&g_collector_key, &g_collector_params, cursor, limit).map_err(|e| {
 		log!(error, "❌ Failed to fetch inspected eras for cluster {:?}: {:?}", cluster_id, e);
 		ApiError::FailedToFetchInspectedEras { cluster_id: *cluster_id }
 	})
@@ -1296,7 +1345,7 @@ pub fn fetch_era_to_inspect_for_cluster<
 >(
 	cluster_id: &ClusterId,
 ) -> Result<Option<EhdEra>, ApiError> {
-	let (_, params) =
+	let (g_collector_key, params) =
 		get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|e| {
 			log!(error, "❌ Failed to fetch G-Collector node for cluster {:?}: {:?}", cluster_id, e);
 			ApiError::FailedToFetchGCollectors { cluster_id: *cluster_id }
@@ -1306,8 +1355,12 @@ pub fn fetch_era_to_inspect_for_cluster<
 		ApiError::FailedToFetchProcessedEras { cluster_id: *cluster_id }
 	})?;
 	let base_url = format!("http://{}:{}", host, params.http_port);
-	let client =
-		DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+	let client = DdcClient::new(
+		g_collector_key.clone(),
+		&base_url,
+		Duration::from_millis(RESPONSE_TIMEOUT),
+		MAX_RETRIES_COUNT,
+	);
 	next_era_to_inspect(&client).map_err(|e| {
 		log!(error, "❌ Failed to read the era to inspect for cluster {:?}: {:?}", cluster_id, e);
 		ApiError::FailedToFetchProcessedEras { cluster_id: *cluster_id }
@@ -1317,6 +1370,7 @@ pub fn fetch_era_to_inspect_for_cluster<
 /// Fetch inspected EHD eras from a node via /activity/inspected-eras.
 #[allow(dead_code)]
 pub fn fetch_inspected_eras(
+	node_key: &NodePubKey,
 	node_params: &StorageNodeParams,
 	cursor: Option<&[u8]>,
 	limit: Option<u32>,
@@ -1326,8 +1380,12 @@ pub fn fetch_inspected_eras(
 		http::Error::Unknown
 	})?;
 	let base_url = format!("http://{}:{}", host, node_params.http_port);
-	let client =
-		DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+	let client = DdcClient::new(
+		node_key.clone(),
+		&base_url,
+		Duration::from_millis(RESPONSE_TIMEOUT),
+		MAX_RETRIES_COUNT,
+	);
 	Ok(client.inspected_eras(cursor, limit)?.response)
 }
 
@@ -1335,6 +1393,7 @@ pub fn fetch_inspected_eras(
 /// returned from the previous page (`None` for the first page). `limit`
 /// caps the number of records; the server also enforces its own max.
 pub fn fetch_tcas_page(
+	node_key: &NodePubKey,
 	node_params: &StorageNodeParams,
 	cursor: Option<&[u8]>,
 	limit: Option<u32>,
@@ -1344,8 +1403,12 @@ pub fn fetch_tcas_page(
 		http::Error::Unknown
 	})?;
 	let base_url = format!("http://{}:{}", host, node_params.http_port);
-	let client =
-		DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+	let client = DdcClient::new(
+		node_key.clone(),
+		&base_url,
+		Duration::from_millis(RESPONSE_TIMEOUT),
+		MAX_RETRIES_COUNT,
+	);
 	let api_response = client.tcas(cursor, limit)?;
 	Ok(api_response.response)
 }
@@ -1355,13 +1418,14 @@ pub fn fetch_tcas_page(
 /// genuinely need a full enumeration; prefer fetch_tcas_page where the
 /// caller can persist a cursor across calls.
 pub fn fetch_tcas_all(
+	node_key: &NodePubKey,
 	node_params: &StorageNodeParams,
 	page_limit: Option<u32>,
 ) -> Result<Vec<proto::era::Tca>, http::Error> {
 	let mut out: Vec<proto::era::Tca> = Vec::new();
 	let mut cursor: Option<Vec<u8>> = None;
 	loop {
-		let page = fetch_tcas_page(node_params, cursor.as_deref(), page_limit)?;
+		let page = fetch_tcas_page(node_key, node_params, cursor.as_deref(), page_limit)?;
 		out.extend(page.records.into_iter());
 		match page.next_cursor {
 			Some(c) if !c.is_empty() => cursor = Some(c),
@@ -1372,6 +1436,7 @@ pub fn fetch_tcas_all(
 
 /// Same as fetch_tcas_page for `/activity/eras`.
 pub fn fetch_eras_page(
+	node_key: &NodePubKey,
 	node_params: &StorageNodeParams,
 	cursor: Option<&[u8]>,
 	limit: Option<u32>,
@@ -1381,21 +1446,26 @@ pub fn fetch_eras_page(
 		http::Error::Unknown
 	})?;
 	let base_url = format!("http://{}:{}", host, node_params.http_port);
-	let client =
-		DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+	let client = DdcClient::new(
+		node_key.clone(),
+		&base_url,
+		Duration::from_millis(RESPONSE_TIMEOUT),
+		MAX_RETRIES_COUNT,
+	);
 	let api_response = client.eras(cursor, limit)?;
 	Ok(api_response.response)
 }
 
 /// Walks `/activity/eras` page by page until `next_cursor` is absent.
 pub fn fetch_eras_all(
+	node_key: &NodePubKey,
 	node_params: &StorageNodeParams,
 	page_limit: Option<u32>,
 ) -> Result<Vec<proto::era::Era>, http::Error> {
 	let mut out: Vec<proto::era::Era> = Vec::new();
 	let mut cursor: Option<Vec<u8>> = None;
 	loop {
-		let page = fetch_eras_page(node_params, cursor.as_deref(), page_limit)?;
+		let page = fetch_eras_page(node_key, node_params, cursor.as_deref(), page_limit)?;
 		out.extend(page.records.into_iter());
 		match page.next_cursor {
 			Some(c) if !c.is_empty() => cursor = Some(c),
@@ -1466,8 +1536,12 @@ fn try_shared_memory_replicas<R>(
 			},
 		};
 		let base_url = format!("http://{}:{}", host, node.params.http_port);
-		let client =
-			DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+		let client = DdcClient::new(
+			node.key.clone(),
+			&base_url,
+			Duration::from_millis(RESPONSE_TIMEOUT),
+			MAX_RETRIES_COUNT,
+		);
 
 		match call(&client) {
 			Ok(result) => return Ok(result),
@@ -1648,10 +1722,16 @@ pub fn submit_inspection_result_read_back<
 		.collect();
 
 	for reader in nodes.iter().filter(|node| node.key != submitter.key) {
-		let Ok(host) = str::from_utf8(&reader.params.host) else { continue };
+		let Ok(host) = str::from_utf8(&reader.params.host) else {
+			continue;
+		};
 		let base_url = format!("http://{}:{}", host, reader.params.http_port);
-		let client =
-			DdcClient::new(&base_url, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT);
+		let client = DdcClient::new(
+			reader.key.clone(),
+			&base_url,
+			Duration::from_millis(RESPONSE_TIMEOUT),
+			MAX_RETRIES_COUNT,
+		);
 
 		match client.read_back_inspection_state(request.era_id, signer) {
 			Ok(state) => {
@@ -1683,6 +1763,16 @@ pub fn submit_inspection_result_read_back<
 				log!(
 					error,
 					"❌ Node {:?} was named as a shared-memory replica of cluster {:?} but does not hold it; the cached list is false and is dropped",
+					reader.key,
+					cluster_id
+				);
+				crate::shared_memory::forget_cached_shared_memory_nodes(cluster_id);
+			},
+			Err(ReadBackError::SignedByAnotherNode) => {
+				log!(
+					error,
+					"❌ The read-back of era {:?} through shared-memory replica {:?} of cluster {:?} is signed by another node (logged with the response); the cached list is false and is dropped",
+					request.era_id,
 					reader.key,
 					cluster_id
 				);
@@ -1807,8 +1897,10 @@ mod tests {
 	type AccountId = u64;
 	type BlockNumber = u64;
 
-	const KEY_A: [u8; 32] = [0x11; 32];
-	const KEY_B: [u8; 32] = [0x22; 32];
+	/// The node at HOST_A signs with this seed's key, and is registered under it.
+	const SEED_A: [u8; 32] = [0x22; 32];
+	/// The node at HOST_B signs with this seed's key, and is registered under it.
+	const SEED_B: [u8; 32] = [0x11; 32];
 	const HOST_A: &str = "node-a";
 	const HOST_B: &str = "node-b";
 	const TEST_HTTP_PORT: u16 = 8080;
@@ -1816,11 +1908,180 @@ mod tests {
 	const INSPECTOR: &[u8] = b"inspector-key";
 	const READ_KEY_TYPE: KeyTypeId = KeyTypeId(*b"insp");
 	const PATH_HASH: [u8; 2] = [0x01, 0x02];
-	const SIGNER_SEED: [u8; 32] = [0x07; 32];
 	/// Field 99, varint 1: a field this build's InspectionReceipt does not know.
 	const UNKNOWN_RECEIPT_FIELD: [u8; 3] = [0x98, 0x06, 0x01];
 	/// Field 99, varint 1: a field this build's Ehd does not know.
 	const UNKNOWN_DOCUMENT_FIELD: [u8; 3] = [0x98, 0x06, 0x01];
+
+	fn key_a() -> [u8; 32] {
+		ed25519::Pair::from_seed(&SEED_A).public().0
+	}
+
+	fn key_b() -> [u8; 32] {
+		ed25519::Pair::from_seed(&SEED_B).public().0
+	}
+
+	fn this_cluster_state() -> InspectionState {
+		InspectionState {
+			cluster_id: ClusterId::zero().as_bytes().to_vec(),
+			era_id: TEST_ERA,
+			..Default::default()
+		}
+	}
+
+	fn node_params(host: &str) -> StorageNodeParams {
+		StorageNodeParams {
+			mode: StorageNodeMode::Storage,
+			host: host.as_bytes().to_vec(),
+			http_port: TEST_HTTP_PORT,
+			..Default::default()
+		}
+	}
+
+	#[test]
+	fn a_shared_memory_answer_signed_by_another_node_is_refused_and_the_next_replica_answers() {
+		let mut requests = Vec::new();
+		expect_discovery(&mut requests);
+		requests.push(get(HOST_A, "/itm/v1/state/7", signed_by(SEED_B, &this_cluster_state())));
+		requests.push(get(HOST_B, "/itm/v1/state/7", signed_by(SEED_B, &this_cluster_state())));
+		run_with(requests, || {
+			let state = get_inspection_state::<AccountId, BlockNumber, MockCluster, MockNodes>(
+				&ClusterId::zero(),
+				&signer(),
+				TEST_ERA,
+			);
+			assert_eq!(state, Ok(this_cluster_state()));
+		});
+	}
+
+	#[test]
+	fn an_activity_answer_signed_by_another_node_is_refused_as_a_failed_fetch() {
+		let grouping =
+			GroupingCollectorsResponse { keys: vec![format!("0x{}", hex::encode(key_b()))] };
+		let requests =
+			vec![get(HOST_A, "/activity/v1/grouping-collectors", signed_by(SEED_B, &grouping))];
+		run_with(requests, || {
+			assert_eq!(
+				get_grouping_collectors_keys(
+					&ClusterId::zero(),
+					&node_key(key_a()),
+					&node_params(HOST_A)
+				),
+				Err(ApiError::HttpClientError {
+					cluster_id: ClusterId::zero(),
+					host: HOST_A.as_bytes().to_vec()
+				})
+			);
+		});
+	}
+
+	#[test]
+	fn a_sealed_phd_whose_envelope_another_node_signed_is_refused() {
+		let requests = vec![get(
+			HOST_B,
+			"/activity/v1/phds/7",
+			signed_payload_by(SEED_A, SealedPhd::default().encode_to_vec()),
+		)];
+		run_with(requests, || {
+			let fetched = get_sealed_phd::<AccountId, BlockNumber, MockCluster, MockNodes>(
+				&ClusterId::zero(),
+				TEST_ERA,
+				node_key(key_b()),
+			);
+			assert!(fetched.is_err(), "{:?}", fetched.map(|r| r.response));
+		});
+	}
+
+	#[test]
+	fn a_forwarded_quorum_answer_signed_by_a_member_it_names_is_accepted() {
+		let members = InspSyncQuorumInfo {
+			quorum_members: vec![member(key_a()), member(key_b())],
+			..Default::default()
+		};
+		let mut requests = Vec::new();
+		requests.push(get(HOST_A, "/itm/v1/quorum/0", signed_by(SEED_B, &members)));
+		requests.push(get(HOST_A, "/itm/v1/quorum/7", signed_by(SEED_B, &members)));
+		run_with(requests, || {
+			let quorum = get_quorum_info::<AccountId, BlockNumber, MockCluster, MockNodes>(
+				&ClusterId::zero(),
+				&signer(),
+				TEST_ERA,
+			);
+			assert_eq!(quorum, Ok(members.clone()));
+		});
+	}
+
+	#[test]
+	fn a_quorum_answer_signed_by_a_node_it_does_not_name_is_refused() {
+		let members =
+			InspSyncQuorumInfo { quorum_members: vec![member(key_b())], ..Default::default() };
+		let requests = vec![get(HOST_A, "/itm/v1/quorum/7", signed_by(SEED_A, &members))];
+		run_with(requests, || {
+			let client = DdcClient::new(
+				node_key(key_a()),
+				"http://node-a:8080",
+				Duration::from_millis(RESPONSE_TIMEOUT),
+				MAX_RETRIES_COUNT,
+			);
+			assert!(client.get_quorum_info(TEST_ERA, &signer()).is_err());
+		});
+	}
+
+	#[test]
+	fn a_read_back_signed_by_the_submitter_is_refused_and_drops_the_cached_list() {
+		let mut requests = Vec::new();
+		expect_discovery(&mut requests);
+		requests.push(post(
+			HOST_A,
+			"/itm/v1/path",
+			request().encode_to_vec(),
+			signed_by(SEED_A, &accepted()),
+		));
+		requests.push(get(
+			HOST_B,
+			"/itm/v1/state/7",
+			signed_by(SEED_A, &state_listing(vec![INSPECTOR.to_vec()])),
+		));
+		expect_discovery(&mut requests);
+		run_with(requests, || {
+			submit_inspection_result_read_back::<AccountId, BlockNumber, MockCluster, MockNodes>(
+				&ClusterId::zero(),
+				&signer(),
+				&request(),
+			)
+			.unwrap();
+			crate::shared_memory::discovered_shared_memory_nodes::<
+				AccountId,
+				BlockNumber,
+				MockCluster,
+				MockNodes,
+			>(&ClusterId::zero(), &signer())
+			.unwrap();
+		});
+	}
+
+	#[test]
+	fn the_read_back_tells_a_signer_mismatch_from_an_unreadable_answer() {
+		let requests =
+			vec![get(HOST_B, "/itm/v1/state/7", signed_by(SEED_A, &state_listing(vec![])))];
+		run_with(requests, || {
+			let client = DdcClient::new(
+				node_key(key_b()),
+				"http://node-b:8080",
+				Duration::from_millis(RESPONSE_TIMEOUT),
+				MAX_RETRIES_COUNT,
+			);
+			assert_eq!(
+				client.read_back_inspection_state(TEST_ERA, &signer()),
+				Err(crate::client::ReadBackError::SignedByAnotherNode)
+			);
+		});
+	}
+
+	#[test]
+	fn the_fixture_nodes_are_in_key_order() {
+		assert!(key_a() < key_b(), "discovery and the replica order ask HOST_A first");
+	}
 
 	fn node_key(bytes: [u8; 32]) -> NodePubKey {
 		NodePubKey::StoragePubKey(StorageNodePubKey::new(bytes))
@@ -1850,7 +2111,7 @@ mod tests {
 			unimplemented!()
 		}
 		fn get_nodes(_: &ClusterId) -> Result<Vec<NodePubKey>, DispatchError> {
-			Ok(vec![node_key(KEY_A), node_key(KEY_B)])
+			Ok(vec![node_key(key_a()), node_key(key_b())])
 		}
 		fn add_node(
 			_: &ClusterId,
@@ -1893,7 +2154,7 @@ mod tests {
 			unimplemented!()
 		}
 		fn get_node_params(key: &NodePubKey) -> Result<NodeParams, DispatchError> {
-			let host = if *key == node_key(KEY_A) { HOST_A } else { HOST_B };
+			let host = if *key == node_key(key_a()) { HOST_A } else { HOST_B };
 			Ok(NodeParams::StorageParams(StorageNodeParams {
 				mode: StorageNodeMode::Storage,
 				host: host.as_bytes().to_vec(),
@@ -1903,12 +2164,12 @@ mod tests {
 		}
 	}
 
-	fn signed<M: Message>(message: &M) -> Vec<u8> {
-		signed_payload(message.encode_to_vec())
+	fn signed_by<M: Message>(seed: [u8; 32], message: &M) -> Vec<u8> {
+		signed_payload_by(seed, message.encode_to_vec())
 	}
 
-	fn signed_payload(payload: Vec<u8>) -> Vec<u8> {
-		let pair = ed25519::Pair::from_seed(&SIGNER_SEED);
+	fn signed_payload_by(seed: [u8; 32], payload: Vec<u8>) -> Vec<u8> {
+		let pair = ed25519::Pair::from_seed(&seed);
 		let value = pair.sign(&payload).0.to_vec();
 		SignedResponse {
 			payload,
@@ -1982,10 +2243,10 @@ mod tests {
 	// Discovery asks the first candidate (A, lowest key) and both are named.
 	fn expect_discovery(requests: &mut Vec<PendingRequest>) {
 		let members = InspSyncQuorumInfo {
-			quorum_members: vec![member(KEY_A), member(KEY_B)],
+			quorum_members: vec![member(key_a()), member(key_b())],
 			..Default::default()
 		};
-		requests.push(get(HOST_A, "/itm/v1/quorum/0", signed(&members)));
+		requests.push(get(HOST_A, "/itm/v1/quorum/0", signed_by(SEED_A, &members)));
 	}
 
 	// The keystore holds no key for it, so its reads go unsigned, as a node in
@@ -2018,7 +2279,7 @@ mod tests {
 		sent.extend_from_slice(&UNKNOWN_RECEIPT_FIELD);
 		let mut requests = Vec::new();
 		expect_discovery(&mut requests);
-		requests.push(get(HOST_A, "/itm/v1/receipt/7", signed_payload(sent.clone())));
+		requests.push(get(HOST_A, "/itm/v1/receipt/7", signed_payload_by(SEED_A, sent.clone())));
 
 		run_with(requests, || {
 			let (decoded, bytes) =
@@ -2038,7 +2299,7 @@ mod tests {
 		let receipt = InspectionReceipt { cluster_id: cluster, era_id: era, ..Default::default() };
 		let mut requests = Vec::new();
 		expect_discovery(&mut requests);
-		requests.push(get(HOST_A, "/itm/v1/receipt/7", signed(&receipt)));
+		requests.push(get(HOST_A, "/itm/v1/receipt/7", signed_by(SEED_A, &receipt)));
 		let mut result = None;
 		run_with(requests, || {
 			result = Some(
@@ -2070,7 +2331,7 @@ mod tests {
 		let state = InspectionState { cluster_id: vec![1; 20], era_id: TEST_ERA, ..Default::default() };
 		let mut requests = Vec::new();
 		expect_discovery(&mut requests);
-		requests.push(get(HOST_A, "/itm/v1/state/7", signed(&state)));
+		requests.push(get(HOST_A, "/itm/v1/state/7", signed_by(SEED_A, &state)));
 		run_with(requests, || {
 			assert_eq!(
 				get_inspection_state::<AccountId, BlockNumber, MockCluster, MockNodes>(
@@ -2106,7 +2367,7 @@ mod tests {
 		for (response, refused) in [(found, true), (missing, false)] {
 			let mut requests = Vec::new();
 			expect_discovery(&mut requests);
-			requests.push(get(HOST_A, "/itm/v1/table/7", signed(&response)));
+			requests.push(get(HOST_A, "/itm/v1/table/7", signed_by(SEED_A, &response)));
 			run_with(requests, || {
 				let result = get_assignments_table::<AccountId, BlockNumber, MockCluster, MockNodes>(
 					&ClusterId::zero(),
@@ -2128,18 +2389,18 @@ mod tests {
 			document: sealed_document.clone(),
 			builder_signature: Some(Signature {
 				algorithm: Algorithm::Ed25519 as i32,
-				signer: KEY_B.to_vec(),
+				signer: key_b().to_vec(),
 				value: vec![0x5a; 64],
 			}),
 		};
 		let grouping = GroupingCollectorsResponse {
-			keys: vec![format!("0x{}", hex::encode(KEY_B))],
+			keys: vec![format!("0x{}", hex::encode(key_b()))],
 		};
 		let mut envelope = sealed.encode_to_vec();
 		envelope.extend_from_slice(&UNKNOWN_DOCUMENT_FIELD);
 		let requests = vec![
-			get(HOST_A, "/activity/v1/grouping-collectors", signed(&grouping)),
-			get(HOST_B, "/activity/v1/ehds/7", signed_payload(envelope.clone())),
+			get(HOST_A, "/activity/v1/grouping-collectors", signed_by(SEED_A, &grouping)),
+			get(HOST_B, "/activity/v1/ehds/7", signed_payload_by(SEED_B, envelope.clone())),
 		];
 
 		run_with(requests, || {
@@ -2149,7 +2410,7 @@ mod tests {
 					TEST_ERA,
 				)
 				.unwrap();
-			assert_eq!(asked, node_key(KEY_B));
+			assert_eq!(asked, node_key(key_b()));
 			assert_eq!(fetched.response, envelope);
 			let decoded = SealedEhd::decode(fetched.response.as_slice()).unwrap();
 			assert_eq!(decoded, sealed);
@@ -2161,26 +2422,27 @@ mod tests {
 	#[test]
 	fn a_sealed_phd_comes_from_the_collector_asked_as_the_envelope_bytes_it_signed_including_fields_this_build_does_not_know(
 	) {
-		let document = Phd { era_id: TEST_ERA, node_key: KEY_B.to_vec(), ..Default::default() };
+		let document = Phd { era_id: TEST_ERA, node_key: key_b().to_vec(), ..Default::default() };
 		let mut sealed_document = document.encode_to_vec();
 		sealed_document.extend_from_slice(&UNKNOWN_DOCUMENT_FIELD);
 		let sealed = SealedPhd {
 			document: sealed_document.clone(),
 			builder_signature: Some(Signature {
 				algorithm: Algorithm::Ed25519 as i32,
-				signer: KEY_B.to_vec(),
+				signer: key_b().to_vec(),
 				value: vec![0x5a; 64],
 			}),
 		};
 		let mut envelope = sealed.encode_to_vec();
 		envelope.extend_from_slice(&UNKNOWN_DOCUMENT_FIELD);
-		let requests = vec![get(HOST_B, "/activity/v1/phds/7", signed_payload(envelope.clone()))];
+		let requests =
+			vec![get(HOST_B, "/activity/v1/phds/7", signed_payload_by(SEED_B, envelope.clone()))];
 
 		run_with(requests, || {
 			let fetched = get_sealed_phd::<AccountId, BlockNumber, MockCluster, MockNodes>(
 				&ClusterId::zero(),
 				TEST_ERA,
-				node_key(KEY_B),
+				node_key(key_b()),
 			)
 			.unwrap();
 			assert_eq!(fetched.response, envelope);
@@ -2195,11 +2457,16 @@ mod tests {
 	fn a_submission_another_replica_reads_back_is_not_resubmitted() {
 		let mut requests = Vec::new();
 		expect_discovery(&mut requests);
-		requests.push(post(HOST_A, "/itm/v1/path", request().encode_to_vec(), signed(&accepted())));
+		requests.push(post(
+			HOST_A,
+			"/itm/v1/path",
+			request().encode_to_vec(),
+			signed_by(SEED_A, &accepted()),
+		));
 		requests.push(get(
 			HOST_B,
 			"/itm/v1/state/7",
-			signed(&state_listing(vec![INSPECTOR.to_vec()])),
+			signed_by(SEED_B, &state_listing(vec![INSPECTOR.to_vec()])),
 		));
 
 		run_with(requests, || {
@@ -2219,9 +2486,19 @@ mod tests {
 	) {
 		let mut requests = Vec::new();
 		expect_discovery(&mut requests);
-		requests.push(post(HOST_A, "/itm/v1/path", request().encode_to_vec(), signed(&accepted())));
-		requests.push(get(HOST_B, "/itm/v1/state/7", signed(&state_listing(vec![]))));
-		requests.push(post(HOST_B, "/itm/v1/path", request().encode_to_vec(), signed(&accepted())));
+		requests.push(post(
+			HOST_A,
+			"/itm/v1/path",
+			request().encode_to_vec(),
+			signed_by(SEED_A, &accepted()),
+		));
+		requests.push(get(HOST_B, "/itm/v1/state/7", signed_by(SEED_B, &state_listing(vec![]))));
+		requests.push(post(
+			HOST_B,
+			"/itm/v1/path",
+			request().encode_to_vec(),
+			signed_by(SEED_B, &accepted()),
+		));
 
 		run_with(requests, || {
 			submit_inspection_result_read_back::<AccountId, BlockNumber, MockCluster, MockNodes>(
@@ -2240,7 +2517,7 @@ mod tests {
 			.unwrap();
 			assert_eq!(
 				cached.iter().map(|n| n.key.clone()).collect::<Vec<_>>(),
-				vec![node_key(KEY_B)]
+				vec![node_key(key_b())]
 			);
 		});
 	}
@@ -2250,7 +2527,7 @@ mod tests {
 	}
 
 	fn eras(records: Vec<proto::era::Era>) -> Vec<u8> {
-		signed(&proto::activity::GetErasResponse { records, ..Default::default() })
+		signed_by(SEED_A, &proto::activity::GetErasResponse { records, ..Default::default() })
 	}
 
 	const ANCHOR_QUERY: &str =
@@ -2265,8 +2542,17 @@ mod tests {
 
 	const HOST_A_URL: &str = "http://node-a:8080";
 
+	fn host_a_key() -> NodePubKey {
+		node_key(key_a())
+	}
+
 	fn client_for_host_a() -> DdcClient<'static> {
-		DdcClient::new(HOST_A_URL, Duration::from_millis(RESPONSE_TIMEOUT), MAX_RETRIES_COUNT)
+		DdcClient::new(
+			host_a_key(),
+			HOST_A_URL,
+			Duration::from_millis(RESPONSE_TIMEOUT),
+			MAX_RETRIES_COUNT,
+		)
 	}
 
 	#[test]

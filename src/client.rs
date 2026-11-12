@@ -22,6 +22,8 @@ pub const SHARED_MEMORY_DEADLINE_HEADER: &str = "X-Insp-Quorum-Deadline-Ms";
 
 const REFUSAL_NO_CLIENT: &str = "no-client";
 const REFUSAL_STORE_UNREACHABLE: &str = "store-unreachable";
+/// Wire reason a node that is not a member gives when no member it knows answered.
+const REFUSAL_MEMBERS_UNREACHABLE: &str = "members-unreachable";
 /// Wire reason a node gives when it does not hold the shared memory.
 const REFUSAL_NOT_A_MEMBER: &str = "not-a-member";
 /// The non-member refusal of a binary older than its `not-a-member` reason.
@@ -41,6 +43,8 @@ pub enum SharedMemoryAnswerKind {
 	StoreUnreachable,
 	/// The node has no such route.
 	NoRoute,
+	/// The node is not a member and no member it knows answered.
+	MembersUnreachable,
 	/// A refusal without the route's own reason: a binary older than discovery.
 	Predates,
 	/// The node did not answer, or answered with something unreadable.
@@ -48,7 +52,11 @@ pub enum SharedMemoryAnswerKind {
 }
 
 pub enum SharedMemoryProbe {
-	Answer { info: proto::inspection::InspSyncQuorumInfo, declared_deadline_ms: Option<u64> },
+	Answer {
+		info: proto::inspection::InspSyncQuorumInfo,
+		declared_deadline_ms: Option<u64>,
+		signer: Vec<u8>,
+	},
 	Refused(SharedMemoryAnswerKind),
 }
 
@@ -63,6 +71,8 @@ struct SharedMemoryRefusalBody {
 pub enum ReadBackError {
 	/// The node does not hold the shared memory, though it was named as holding it.
 	NotSharedMemory,
+	/// The answer is signed by a node other than the one asked.
+	SignedByAnotherNode,
 	/// Anything else: no answer, an error, an unreadable body.
 	Unavailable,
 }
@@ -90,6 +100,7 @@ pub fn classify_shared_memory_refusal(code: u16, body: &[u8]) -> SharedMemoryAns
 			match serde_json::from_slice::<SharedMemoryRefusalBody>(body).ok().and_then(|b| b.reason) {
 				Some(r) if r == REFUSAL_NO_CLIENT => SharedMemoryAnswerKind::NoClient,
 				Some(r) if r == REFUSAL_STORE_UNREACHABLE => SharedMemoryAnswerKind::StoreUnreachable,
+				Some(r) if r == REFUSAL_MEMBERS_UNREACHABLE => SharedMemoryAnswerKind::MembersUnreachable,
 				_ => SharedMemoryAnswerKind::Predates,
 			}
 		},
@@ -98,6 +109,8 @@ pub fn classify_shared_memory_refusal(code: u16, body: &[u8]) -> SharedMemoryAns
 }
 
 pub struct DdcClient<'a> {
+	/// The node this client asks: every signed response must be signed by it.
+	node: NodePubKey,
 	pub base_url: &'a str,
 	timeout: Duration,
 	retries: u32,
@@ -128,6 +141,8 @@ macro_rules! fetch_and_parse_proto {
 			);
 			return Err(http::Error::Unknown);
 		}
+		signed_by_expected(&$url, &$self.node, proto_signed_response.signature.as_ref())
+			.map_err(|_| http::Error::Unknown)?;
 
 		let proto_response: $response_ty =
 			<$response_ty>::decode(proto_signed_response.payload.as_slice()).map_err(|e| {
@@ -146,11 +161,91 @@ macro_rules! fetch_and_parse_proto {
 	}};
 }
 
-/// Decode a signed-envelope response body, verify the signature, and
-/// return the inner proto. Used by every /v1/itm/* call (both POST and GET)
-/// that receives a SignedResponse-wrapped body.
-fn decode_signed_proto<R: Message + Default>(url: &str, body: &[u8]) -> Result<R, http::Error> {
-	decode_signed_proto_with_payload(url, body).map(|(message, _)| message)
+/// Why a signed response was not accepted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EnvelopeRejection {
+	/// Not a readable, validly signed envelope.
+	Unreadable,
+	/// Validly signed, by a node other than the one asked.
+	SignedByAnotherNode,
+}
+
+/// A signed response's verified payload, decoded, with the payload's bytes as
+/// signed and its signer.
+struct OpenedEnvelope<R> {
+	message: R,
+	payload: Vec<u8>,
+	signer: Vec<u8>,
+}
+
+/// Checks that a response was signed by the node that was asked.
+fn signed_by_expected(
+	url: &str,
+	expected: &NodePubKey,
+	signature: Option<&proto::signature::Signature>,
+) -> Result<(), EnvelopeRejection> {
+	let signature = signature.ok_or(EnvelopeRejection::Unreadable)?;
+	let NodePubKey::StoragePubKey(expected_key) = expected;
+	if signature.signer.as_slice() != AsRef::<[u8]>::as_ref(expected_key) {
+		log!(
+			error,
+			"❌ Response from {:?} is signed by 0x{} where 0x{} was asked",
+			url,
+			hex::encode(&signature.signer),
+			hex::encode(AsRef::<[u8]>::as_ref(expected_key))
+		);
+		return Err(EnvelopeRejection::SignedByAnotherNode);
+	}
+	Ok(())
+}
+
+/// Decodes a signed-envelope response body and verifies its signature,
+/// whoever signed it.
+fn open_signed_envelope<R: Message + Default>(
+	url: &str,
+	body: &[u8],
+) -> Result<OpenedEnvelope<R>, EnvelopeRejection> {
+	let signed = proto::signature::SignedResponse::decode(body).map_err(|e| {
+		log!(error, "❌ Failed to decode SignedResponse from {:?}: {:?}", url, e);
+		EnvelopeRejection::Unreadable
+	})?;
+	if !signed.verify() {
+		log!(error, "❌ Bad signature on response from {:?}", url);
+		return Err(EnvelopeRejection::Unreadable);
+	}
+	let signer = signed.signature.as_ref().map(|s| s.signer.clone()).ok_or_else(|| {
+		log!(error, "❌ Missing signature in signed response from {:?}", url);
+		EnvelopeRejection::Unreadable
+	})?;
+	let message = R::decode(signed.payload.as_slice()).map_err(|e| {
+		log!(error, "❌ Failed to decode signed payload from {:?}: {:?}", url, e);
+		EnvelopeRejection::Unreadable
+	})?;
+	Ok(OpenedEnvelope { message, payload: signed.payload, signer })
+}
+
+/// Like `open_signed_envelope`, and refuses a response not signed by expected.
+fn open_envelope_signed_by<R: Message + Default>(
+	url: &str,
+	body: &[u8],
+	expected: &NodePubKey,
+) -> Result<OpenedEnvelope<R>, EnvelopeRejection> {
+	let opened = open_signed_envelope::<R>(url, body)?;
+	let signature =
+		proto::signature::Signature { signer: opened.signer.clone(), ..Default::default() };
+	signed_by_expected(url, expected, Some(&signature))?;
+	Ok(opened)
+}
+
+/// Decode a signed-envelope response body, verify the signature and that the
+/// node asked signed it, and return the inner proto. Used by every /v1/itm/*
+/// call (both POST and GET) that receives a SignedResponse-wrapped body.
+fn decode_signed_proto<R: Message + Default>(
+	url: &str,
+	body: &[u8],
+	expected: &NodePubKey,
+) -> Result<R, http::Error> {
+	decode_signed_proto_with_payload(url, body, expected).map(|(message, _)| message)
 }
 
 /// Like `decode_signed_proto`, and also returns the payload exactly as the node
@@ -158,20 +253,23 @@ fn decode_signed_proto<R: Message + Default>(url: &str, body: &[u8]) -> Result<R
 fn decode_signed_proto_with_payload<R: Message + Default>(
 	url: &str,
 	body: &[u8],
+	expected: &NodePubKey,
 ) -> Result<(R, Vec<u8>), http::Error> {
-	let signed = proto::signature::SignedResponse::decode(body).map_err(|e| {
-		log!(error, "❌ Failed to decode SignedResponse from {:?}: {:?}", url, e);
-		http::Error::Unknown
-	})?;
-	if !signed.verify() {
-		log!(error, "❌ Bad signature on response from {:?}", url);
-		return Err(http::Error::Unknown);
-	}
-	let message = R::decode(signed.payload.as_slice()).map_err(|e| {
-		log!(error, "❌ Failed to decode signed payload from {:?}: {:?}", url, e);
-		http::Error::Unknown
-	})?;
-	Ok((message, signed.payload))
+	open_envelope_signed_by::<R>(url, body, expected)
+		.map(|opened| (opened.message, opened.payload))
+		.map_err(|_| http::Error::Unknown)
+}
+
+/// Like `decode_signed_proto` with no check of who signed, returning the
+/// signer. Only the membership route may answer with another node's
+/// signature, because a node that is not a member relays a member's answer.
+fn decode_signed_proto_unbound<R: Message + Default>(
+	url: &str,
+	body: &[u8],
+) -> Result<(R, Vec<u8>), http::Error> {
+	open_signed_envelope::<R>(url, body)
+		.map(|opened| (opened.message, opened.signer))
+		.map_err(|_| http::Error::Unknown)
 }
 
 /// Adds headers to a request, in order.
@@ -186,8 +284,9 @@ fn with_headers<'a>(
 }
 
 impl<'a> DdcClient<'a> {
-	pub fn new(base_url: &'a str, timeout: Duration, retries: u32) -> Self {
-		Self { base_url, timeout, retries }
+	/// A client for node, at base_url: every signed response must be node's.
+	pub fn new(node: NodePubKey, base_url: &'a str, timeout: Duration, retries: u32) -> Self {
+		Self { node, base_url, timeout, retries }
 	}
 
 	fn insp_mem_url(&self, path: &str) -> String {
@@ -405,6 +504,8 @@ impl<'a> DdcClient<'a> {
 			log!(error, "❌ Bad signature on response from {:?}", url);
 			return Err(http::Error::Unknown);
 		}
+		signed_by_expected(url, &self.node, signed.signature.as_ref())
+			.map_err(|_| http::Error::Unknown)?;
 		let signed_by = signed
 			.signature
 			.map(|v| SignedBy { signer: v.signer, signature: v.value })
@@ -501,7 +602,7 @@ impl<'a> DdcClient<'a> {
 		let response = self.post_proto(&url, body)?;
 		let body = response.body().collect::<Vec<u8>>();
 
-		decode_signed_proto::<proto::inspection::LeaseResult>(&url, &body)
+		decode_signed_proto::<proto::inspection::LeaseResult>(&url, &body, &self.node)
 	}
 
 	/// POST /itm/submit - Submit completed assignment table (protobuf)
@@ -522,7 +623,9 @@ impl<'a> DdcClient<'a> {
 		let response = self.post_proto(&url, body)?;
 		let body = response.body().collect::<Vec<u8>>();
 
-		decode_signed_proto::<proto::inspection::PostAssignmentTableResponse>(&url, &body)
+		decode_signed_proto::<proto::inspection::PostAssignmentTableResponse>(
+			&url, &body, &self.node,
+		)
 	}
 
 	/// GET /itm/table - Retrieve assignment table (protobuf)
@@ -536,7 +639,9 @@ impl<'a> DdcClient<'a> {
 		let response = self.get(&url, Accept::Protobuf, &signer.headers(ReadRoute::Table, era))?;
 		let body = response.body().collect::<Vec<u8>>();
 
-		decode_signed_proto::<proto::inspection::GetAssignmentTableResponse>(&url, &body)
+		decode_signed_proto::<proto::inspection::GetAssignmentTableResponse>(
+			&url, &body, &self.node,
+		)
 	}
 
 	/// POST /itm/path - Submit inspection path results (protobuf)
@@ -550,7 +655,7 @@ impl<'a> DdcClient<'a> {
 		let response = self.post_proto(&url, body)?;
 		let body = response.body().collect::<Vec<u8>>();
 
-		decode_signed_proto::<proto::inspection::PostEraNudgeResponse>(&url, &body)
+		decode_signed_proto::<proto::inspection::PostEraNudgeResponse>(&url, &body, &self.node)
 	}
 
 	pub fn post_seed_contribution(
@@ -563,7 +668,9 @@ impl<'a> DdcClient<'a> {
 		let response = self.post_proto(&url, body)?;
 		let body = response.body().collect::<Vec<u8>>();
 
-		decode_signed_proto::<proto::inspection::PostSeedContributionResponse>(&url, &body)
+		decode_signed_proto::<proto::inspection::PostSeedContributionResponse>(
+			&url, &body, &self.node,
+		)
 	}
 
 	pub fn submit_inspection_result(
@@ -576,7 +683,9 @@ impl<'a> DdcClient<'a> {
 		let response = self.post_proto(&url, body)?;
 		let body = response.body().collect::<Vec<u8>>();
 
-		decode_signed_proto::<proto::inspection::PostInspectionResultResponse>(&url, &body)
+		decode_signed_proto::<proto::inspection::PostInspectionResultResponse>(
+			&url, &body, &self.node,
+		)
 	}
 
 	/// GET /itm/state - Retrieve inspection state (protobuf)
@@ -590,7 +699,7 @@ impl<'a> DdcClient<'a> {
 		let response = self.get(&url, Accept::Protobuf, &signer.headers(ReadRoute::State, era))?;
 		let body = response.body().collect::<Vec<u8>>();
 
-		decode_signed_proto::<proto::inspection::InspectionState>(&url, &body)
+		decode_signed_proto::<proto::inspection::InspectionState>(&url, &body, &self.node)
 	}
 
 	/// Reads an era's inspection state back from the inspectors' shared memory
@@ -622,8 +731,12 @@ impl<'a> DdcClient<'a> {
 				ReadBackError::Unavailable
 			});
 		}
-		decode_signed_proto::<proto::inspection::InspectionState>(&url, &body)
-			.map_err(|_| ReadBackError::Unavailable)
+		open_envelope_signed_by::<proto::inspection::InspectionState>(&url, &body, &self.node)
+			.map(|opened| opened.message)
+			.map_err(|rejection| match rejection {
+				EnvelopeRejection::SignedByAnotherNode => ReadBackError::SignedByAnotherNode,
+				EnvelopeRejection::Unreadable => ReadBackError::Unavailable,
+			})
 	}
 
 	/// GET /itm/receipt - Retrieve inspection receipt (protobuf), with the
@@ -640,7 +753,9 @@ impl<'a> DdcClient<'a> {
 		let response = self.get(&url, Accept::Protobuf, &signer.headers(ReadRoute::Receipt, era))?;
 		let body = response.body().collect::<Vec<u8>>();
 
-		decode_signed_proto_with_payload::<proto::inspection::InspectionReceipt>(&url, &body)
+		decode_signed_proto_with_payload::<proto::inspection::InspectionReceipt>(
+			&url, &body, &self.node,
+		)
 	}
 
 	/// GET /itm/quorum - Retrieve quorum information (protobuf)
@@ -654,7 +769,22 @@ impl<'a> DdcClient<'a> {
 		let response = self.get(&url, Accept::Protobuf, &signer.headers(ReadRoute::Quorum, era))?;
 		let body = response.body().collect::<Vec<u8>>();
 
-		decode_signed_proto::<proto::inspection::InspSyncQuorumInfo>(&url, &body)
+		let (info, signer) =
+			decode_signed_proto_unbound::<proto::inspection::InspSyncQuorumInfo>(&url, &body)?;
+		let signed_by_member = info.quorum_members.iter().any(|member| {
+			crate::shared_memory::decode_member_key(&member.node_key)
+				.is_some_and(|key| crate::shared_memory::node_key_bytes(&key) == signer.as_slice())
+		});
+		if !signed_by_member {
+			log!(
+				error,
+				"❌ Quorum answer from {:?} is signed by 0x{}, which it does not name as a member",
+				url,
+				hex::encode(&signer)
+			);
+			return Err(http::Error::Unknown);
+		}
+		Ok(info)
 	}
 
 	/// Asks once, with no retry, who the sync members are. Retrying is the
@@ -682,8 +812,8 @@ impl<'a> DdcClient<'a> {
 		if code != HTTP_OK {
 			return SharedMemoryProbe::Refused(classify_shared_memory_refusal(code, &body));
 		}
-		match decode_signed_proto::<proto::inspection::InspSyncQuorumInfo>(&url, &body) {
-			Ok(info) => SharedMemoryProbe::Answer { info, declared_deadline_ms },
+		match decode_signed_proto_unbound::<proto::inspection::InspSyncQuorumInfo>(&url, &body) {
+			Ok((info, signer)) => SharedMemoryProbe::Answer { info, declared_deadline_ms, signer },
 			Err(_) => SharedMemoryProbe::Refused(SharedMemoryAnswerKind::Transport),
 		}
 	}
