@@ -1211,29 +1211,10 @@ pub fn fetch_processed_eras(
 	Ok(client.processed_eras(cursor, limit)?.response)
 }
 
-/// Fetch inspected EHD eras of a cluster from its G-Collector.
-#[allow(dead_code)]
+/// Fetch inspected EHD eras of a cluster from its G-Collector. `discovery_timeout` bounds
+/// only the grouping-collectors request that resolves the G-Collector; the eras request
+/// keeps `RESPONSE_TIMEOUT`.
 pub fn fetch_inspected_eras_for_cluster<
-	AccountId,
-	BlockNumber,
-	CM: ClusterManager<AccountId, BlockNumber>,
-	NM: NodeManager<AccountId>,
->(
-	cluster_id: &ClusterId,
-	cursor: Option<&[u8]>,
-	limit: Option<u32>,
-) -> Result<proto::activity::GetErasResponse, ApiError> {
-	fetch_inspected_eras_for_cluster_with_discovery_timeout::<AccountId, BlockNumber, CM, NM>(
-		cluster_id,
-		cursor,
-		limit,
-		Duration::from_millis(RESPONSE_TIMEOUT),
-	)
-}
-
-/// Fetch inspected eras of a cluster, bounding only the grouping-collectors request that
-/// resolves the G-Collector by `discovery_timeout`; the eras request keeps `RESPONSE_TIMEOUT`.
-pub fn fetch_inspected_eras_for_cluster_with_discovery_timeout<
 	AccountId,
 	BlockNumber,
 	CM: ClusterManager<AccountId, BlockNumber>,
@@ -1275,6 +1256,7 @@ pub fn fetch_inspected_era<
 		cluster_id,
 		Some(&after),
 		None,
+		Duration::from_millis(RESPONSE_TIMEOUT),
 	)?;
 	page.records
 		.into_iter()
@@ -2771,42 +2753,18 @@ mod tests {
 			inspected_eras_from_node_b("/activity/v1/inspected-eras"),
 		];
 		let awaited = deadlines_of(requests, || {
-			fetch_inspected_eras_for_cluster_with_discovery_timeout::<
-				AccountId,
-				BlockNumber,
-				MockCluster,
-				MockNodes,
-			>(&ClusterId::zero(), None, None, Duration::from_millis(SHORT_DISCOVERY_MILLIS))
-			.unwrap();
-		});
-		assert_eq!(
-			awaited,
-			vec![
-				(url(HOST_A, GROUPING_COLLECTORS_PATH), SHORT_DISCOVERY_MILLIS),
-				(url(HOST_B, "/activity/v1/inspected-eras"), RESPONSE_TIMEOUT),
-			]
-		);
-	}
-
-	#[test]
-	fn an_inspected_eras_fetch_without_a_discovery_timeout_resolves_its_g_collector_within_the_response_timeout(
-	) {
-		let requests = vec![
-			g_collector_is_node_b(),
-			inspected_eras_from_node_b("/activity/v1/inspected-eras"),
-		];
-		let awaited = deadlines_of(requests, || {
 			fetch_inspected_eras_for_cluster::<AccountId, BlockNumber, MockCluster, MockNodes>(
 				&ClusterId::zero(),
 				None,
 				None,
+				Duration::from_millis(SHORT_DISCOVERY_MILLIS),
 			)
 			.unwrap();
 		});
 		assert_eq!(
 			awaited,
 			vec![
-				(url(HOST_A, GROUPING_COLLECTORS_PATH), RESPONSE_TIMEOUT),
+				(url(HOST_A, GROUPING_COLLECTORS_PATH), SHORT_DISCOVERY_MILLIS),
 				(url(HOST_B, "/activity/v1/inspected-eras"), RESPONSE_TIMEOUT),
 			]
 		);
