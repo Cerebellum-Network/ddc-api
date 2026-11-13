@@ -187,6 +187,7 @@ pub fn get_g_collectors_nodes<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	discovery_timeout: Duration,
 ) -> Result<Vec<(NodePubKey, StorageNodeParams)>, ApiError> {
 	let mut g_collectors = Vec::new();
 
@@ -195,7 +196,9 @@ pub fn get_g_collectors_nodes<
 
 	for (node_key, node_params) in collectors {
 		if g_collectors_keys.is_empty() {
-			if let Ok(keys) = get_grouping_collectors_keys(cluster_id, &node_key, &node_params) {
+			if let Ok(keys) =
+				get_grouping_collectors_keys(cluster_id, &node_key, &node_params, discovery_timeout)
+			{
 				g_collectors_keys.extend(keys);
 			} else {
 				continue;
@@ -225,8 +228,12 @@ pub fn get_g_collector_node<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	discovery_timeout: Duration,
 ) -> Result<(NodePubKey, StorageNodeParams), ApiError> {
-	let g_collectors = get_g_collectors_nodes::<AccountId, BlockNumber, CM, NM>(cluster_id)
+	let g_collectors = get_g_collectors_nodes::<AccountId, BlockNumber, CM, NM>(
+		cluster_id,
+		discovery_timeout,
+	)
 		.map_err(|e| {
 			log!(error, "❌ Failed to fetch G-Collectors for cluster {:?}: {:?}", cluster_id, e);
 			ApiError::FailedToFetchGCollectors { cluster_id: *cluster_id }
@@ -243,6 +250,7 @@ pub fn get_grouping_collectors_keys(
 	cluster_id: &ClusterId,
 	node_key: &NodePubKey,
 	node_params: &StorageNodeParams,
+	timeout: Duration,
 ) -> Result<Vec<NodePubKey>, ApiError> {
 	let host = str::from_utf8(&node_params.host).map_err(|e| {
 		log!(
@@ -259,12 +267,7 @@ pub fn get_grouping_collectors_keys(
 		}
 	})?;
 	let base_url: String = format!("http://{}:{}", host, node_params.http_port);
-	let client = DdcClient::new(
-		node_key.clone(),
-		&base_url,
-		Duration::from_millis(RESPONSE_TIMEOUT),
-		MAX_RETRIES_COUNT,
-	);
+	let client = DdcClient::new(node_key.clone(), &base_url, timeout, MAX_RETRIES_COUNT);
 
 	let api_response = client.get_grouping_collectors().map_err(|e| {
 		log!(
@@ -847,7 +850,7 @@ pub fn fetch_traversed_era_historical_document<
 		BlockNumber,
 		CM,
 		NM,
-	>(cluster_id)
+	>(cluster_id, Duration::from_millis(RESPONSE_TIMEOUT))
 	.map_err(|e| {
 		log!(error, "❌ Failed to fetch G-Collector node for cluster {:?}: {:?}", cluster_id, e);
 		ApiError::FailedToFetchGCollectors { cluster_id: *cluster_id }
@@ -944,7 +947,10 @@ pub fn get_sealed_ehd<
 	era: EhdEra,
 ) -> Result<(NodePubKey, ApiResponse<Vec<u8>>), ApiError> {
 	let (g_collector_key, g_collector_params) =
-		get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id)?;
+		get_g_collector_node::<AccountId, BlockNumber, CM, NM>(
+			cluster_id,
+			Duration::from_millis(RESPONSE_TIMEOUT),
+		)?;
 	let host = str::from_utf8(&g_collector_params.host).map_err(|e| {
 		log!(
 			error,
@@ -1173,7 +1179,7 @@ pub fn fetch_processed_eras_for_cluster<
 		BlockNumber,
 		CM,
 		NM,
-	>(cluster_id)
+	>(cluster_id, Duration::from_millis(RESPONSE_TIMEOUT))
 	.map_err(|e| {
 		log!(error, "❌ Failed to fetch G-Collector node for cluster {:?}: {:?}", cluster_id, e);
 		ApiError::FailedToFetchGCollectors { cluster_id: *cluster_id }
@@ -1217,12 +1223,33 @@ pub fn fetch_inspected_eras_for_cluster<
 	cursor: Option<&[u8]>,
 	limit: Option<u32>,
 ) -> Result<proto::activity::GetErasResponse, ApiError> {
+	fetch_inspected_eras_for_cluster_with_discovery_timeout::<AccountId, BlockNumber, CM, NM>(
+		cluster_id,
+		cursor,
+		limit,
+		Duration::from_millis(RESPONSE_TIMEOUT),
+	)
+}
+
+/// Fetch inspected eras of a cluster, bounding only the grouping-collectors request that
+/// resolves the G-Collector by `discovery_timeout`; the eras request keeps `RESPONSE_TIMEOUT`.
+pub fn fetch_inspected_eras_for_cluster_with_discovery_timeout<
+	AccountId,
+	BlockNumber,
+	CM: ClusterManager<AccountId, BlockNumber>,
+	NM: NodeManager<AccountId>,
+>(
+	cluster_id: &ClusterId,
+	cursor: Option<&[u8]>,
+	limit: Option<u32>,
+	discovery_timeout: Duration,
+) -> Result<proto::activity::GetErasResponse, ApiError> {
 	let (g_collector_key, g_collector_params) = get_g_collector_node::<
 		AccountId,
 		BlockNumber,
 		CM,
 		NM,
-	>(cluster_id)
+	>(cluster_id, discovery_timeout)
 	.map_err(|e| {
 		log!(error, "❌ Failed to fetch G-Collector node for cluster {:?}: {:?}", cluster_id, e);
 		ApiError::FailedToFetchGCollectors { cluster_id: *cluster_id }
@@ -1346,7 +1373,11 @@ pub fn fetch_era_to_inspect_for_cluster<
 	cluster_id: &ClusterId,
 ) -> Result<Option<EhdEra>, ApiError> {
 	let (g_collector_key, params) =
-		get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id).map_err(|e| {
+		get_g_collector_node::<AccountId, BlockNumber, CM, NM>(
+			cluster_id,
+			Duration::from_millis(RESPONSE_TIMEOUT),
+		)
+		.map_err(|e| {
 			log!(error, "❌ Failed to fetch G-Collector node for cluster {:?}: {:?}", cluster_id, e);
 			ApiError::FailedToFetchGCollectors { cluster_id: *cluster_id }
 		})?;
@@ -1870,7 +1901,8 @@ mod tests {
 		ed25519,
 		offchain::{
 			testing::{PendingRequest, TestOffchainExt},
-			OffchainDbExt, OffchainWorkerExt,
+			Externalities, HttpError, HttpRequestId, HttpRequestStatus, OffchainDbExt,
+			OffchainWorkerExt, Timestamp,
 		},
 		Pair,
 	};
@@ -1965,7 +1997,8 @@ mod tests {
 				get_grouping_collectors_keys(
 					&ClusterId::zero(),
 					&node_key(key_a()),
-					&node_params(HOST_A)
+					&node_params(HOST_A),
+					Duration::from_millis(RESPONSE_TIMEOUT)
 				),
 				Err(ApiError::HttpClientError {
 					cluster_id: ClusterId::zero(),
@@ -2606,5 +2639,221 @@ mod tests {
 		run_with(requests, || {
 			assert!(next_era_to_inspect(&client_for_host_a()).is_err());
 		});
+	}
+
+	struct DeadlineRecorder {
+		inner: TestOffchainExt,
+		uris: std::collections::BTreeMap<u16, String>,
+		awaited: Arc<std::sync::Mutex<Vec<(String, u64)>>>,
+	}
+
+	impl Externalities for DeadlineRecorder {
+		fn is_validator(&self) -> bool {
+			self.inner.is_validator()
+		}
+		fn network_state(
+			&self,
+		) -> Result<polkadot_sdk::sp_core::offchain::OpaqueNetworkState, ()> {
+			self.inner.network_state()
+		}
+		fn timestamp(&mut self) -> Timestamp {
+			self.inner.timestamp()
+		}
+		fn sleep_until(&mut self, deadline: Timestamp) {
+			self.inner.sleep_until(deadline)
+		}
+		fn random_seed(&mut self) -> [u8; 32] {
+			self.inner.random_seed()
+		}
+		fn http_request_start(
+			&mut self,
+			method: &str,
+			uri: &str,
+			meta: &[u8],
+		) -> Result<HttpRequestId, ()> {
+			let id = self.inner.http_request_start(method, uri, meta)?;
+			self.uris.insert(id.0, uri.to_string());
+			Ok(id)
+		}
+		fn http_request_add_header(
+			&mut self,
+			request_id: HttpRequestId,
+			name: &str,
+			value: &str,
+		) -> Result<(), ()> {
+			self.inner.http_request_add_header(request_id, name, value)
+		}
+		fn http_request_write_body(
+			&mut self,
+			request_id: HttpRequestId,
+			chunk: &[u8],
+			deadline: Option<Timestamp>,
+		) -> Result<(), HttpError> {
+			self.inner.http_request_write_body(request_id, chunk, deadline)
+		}
+		fn http_response_wait(
+			&mut self,
+			ids: &[HttpRequestId],
+			deadline: Option<Timestamp>,
+		) -> Vec<HttpRequestStatus> {
+			for id in ids {
+				let deadline = deadline.map(|d| d.unix_millis()).unwrap_or(u64::MAX);
+				self.awaited.lock().unwrap().push((self.uris[&id.0].clone(), deadline));
+			}
+			self.inner.http_response_wait(ids, deadline)
+		}
+		fn http_response_headers(&mut self, request_id: HttpRequestId) -> Vec<(Vec<u8>, Vec<u8>)> {
+			self.inner.http_response_headers(request_id)
+		}
+		fn http_response_read_body(
+			&mut self,
+			request_id: HttpRequestId,
+			buffer: &mut [u8],
+			deadline: Option<Timestamp>,
+		) -> Result<usize, HttpError> {
+			self.inner.http_response_read_body(request_id, buffer, deadline)
+		}
+		fn set_authorized_nodes(
+			&mut self,
+			nodes: Vec<polkadot_sdk::sp_core::OpaquePeerId>,
+			authorized_only: bool,
+		) {
+			self.inner.set_authorized_nodes(nodes, authorized_only)
+		}
+	}
+
+	// The test clock stands at zero, so a request's deadline is the timeout it was given.
+	fn deadlines_of(requests: Vec<PendingRequest>, test: impl FnOnce()) -> Vec<(String, u64)> {
+		let (offchain, state) = TestOffchainExt::new();
+		for request in requests {
+			state.write().expect_request(request);
+		}
+		let awaited = Arc::new(std::sync::Mutex::new(Vec::new()));
+		let recorder = DeadlineRecorder {
+			inner: offchain.clone(),
+			uris: Default::default(),
+			awaited: awaited.clone(),
+		};
+		let mut ext = TestExternalities::default();
+		ext.register_extension(OffchainDbExt::new(offchain));
+		ext.register_extension(OffchainWorkerExt::new(recorder));
+		ext.register_extension(KeystoreExt(Arc::new(MemoryKeystore::new())));
+		ext.execute_with(test);
+		let awaited = awaited.lock().unwrap().clone();
+		awaited
+	}
+
+	const SHORT_DISCOVERY_MILLIS: u64 = 5_000;
+	const GROUPING_COLLECTORS_PATH: &str = "/activity/v1/grouping-collectors";
+
+	fn url(host: &str, path: &str) -> String {
+		format!("http://{}:{}{}", host, TEST_HTTP_PORT, path)
+	}
+
+	fn g_collector_is_node_b() -> PendingRequest {
+		let grouping =
+			GroupingCollectorsResponse { keys: vec![format!("0x{}", hex::encode(key_b()))] };
+		get(HOST_A, GROUPING_COLLECTORS_PATH, signed_by(SEED_A, &grouping))
+	}
+
+	fn inspected_eras_from_node_b(path: &str) -> PendingRequest {
+		let page = proto::activity::GetErasResponse {
+			records: vec![era(TEST_ERA, proto::era::EraStatus::EraInspected)],
+			..Default::default()
+		};
+		get(HOST_B, path, signed_by(SEED_B, &page))
+	}
+
+	#[test]
+	fn a_discovery_timeout_bounds_only_the_grouping_collectors_request_of_an_inspected_eras_fetch() {
+		let requests = vec![
+			g_collector_is_node_b(),
+			inspected_eras_from_node_b("/activity/v1/inspected-eras"),
+		];
+		let awaited = deadlines_of(requests, || {
+			fetch_inspected_eras_for_cluster_with_discovery_timeout::<
+				AccountId,
+				BlockNumber,
+				MockCluster,
+				MockNodes,
+			>(&ClusterId::zero(), None, None, Duration::from_millis(SHORT_DISCOVERY_MILLIS))
+			.unwrap();
+		});
+		assert_eq!(
+			awaited,
+			vec![
+				(url(HOST_A, GROUPING_COLLECTORS_PATH), SHORT_DISCOVERY_MILLIS),
+				(url(HOST_B, "/activity/v1/inspected-eras"), RESPONSE_TIMEOUT),
+			]
+		);
+	}
+
+	#[test]
+	fn an_inspected_eras_fetch_without_a_discovery_timeout_resolves_its_g_collector_within_the_response_timeout(
+	) {
+		let requests = vec![
+			g_collector_is_node_b(),
+			inspected_eras_from_node_b("/activity/v1/inspected-eras"),
+		];
+		let awaited = deadlines_of(requests, || {
+			fetch_inspected_eras_for_cluster::<AccountId, BlockNumber, MockCluster, MockNodes>(
+				&ClusterId::zero(),
+				None,
+				None,
+			)
+			.unwrap();
+		});
+		assert_eq!(
+			awaited,
+			vec![
+				(url(HOST_A, GROUPING_COLLECTORS_PATH), RESPONSE_TIMEOUT),
+				(url(HOST_B, "/activity/v1/inspected-eras"), RESPONSE_TIMEOUT),
+			]
+		);
+	}
+
+	#[test]
+	fn a_single_inspected_era_resolves_its_g_collector_within_the_response_timeout() {
+		let path = format!(
+			"/activity/v1/inspected-eras?cursor={}",
+			hex::encode((TEST_ERA - 1).to_be_bytes())
+		);
+		let requests = vec![g_collector_is_node_b(), inspected_eras_from_node_b(&path)];
+		let awaited = deadlines_of(requests, || {
+			fetch_inspected_era::<AccountId, BlockNumber, MockCluster, MockNodes>(
+				&ClusterId::zero(),
+				TEST_ERA,
+			)
+			.unwrap();
+		});
+		assert_eq!(
+			awaited,
+			vec![
+				(url(HOST_A, GROUPING_COLLECTORS_PATH), RESPONSE_TIMEOUT),
+				(url(HOST_B, &path), RESPONSE_TIMEOUT),
+			]
+		);
+	}
+
+	#[test]
+	fn a_sealed_ehd_resolves_its_g_collector_within_the_response_timeout() {
+		let requests = vec![
+			g_collector_is_node_b(),
+			get(HOST_B, "/activity/v1/ehds/7", signed_payload_by(SEED_B, vec![0x5a])),
+		];
+		let awaited = deadlines_of(requests, || {
+			get_sealed_ehd::<AccountId, BlockNumber, MockCluster, MockNodes>(
+				&ClusterId::zero(),
+				TEST_ERA,
+			)
+			.unwrap();
+		});
+		assert_eq!(
+			awaited,
+			vec![
+				(url(HOST_A, GROUPING_COLLECTORS_PATH), RESPONSE_TIMEOUT),
+				(url(HOST_B, "/activity/v1/ehds/7"), RESPONSE_TIMEOUT),
+			]
+		);
 	}
 }
