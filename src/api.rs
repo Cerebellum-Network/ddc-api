@@ -1345,7 +1345,8 @@ fn has_status(era: &proto::era::Era, statuses: &[proto::era::EraStatus]) -> bool
 }
 
 /// The era a cluster should inspect next, read from its G-Collector. See
-/// `next_era_to_inspect`.
+/// `next_era_to_inspect`. `discovery_timeout` bounds only the grouping-collectors request
+/// that resolves the G-Collector; the era listing keeps `RESPONSE_TIMEOUT`.
 pub fn fetch_era_to_inspect_for_cluster<
 	AccountId,
 	BlockNumber,
@@ -1353,12 +1354,10 @@ pub fn fetch_era_to_inspect_for_cluster<
 	NM: NodeManager<AccountId>,
 >(
 	cluster_id: &ClusterId,
+	discovery_timeout: Duration,
 ) -> Result<Option<EhdEra>, ApiError> {
 	let (g_collector_key, params) =
-		get_g_collector_node::<AccountId, BlockNumber, CM, NM>(
-			cluster_id,
-			Duration::from_millis(RESPONSE_TIMEOUT),
-		)
+		get_g_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, discovery_timeout)
 		.map_err(|e| {
 			log!(error, "❌ Failed to fetch G-Collector node for cluster {:?}: {:?}", cluster_id, e);
 			ApiError::FailedToFetchGCollectors { cluster_id: *cluster_id }
@@ -2811,6 +2810,36 @@ mod tests {
 			vec![
 				(url(HOST_A, GROUPING_COLLECTORS_PATH), RESPONSE_TIMEOUT),
 				(url(HOST_B, "/activity/v1/ehds/7"), RESPONSE_TIMEOUT),
+			]
+		);
+	}
+
+	#[test]
+	fn a_discovery_timeout_bounds_only_the_grouping_collectors_request_of_the_era_to_inspect() {
+		use proto::era::EraStatus::*;
+		let page = |records| {
+			signed_by(SEED_B, &proto::activity::GetErasResponse { records, ..Default::default() })
+		};
+		let requests = vec![
+			g_collector_is_node_b(),
+			get(HOST_B, ANCHOR_QUERY, page(vec![era(6, EraInspected)])),
+			get(HOST_B, &next_query(6), page(vec![era(TEST_ERA, EraProcessed)])),
+		];
+		let awaited = deadlines_of(requests, || {
+			assert_eq!(
+				fetch_era_to_inspect_for_cluster::<AccountId, BlockNumber, MockCluster, MockNodes>(
+					&ClusterId::zero(),
+					Duration::from_millis(SHORT_DISCOVERY_MILLIS),
+				),
+				Ok(Some(TEST_ERA))
+			);
+		});
+		assert_eq!(
+			awaited,
+			vec![
+				(url(HOST_A, GROUPING_COLLECTORS_PATH), SHORT_DISCOVERY_MILLIS),
+				(url(HOST_B, ANCHOR_QUERY), RESPONSE_TIMEOUT),
+				(url(HOST_B, &next_query(6)), RESPONSE_TIMEOUT),
 			]
 		);
 	}
