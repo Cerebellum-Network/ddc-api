@@ -4,6 +4,8 @@ pub const LOG_TARGET: &str = "ddc-api";
 
 pub mod api;
 pub mod client;
+pub mod read_auth;
+pub mod shared_memory;
 pub mod verification;
 
 pub mod proto {
@@ -51,6 +53,7 @@ pub mod proto {
                     era_id: 42,
                     inspector_key: "0xabc123".into(),
                     ttl_seconds: 300,
+                    inspector_signature: vec![],
                 };
 
                 let bytes = req.encode_to_vec();
@@ -58,7 +61,7 @@ pub mod proto {
 
                 let decoded = LeaseRequest::decode(bytes.as_slice()).unwrap();
                 assert_eq!(decoded.era_id, 42);
-                assert_eq!(decoded.inspector_key, "0xabc123");
+                assert_eq!(decoded.inspector_key, b"0xabc123");
                 assert_eq!(decoded.ttl_seconds, 300);
             }
 
@@ -70,15 +73,16 @@ pub mod proto {
                     inspector_key: "0xabc123".into(),
                     lease_id: "lease-001".into(),
                     expires_at: 1700000000,
-                    current_holder: String::new(),
+                    current_holder: vec![],
                     error_message: String::new(),
+                    collective_seed: 0,
                 };
 
                 let bytes = res.encode_to_vec();
                 let decoded = LeaseResult::decode(bytes.as_slice()).unwrap();
                 assert_eq!(decoded.status, LeaseStatus::Acquired as i32);
                 assert_eq!(decoded.era_id, 42);
-                assert_eq!(decoded.inspector_key, "0xabc123");
+                assert_eq!(decoded.inspector_key, b"0xabc123");
                 assert_eq!(decoded.lease_id, "lease-001");
                 assert_eq!(decoded.expires_at, 1700000000);
             }
@@ -90,25 +94,23 @@ pub mod proto {
                 let mut paths = BTreeMap::new();
                 paths.insert(
                     "path-001".into(),
-                    InspectionPath {
-                        path_type: InspectionPathType::NodeAr as i32,
-                        collectors: vec!["0xc0c1".into(), "0xc2c3".into()],
-                        path_data: Some(PathData::NodeAr(NodeArPath {
-                            node_key: "0x0a0b".into(),
-                            leaves_pos: vec![1, 2, 3],
-                            tca_id: 5,
-                            record_id_range_start: vec![],
-                            record_id_range_end: vec![],
-                        })),
-                    },
-                );
-
-                let mut assignments = BTreeMap::new();
-                assignments.insert(
-                    "path-001".into(),
-                    InspectorAssignments {
-                        main_inspectors: vec!["insp1".into(), "insp2".into()],
-                        backup_inspectors: vec!["insp3".into()],
+                    PathAssignment {
+                        path: Some(InspectionPath {
+                            path_type: InspectionPathType::NodeAr as i32,
+                            collectors: vec!["0xc0c1".into(), "0xc2c3".into()],
+                            path_data: Some(PathData::NodeAr(NodeArPath {
+                                node_key: "0x0a0b".into(),
+                                leaves_pos: vec![1, 2, 3],
+                                tca_id: 5,
+                                record_id_range_start: vec![],
+                                record_id_range_end: vec![],
+                                value: None,
+                            })),
+                        }),
+                        assignments: Some(InspectorAssignments {
+                            main_inspectors: vec!["insp1".into(), "insp2".into()],
+                            backup_inspectors: vec!["insp3".into()],
+                        }),
                     },
                 );
 
@@ -117,35 +119,32 @@ pub mod proto {
                     era: 42,
                     irf: 3,
                     paths,
-                    assignments,
                     collective_seed: 12345,
                     builder: "0xabc123".into(),
                     submitted_at: 1700000000,
-                    archived_cid: vec![],
-                    archived_at: 0,
-                    archival_status: ArchivalStatus::Pending as i32,
+                    builder_signature: vec![],
+                    era_give_up_distance: 24,
                 };
 
                 let bytes = table.encode_to_vec();
                 let decoded = AssignmentTable::decode(bytes.as_slice()).unwrap();
                 assert_eq!(decoded.era, 42);
                 assert_eq!(decoded.irf, 3);
+                assert_eq!(decoded.era_give_up_distance, 24);
                 assert_eq!(decoded.paths.len(), 1);
-                assert_eq!(decoded.assignments.len(), 1);
-                assert_eq!(
-                    decoded.paths["path-001"].path_type,
-                    InspectionPathType::NodeAr as i32
-                );
-                assert_eq!(decoded.paths["path-001"].collectors.len(), 2);
-                match &decoded.paths["path-001"].path_data {
+                let path = decoded.paths["path-001"].path.as_ref().unwrap();
+                assert_eq!(path.path_type, InspectionPathType::NodeAr as i32);
+                assert_eq!(path.collectors.len(), 2);
+                match &path.path_data {
                     Some(PathData::NodeAr(node_ar)) => {
-                        assert_eq!(node_ar.node_key, "0x0a0b");
+                        assert_eq!(node_ar.node_key, b"0x0a0b");
                         assert_eq!(node_ar.leaves_pos, vec![1, 2, 3]);
                         assert_eq!(node_ar.tca_id, 5);
                     }
                     _ => panic!("Expected NodeAr path_data"),
                 }
-                assert_eq!(decoded.assignments["path-001"].main_inspectors.len(), 2);
+                let assignments = decoded.paths["path-001"].assignments.as_ref().unwrap();
+                assert_eq!(assignments.main_inspectors.len(), 2);
             }
 
             #[test]
@@ -158,13 +157,11 @@ pub mod proto {
                         era: 42,
                         irf: 3,
                         paths: BTreeMap::new(),
-                        assignments: BTreeMap::new(),
                         collective_seed: 0,
                         builder: "0xabc123".into(),
                         submitted_at: 0,
-                        archived_cid: vec![],
-                        archived_at: 0,
-                        archival_status: 0,
+                        builder_signature: vec![],
+                        era_give_up_distance: 0,
                     }),
                 };
 
@@ -205,7 +202,7 @@ pub mod proto {
                 let decoded = GetAssignmentTableResponse::decode(bytes.as_slice()).unwrap();
                 assert_eq!(decoded.status, GetAssignmentTableStatus::Building as i32);
                 assert!(decoded.table.is_none());
-                assert_eq!(decoded.lease_holder, "0xdef456");
+                assert_eq!(decoded.lease_holder, b"0xdef456");
             }
 
             #[test]
@@ -213,13 +210,13 @@ pub mod proto {
                 let req = PostInspectionResultRequest {
                     era_id: 42,
                     inspector_key: "0xabc123".into(),
-                    inspector_signature: String::new(),
+                    inspector_signature: vec![],
                     paths_results: vec![
                         InspectionPathResult {
                             path_hash: "0x01".into(),
                             result_hash: "0xaabbcc".into(),
                             exception: None,
-                            source_collectors: vec![],
+                            source_nodes: vec![],
                         },
                         InspectionPathResult {
                             path_hash: "0x02".into(),
@@ -234,7 +231,7 @@ pub mod proto {
                                     },
                                 )),
                             }),
-                            source_collectors: vec![],
+                            source_nodes: vec![],
                         },
                     ],
                 };
@@ -242,11 +239,11 @@ pub mod proto {
                 let bytes = req.encode_to_vec();
                 let decoded = PostInspectionResultRequest::decode(bytes.as_slice()).unwrap();
                 assert_eq!(decoded.paths_results.len(), 2);
-                assert_eq!(decoded.paths_results[0].path_hash, "0x01");
+                assert_eq!(decoded.paths_results[0].path_hash, b"0x01");
                 assert!(decoded.paths_results[1].exception.is_some());
                 match &decoded.paths_results[1].exception.as_ref().unwrap().kind {
                     Some(insp_path_exception::Kind::NodeArsUnavailable(inner)) => {
-                        assert_eq!(inner.node_key, "0xnode1");
+                        assert_eq!(inner.node_key, b"0xnode1");
                         assert_eq!(inner.tca_id, 1);
                     }
                     _ => panic!("Expected NodeArsUnavailable exception"),
@@ -292,22 +289,20 @@ pub mod proto {
                         exception: None,
                         submissions,
                         inspectors: vec!["insp1".into(), "insp2".into(), "insp3".into()],
-                        remaining_inspectors: vec!["insp4".into()],
                     },
                 );
 
                 let state = InspectionState {
+                    cluster_id: "0xaabb".into(),
                     era_id: 42,
                     total_paths: 10,
                     verified_paths: 5,
                     unverified_paths: 2,
                     pending_paths: 3,
+                    quorum_unreached_paths: 0,
                     irf: 3,
                     paths,
-                    updated_at: 1700000000,
-                    archived_cid: vec![],
-                    archived_at: 0,
-                    archival_status: 0,
+                    submissions: vec![],
                 };
 
                 let bytes = state.encode_to_vec();
@@ -342,14 +337,16 @@ pub mod proto {
                             )),
                         }),
                     }],
-                    quorum_unreached_paths: vec!["0x04".into()],
-                    assignments_hash: String::new(),
-                    state_hash: String::new(),
+                    quorum_unreached_paths: vec![UnverifiedPath {
+                        path_hash: "0x04".into(),
+                        exception: None,
+                    }],
+                    assignments_hash: vec![],
+                    state_hash: vec![],
                     generated_at: 1700000000,
                     complete: true,
-                    archived_cid: vec![],
-                    archived_at: 0,
-                    archival_status: 0,
+                    assignments_cid: vec![0x01, 0x02, 0x1e, 0x20],
+                    state_cid: vec![0x01, 0x02, 0x1e, 0x20],
                 };
 
                 let bytes = receipt.encode_to_vec();
@@ -401,7 +398,7 @@ pub mod proto {
             fn default_values_are_zero() {
                 let req = LeaseRequest::default();
                 assert_eq!(req.era_id, 0);
-                assert_eq!(req.inspector_key, "");
+                assert!(req.inspector_key.is_empty());
                 assert_eq!(req.ttl_seconds, 0);
 
                 let state = InspectionState::default();
@@ -455,6 +452,7 @@ pub mod proto {
                     era_id: 100,
                     inspector_key: "0x1234567890abcdef".into(),
                     ttl_seconds: 60,
+                    inspector_signature: vec![],
                 };
 
                 // Serialize to bytes (as inspector client would send)
@@ -477,8 +475,9 @@ pub mod proto {
                     inspector_key: "0x1234567890abcdef".into(),
                     lease_id: "lease-abc-123".into(),
                     expires_at: 1700000060,
-                    current_holder: String::new(),
+                    current_holder: vec![],
                     error_message: String::new(),
+                    collective_seed: 0,
                 };
 
                 let bytes = result.encode_to_vec();
@@ -504,12 +503,13 @@ pub mod proto {
                     expires_at: 1700000120,
                     current_holder: "0xother_inspector_key".into(),
                     error_message: String::new(),
+                    collective_seed: 0,
                 };
 
                 let bytes = result.encode_to_vec();
                 let decoded = LeaseResult::decode(bytes.as_slice()).unwrap();
                 assert_eq!(decoded.status, LeaseStatus::HeldByOther as i32);
-                assert_eq!(decoded.current_holder, "0xother_inspector_key");
+                assert_eq!(decoded.current_holder, b"0xother_inspector_key");
                 assert!(decoded.lease_id.is_empty());
             }
 
@@ -522,8 +522,9 @@ pub mod proto {
                     inspector_key: "0x1234567890abcdef".into(),
                     lease_id: String::new(),
                     expires_at: 0,
-                    current_holder: String::new(),
+                    current_holder: vec![],
                     error_message: "etcd cluster unavailable".into(),
+                    collective_seed: 0,
                 };
 
                 let bytes = result.encode_to_vec();
@@ -604,9 +605,26 @@ pub mod proto {
         }
     }
 
+    /// Separates a result hash from any other BLAKE2b-256 digest, as ddc-dac's
+    /// `inspection.ResultHashTag`.
+    pub const RESULT_HASH_TAG: &[u8] = b"ddc-insp/result/v1";
+
+    /// Separates an inspector's submission signature from anything else its key
+    /// signs, as ddc-dac's `inspection.SubmissionSigningTag`.
+    pub const SUBMISSION_SIGNING_TAG: &[u8] = b"ddc-insp/submission/v1";
+
+    fn push_len_bytes(out: &mut polkadot_sdk::sp_std::vec::Vec<u8>, bytes: &[u8]) {
+        out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        out.extend_from_slice(bytes);
+    }
+
     impl inspection::InspectionPathResult {
         /// Creates a new `InspectionPathResult` with `result_hash` computed as
-        /// Blake2b-256(path_hash || exception_bytes || source_nodes).
+        /// ddc-dac's `inspection.ResultHash`: BLAKE2b-256 of the tag, the path
+        /// hash, the exception bytes, then each source node's key and response
+        /// signature, every field length-prefixed with a 4-byte little-endian
+        /// length. Without the framing, bytes moved from the exception into a
+        /// source key land on the same hash.
         pub fn new(
             path_hash: polkadot_sdk::sp_std::vec::Vec<u8>,
             exception: Option<inspection::InspPathException>,
@@ -614,14 +632,17 @@ pub mod proto {
         ) -> Self {
             use blake2::digest::{consts::U32, Digest};
             use prost::Message;
-            let mut data = polkadot_sdk::sp_std::vec::Vec::new();
-            data.extend_from_slice(&path_hash);
-            if let Some(ref exc) = exception {
-                data.extend_from_slice(&exc.encode_to_vec());
-            }
+            let exception_bytes = exception
+                .as_ref()
+                .map(|exc| exc.encode_to_vec())
+                .unwrap_or_default();
+            let mut data = RESULT_HASH_TAG.to_vec();
+            push_len_bytes(&mut data, &path_hash);
+            push_len_bytes(&mut data, &exception_bytes);
+            data.extend_from_slice(&(source_nodes.len() as u32).to_le_bytes());
             for node in &source_nodes {
-                data.extend_from_slice(&node.node_key);
-                data.extend_from_slice(&node.response_signature);
+                push_len_bytes(&mut data, &node.node_key);
+                push_len_bytes(&mut data, &node.response_signature);
             }
             let hash: [u8; 32] = blake2::Blake2b::<U32>::digest(&data).into();
             Self {
@@ -631,6 +652,50 @@ pub mod proto {
                 source_nodes,
             }
         }
+    }
+
+    /// The bytes an inspector signs for one submission, as ddc-dac's
+    /// `inspection.SubmissionSigningMessage` builds them: the tag, the cluster,
+    /// the era and the inspector key, then one entry per result,
+    /// path_hash ‖ BLAKE2b-256(exception bytes) ‖ result_hash, in ascending
+    /// byte order. Variable-length fields carry a 4-byte little-endian length.
+    /// `exceptions[i]` is result `i`'s exception bytes, empty for none.
+    pub fn submission_signing_message(
+        cluster_id: &[u8],
+        era_id: u32,
+        inspector_key: &[u8],
+        path_hashes: &[polkadot_sdk::sp_std::vec::Vec<u8>],
+        result_hashes: &[polkadot_sdk::sp_std::vec::Vec<u8>],
+        exceptions: &[polkadot_sdk::sp_std::vec::Vec<u8>],
+    ) -> Option<polkadot_sdk::sp_std::vec::Vec<u8>> {
+        use blake2::digest::{consts::U32, Digest};
+        if result_hashes.len() != path_hashes.len() || exceptions.len() != path_hashes.len() {
+            return None;
+        }
+        let mut entries: polkadot_sdk::sp_std::vec::Vec<polkadot_sdk::sp_std::vec::Vec<u8>> =
+            path_hashes
+                .iter()
+                .zip(result_hashes)
+                .zip(exceptions)
+                .map(|((path_hash, result_hash), exception)| {
+                    let digest: [u8; 32] = blake2::Blake2b::<U32>::digest(exception).into();
+                    let mut entry = polkadot_sdk::sp_std::vec::Vec::new();
+                    push_len_bytes(&mut entry, path_hash);
+                    entry.extend_from_slice(&digest);
+                    push_len_bytes(&mut entry, result_hash);
+                    entry
+                })
+                .collect();
+        entries.sort();
+        let mut message = SUBMISSION_SIGNING_TAG.to_vec();
+        push_len_bytes(&mut message, cluster_id);
+        message.extend_from_slice(&era_id.to_le_bytes());
+        push_len_bytes(&mut message, inspector_key);
+        message.extend_from_slice(&(entries.len() as u32).to_le_bytes());
+        for entry in entries {
+            message.extend_from_slice(&entry);
+        }
+        Some(message)
     }
 
     pub mod activity_wasm {
@@ -710,5 +775,338 @@ pub mod proto {
                 Self::decode(bytes).ok()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod result_hash_vectors {
+    use prost::Message;
+
+    use crate::proto::inspection::{
+        insp_path_exception::Kind, provenance_evidence, BucketARsSigUnverified,
+        BucketARsUnavailable, BucketAggregateMalformed, BucketIrfUnreached,
+        BucketTcaTreeNeedsDeepInspection, InspPathException, InspectionPathResult,
+        MultipleExceptions, NodeARsSigUnverified, NodeARsUnavailable, NodeAggregateMalformed,
+        NodeIrfUnreached, NodeProvenance, NodeTcaTreeNeedsDeepInspection, PathValue,
+        PostInspectionResultRequest, ProvenanceEvidence, TcaInspectionStage, UnverifiedUsage,
+    };
+
+    const FIXTURE: &str = include_str!("test_data/result_hash_vectors.json");
+    const FIXTURE_PATH: &str = "src/test_data/result_hash_vectors.json";
+    const REGENERATE_ENV: &str = "REGENERATE_RESULT_HASH_VECTORS";
+
+    fn usage() -> UnverifiedUsage {
+        UnverifiedUsage {
+            usage: Some(PathValue {
+                put_count: 3,
+                get_count: 5,
+                stored: -4096,
+                transferred: 1 << 40,
+                cpu_units: 7,
+                gpu_units: 0,
+                ram_units: u64::MAX,
+                compute_count: 2,
+            }),
+            evidence: Some(ProvenanceEvidence {
+                kind: Some(provenance_evidence::Kind::Signed(NodeProvenance {
+                    node_key: vec![0xaa; 32],
+                    response_signature: vec![0xbb; 64],
+                })),
+            }),
+        }
+    }
+
+    fn unavailable_usage() -> UnverifiedUsage {
+        UnverifiedUsage {
+            usage: Some(PathValue::default()),
+            evidence: Some(ProvenanceEvidence {
+                kind: Some(provenance_evidence::Kind::Unavailable(NodeProvenance {
+                    node_key: vec![0xcc; 32],
+                    response_signature: vec![],
+                })),
+            }),
+        }
+    }
+
+    fn exception(kind: Kind) -> Option<InspPathException> {
+        Some(InspPathException { kind: Some(kind) })
+    }
+
+    fn sources(count: u8) -> Vec<NodeProvenance> {
+        (0..count)
+            .map(|i| NodeProvenance {
+                node_key: vec![i; 32],
+                response_signature: vec![i ^ 0xff; 64],
+            })
+            .collect()
+    }
+
+    fn cases() -> Vec<(&'static str, Option<InspPathException>, Vec<NodeProvenance>)> {
+        let node_key = vec![0x11; 32];
+        vec![
+            ("no exception, no sources", None, vec![]),
+            ("no exception, three sources", None, sources(3)),
+            (
+                "empty exception",
+                Some(InspPathException::default()),
+                sources(1),
+            ),
+            (
+                "node irf unreached",
+                exception(Kind::NodeIrfUnreached(NodeIrfUnreached {
+                    node_key: node_key.clone(),
+                    tca_id: 29807910,
+                    unverified_usage: Some(usage()),
+                })),
+                sources(1),
+            ),
+            (
+                "bucket irf unreached with empty usage",
+                exception(Kind::BucketIrfUnreached(BucketIrfUnreached {
+                    bucket_id: u64::MAX,
+                    tca_id: 0,
+                    unverified_usage: Some(UnverifiedUsage::default()),
+                })),
+                vec![],
+            ),
+            (
+                "node ars sig unverified",
+                exception(Kind::NodeArsSigUnverified(NodeARsSigUnverified {
+                    node_key: node_key.clone(),
+                    tca_id: 1,
+                    bad_records_ids: vec![vec![1, 2, 3], vec![], vec![0xff; 16]],
+                    unverified_usage: Some(usage()),
+                })),
+                sources(2),
+            ),
+            (
+                "bucket ars sig unverified",
+                exception(Kind::BucketArsSigUnverified(BucketARsSigUnverified {
+                    bucket_id: 42,
+                    node_key: node_key.clone(),
+                    tca_id: 2,
+                    bad_records_ids: vec![vec![9; 8]],
+                    unverified_usage: Some(unavailable_usage()),
+                })),
+                sources(1),
+            ),
+            (
+                "node ars unavailable",
+                exception(Kind::NodeArsUnavailable(NodeARsUnavailable {
+                    node_key: node_key.clone(),
+                    tca_id: 3,
+                    leaves_ids: vec![0, 1, 300, u64::MAX],
+                    unverified_usage: Some(usage()),
+                })),
+                sources(1),
+            ),
+            (
+                "bucket ars unavailable",
+                exception(Kind::BucketArsUnavailable(BucketARsUnavailable {
+                    bucket_id: 7,
+                    node_key: node_key.clone(),
+                    tca_id: 4,
+                    leaves_ids: vec![5],
+                    unverified_usage: None,
+                })),
+                sources(1),
+            ),
+            (
+                "node aggregate malformed",
+                exception(Kind::NodeAggregateMalformed(NodeAggregateMalformed {
+                    node_key: node_key.clone(),
+                    tca_id: 5,
+                    unverified_usage: Some(usage()),
+                })),
+                sources(1),
+            ),
+            (
+                "bucket aggregate malformed",
+                exception(Kind::BucketAggregateMalformed(BucketAggregateMalformed {
+                    bucket_id: 8,
+                    tca_id: 6,
+                    unverified_usage: Some(usage()),
+                })),
+                sources(1),
+            ),
+            (
+                "node tca tree needs deep inspection",
+                exception(Kind::NodeTcaTreeNeedsDeepInspection(
+                    NodeTcaTreeNeedsDeepInspection {
+                        node_key: node_key.clone(),
+                        tca_id: 7,
+                        stage: TcaInspectionStage::RebuildMismatch as i32,
+                        unverified_usage: Some(usage()),
+                    },
+                )),
+                sources(1),
+            ),
+            (
+                "bucket tca tree needs deep inspection",
+                exception(Kind::BucketTcaTreeNeedsDeepInspection(
+                    BucketTcaTreeNeedsDeepInspection {
+                        bucket_id: 9,
+                        node_key: node_key.clone(),
+                        tca_id: 8,
+                        stage: TcaInspectionStage::NoMatchingPair as i32,
+                        unverified_usage: Some(usage()),
+                    },
+                )),
+                sources(1),
+            ),
+            (
+                "multiple exceptions, nested",
+                exception(Kind::MultipleExceptions(MultipleExceptions {
+                    exceptions: vec![
+                        InspPathException {
+                            kind: Some(Kind::NodeIrfUnreached(NodeIrfUnreached {
+                                node_key: node_key.clone(),
+                                tca_id: 10,
+                                unverified_usage: Some(usage()),
+                            })),
+                        },
+                        InspPathException {
+                            kind: Some(Kind::MultipleExceptions(MultipleExceptions {
+                                exceptions: vec![InspPathException {
+                                    kind: Some(Kind::BucketAggregateMalformed(
+                                        BucketAggregateMalformed {
+                                            bucket_id: 11,
+                                            tca_id: 12,
+                                            unverified_usage: None,
+                                        },
+                                    )),
+                                }],
+                            })),
+                        },
+                    ],
+                })),
+                sources(3),
+            ),
+        ]
+    }
+
+    fn render() -> String {
+        let vectors: Vec<serde_json::Value> = cases()
+            .into_iter()
+            .enumerate()
+            .map(|(i, (name, exception, source_nodes))| {
+                let path_hash = vec![i as u8 + 1; 32];
+                let result = InspectionPathResult::new(path_hash, exception, source_nodes);
+                let request = PostInspectionResultRequest {
+                    era_id: 1,
+                    inspector_key: vec![0x22; 32],
+                    inspector_signature: vec![0x33; 64],
+                    paths_results: vec![result.clone()],
+                };
+                serde_json::json!({
+                    "name": name,
+                    "request": hex::encode(request.encode_to_vec()),
+                    "result_hash": hex::encode(&result.result_hash),
+                })
+            })
+            .collect();
+        serde_json::to_string_pretty(&vectors).unwrap() + "\n"
+    }
+
+    #[test]
+    fn a_result_hash_matches_ddc_dacs_pinned_encoding() {
+        let exception = InspPathException {
+            kind: Some(Kind::NodeAggregateMalformed(NodeAggregateMalformed {
+                node_key: vec![],
+                tca_id: 1,
+                unverified_usage: None,
+            })),
+        };
+        assert_eq!(exception.encode_to_vec(), vec![0x42, 0x02, 0x10, 0x01]);
+        let sources = vec![
+            NodeProvenance {
+                node_key: vec![0x33; 32],
+                response_signature: vec![0x44; 64],
+            },
+            NodeProvenance {
+                node_key: vec![0x55; 32],
+                response_signature: vec![],
+            },
+        ];
+        let framed = InspectionPathResult::new(vec![0x11; 32], Some(exception), sources);
+        assert_eq!(
+            hex::encode(&framed.result_hash),
+            "8689d061cbf4ed8650e9d96cc9b6f32c39fcbbba5a4dcffd0af30c1dc37fa669"
+        );
+        let bare = InspectionPathResult::new(vec![0x11; 32], None, vec![]);
+        assert_eq!(
+            hex::encode(&bare.result_hash),
+            "10cf76eff7571c249ebd971cafff37d9e47efb011bbae834a2668c5566338745"
+        );
+    }
+
+    #[test]
+    fn an_exception_moved_into_a_source_key_changes_the_result_hash() {
+        let exception = InspPathException {
+            kind: Some(Kind::NodeIrfUnreached(NodeIrfUnreached {
+                node_key: vec![0x22; 32],
+                tca_id: 1,
+                unverified_usage: Some(usage()),
+            })),
+        };
+        let source = NodeProvenance {
+            node_key: vec![0x33; 32],
+            response_signature: vec![0x44; 64],
+        };
+        let mut shifted = exception.encode_to_vec();
+        shifted.extend_from_slice(&source.node_key);
+        shifted.extend_from_slice(&source.response_signature);
+
+        let honest = InspectionPathResult::new(vec![0x11; 32], Some(exception), vec![source]);
+        let forged = InspectionPathResult::new(
+            vec![0x11; 32],
+            None,
+            vec![NodeProvenance {
+                node_key: shifted,
+                response_signature: vec![],
+            }],
+        );
+        assert_ne!(honest.result_hash, forged.result_hash);
+    }
+
+    #[test]
+    fn a_submission_signing_message_matches_ddc_dacs_pinned_encoding() {
+        let message = crate::proto::submission_signing_message(
+            b"cluster-1",
+            1495203,
+            &[0x0c; 32],
+            &[vec![0x02; 32], vec![0x01; 32]],
+            &[vec![0xbb; 32], vec![0xaa; 32]],
+            &[vec![0x0a, 0x02, 0x08, 0x01], vec![]],
+        )
+        .unwrap();
+        assert_eq!(hex::encode(message), "6464632d696e73702f7375626d697373696f6e2f763109000000636c75737465722d31a3d01600200000000c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c020000002000000001010101010101010101010101010101010101010101010101010101010101010e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a820000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2000000002020202020202020202020202020202020202020202020202020202020202026862d269447d0413e07bbb23be38dea34b151ff6a9898fa6dd34657e6f909a3820000000bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    }
+
+    #[test]
+    fn a_submission_signing_message_needs_one_exception_and_result_per_path() {
+        assert!(crate::proto::submission_signing_message(
+            b"c",
+            1,
+            b"k",
+            &[vec![1]],
+            &[vec![2]],
+            &[]
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn result_hash_vectors_match_the_committed_fixture() {
+        let rendered = render();
+        if std::env::var(REGENERATE_ENV).is_ok() {
+            std::fs::write(FIXTURE_PATH, &rendered).unwrap();
+            return;
+        }
+        assert_eq!(
+            rendered, FIXTURE,
+            "regenerate with {}=1 cargo test",
+            REGENERATE_ENV
+        );
     }
 }
