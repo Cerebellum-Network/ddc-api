@@ -31,8 +31,11 @@ use crate::{
 
 /// A usable answer names at least this many registry-confirmed members.
 pub const MEMBER_FLOOR: usize = 2;
-/// Candidates asked per discovery; the next tick asks again.
+/// Candidates whose answer counts against a discovery; the next tick asks again.
+/// A candidate that answers it holds no sync client does not count.
 pub const MAX_DISCOVERY_ATTEMPTS: usize = 3;
+/// Candidates asked per discovery at most, counted or not.
+pub const MAX_DISCOVERY_PROBES: usize = 8;
 /// Reader timeout for one membership question.
 pub const DISCOVERY_TIMEOUT_MS: u64 = 15_000;
 /// Headroom the reader timeout must leave above a node's declared deadline.
@@ -114,20 +117,26 @@ fn discover_and_cache<
 	Ok(nodes)
 }
 
-/// Asks the first candidates in key order and returns the first usable
-/// answer: one that names at least `MEMBER_FLOOR` validated members and is
-/// signed by one of them. `probe` asks one node.
+/// Asks candidates in key order and returns the first usable answer: one that
+/// names at least `MEMBER_FLOOR` validated members and is signed by one of
+/// them. A candidate holding no sync client is passed over without using up
+/// one of the `MAX_DISCOVERY_ATTEMPTS`; at most `MAX_DISCOVERY_PROBES`
+/// candidates are asked in all. `probe` asks one node.
 pub fn discover<P: FnMut(&NodePubKey, &StorageNodeParams) -> SharedMemoryProbe>(
 	cluster_id: &ClusterId,
 	registry: &[(NodePubKey, StorageNodeParams)],
 	mut probe: P,
 ) -> Result<Vec<SharedMemoryNode>, ApiError> {
 	let mut seen = Vec::new();
+	let mut attempts = 0;
 	let candidates = registry
 		.iter()
 		.filter(|(_, params)| params.mode != StorageNodeMode::Compute)
-		.take(MAX_DISCOVERY_ATTEMPTS);
+		.take(MAX_DISCOVERY_PROBES);
 	for (key, params) in candidates {
+		if attempts == MAX_DISCOVERY_ATTEMPTS {
+			break;
+		}
 		match probe(key, params) {
 			SharedMemoryProbe::Answer { info, declared_deadline_ms, signer } => {
 				check_deadline_coupling(key, declared_deadline_ms);
@@ -151,9 +160,28 @@ pub fn discover<P: FnMut(&NodePubKey, &StorageNodeParams) -> SharedMemoryProbe>(
 					);
 					return Ok(members);
 				}
+				log!(
+					debug,
+					"Shared-memory candidate {:?} of cluster {:?} gave no usable answer",
+					key,
+					cluster_id
+				);
 				seen.push(SharedMemoryAnswerKind::Rejected);
+				attempts += 1;
 			}
-			SharedMemoryProbe::Refused(kind) => seen.push(kind),
+			SharedMemoryProbe::Refused(kind) => {
+				log!(
+					debug,
+					"Shared-memory candidate {:?} of cluster {:?} refused: {:?}",
+					key,
+					cluster_id,
+					kind
+				);
+				if kind != SharedMemoryAnswerKind::NoClient {
+					attempts += 1;
+				}
+				seen.push(kind);
+			}
 		}
 	}
 
@@ -490,6 +518,74 @@ mod tests {
 		});
 		assert!(result.is_err());
 		assert_eq!(asked, MAX_DISCOVERY_ATTEMPTS);
+	}
+
+	fn wide_registry(count: u8) -> Vec<(NodePubKey, StorageNodeParams)> {
+		(1u8..=count).map(|i| (key([i; 32]), params("node", StorageNodeMode::Cache))).collect()
+	}
+
+	#[test]
+	fn candidates_without_a_sync_client_do_not_use_up_attempts() {
+		let registry = wide_registry(MAX_DISCOVERY_ATTEMPTS as u8 + 2);
+		let answering = key([MAX_DISCOVERY_ATTEMPTS as u8 + 1; 32]);
+		let mut asked = 0;
+		let result = discover(&ClusterId::zero(), &registry, |candidate, _| {
+			asked += 1;
+			if *candidate == answering {
+				SharedMemoryProbe::Answer {
+					info: info(vec![member([1; 32], "x"), member([2; 32], "x")]),
+					declared_deadline_ms: None,
+					signer: vec![1; 32],
+				}
+			} else {
+				SharedMemoryProbe::Refused(SharedMemoryAnswerKind::NoClient)
+			}
+		});
+		assert_eq!(asked, MAX_DISCOVERY_ATTEMPTS + 1);
+		assert_eq!(result.map(|nodes| nodes.len()), Ok(2));
+	}
+
+	#[test]
+	fn discovery_fails_when_no_candidate_holds_a_sync_client() {
+		let registry = wide_registry(MAX_DISCOVERY_ATTEMPTS as u8 + 1);
+		let mut asked = 0;
+		let result = discover(&ClusterId::zero(), &registry, |_, _| {
+			asked += 1;
+			SharedMemoryProbe::Refused(SharedMemoryAnswerKind::NoClient)
+		});
+		assert_eq!(
+			result,
+			Err(ApiError::FailedToFetchSharedMemoryNodes { cluster_id: ClusterId::zero() })
+		);
+		assert_eq!(asked, registry.len());
+	}
+
+	#[test]
+	fn discovery_asks_at_most_max_probes_candidates_however_they_answer() {
+		let registry = wide_registry(MAX_DISCOVERY_PROBES as u8 + 4);
+		let mut asked = 0;
+		let result = discover(&ClusterId::zero(), &registry, |_, _| {
+			asked += 1;
+			SharedMemoryProbe::Refused(SharedMemoryAnswerKind::NoClient)
+		});
+		assert!(result.is_err());
+		assert_eq!(asked, MAX_DISCOVERY_PROBES);
+	}
+
+	#[test]
+	fn a_refusal_other_than_no_client_still_uses_up_an_attempt() {
+		let registry = wide_registry(MAX_DISCOVERY_PROBES as u8);
+		let mut asked = 0;
+		let result = discover(&ClusterId::zero(), &registry, |_, _| {
+			asked += 1;
+			if asked % 2 == 0 {
+				SharedMemoryProbe::Refused(SharedMemoryAnswerKind::StoreUnreachable)
+			} else {
+				SharedMemoryProbe::Refused(SharedMemoryAnswerKind::NoClient)
+			}
+		});
+		assert!(result.is_err());
+		assert_eq!(asked, 2 * MAX_DISCOVERY_ATTEMPTS);
 	}
 
 	const INSPECTOR: &[u8] = b"inspector-key";
