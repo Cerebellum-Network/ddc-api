@@ -123,8 +123,10 @@ pub struct DdcClient<'a> {
 /// protocol error, not a configurable client behaviour.
 macro_rules! fetch_and_parse_proto {
 	($self:expr, $url:expr, $response_ty:ty) => {{
-		let response = $self.get(&$url, Accept::Protobuf, &[])?;
-		let body = response.body().collect::<Vec<u8>>();
+		let body = match $crate::prefetch::take_prefetched(&$url) {
+			Some(body) => body,
+			None => $self.get(&$url, Accept::Protobuf, &[])?.body().collect::<Vec<u8>>(),
+		};
 
 		let proto_signed_response = proto::signature::SignedResponse::decode(body.as_slice())
 			.map_err(|e| {
@@ -428,28 +430,17 @@ impl<'a> DdcClient<'a> {
 		limit: Option<u32>,
 		indexes: Option<&[u64]>,
 	) -> Result<ApiResponse<proto::activity::GetRecordsResponse>, http::Error> {
-		let mut url = format!(
-			"{}/activity/v1/records?tcaId={}&nodePubKey={}&recordIdGte={}&recordIdLte={}",
+		let url = records_range_url(
 			self.base_url,
 			tca_id,
-			hex::encode(node_pubkey),
-			hex::encode(record_id_gte),
-			hex::encode(record_id_lte),
+			node_pubkey,
+			bucket_id,
+			record_id_gte,
+			record_id_lte,
+			cursor,
+			limit,
+			indexes,
 		);
-		if let Some(b) = bucket_id {
-			url = format!("{}&bucketId={}", url, b);
-		}
-		if let Some(idx) = indexes {
-			let joined = idx.iter().map(|i| format!("{}", i)).collect::<Vec<_>>().join(",");
-			url = format!("{}&indexes={}", url, joined);
-		} else {
-			if let Some(c) = cursor {
-				url = format!("{}&cursor={}", url, hex::encode(c));
-			}
-			if let Some(l) = limit {
-				url = format!("{}&limit={}", url, l);
-			}
-		}
 
 		let (response, signed_by) =
 			fetch_and_parse_proto!(self, url, proto::activity::GetRecordsResponse)?;
@@ -542,14 +533,8 @@ impl<'a> DdcClient<'a> {
 		merkle_tree_node_id: u64,
 		levels: u16,
 	) -> Result<ApiResponse<proto::activity::ActivityTreeTraversalResponse>, http::Error> {
-		let mut url = format!(
-			"{}/activity/v1/nodes/{}/traverse/{}?merkleTreeNodeId={}&levels={}",
-			self.base_url,
-			<NodePubKey as Into<String>>::into(node_key),
-			tca_id,
-			merkle_tree_node_id,
-			levels,
-		);
+		let url =
+			node_aggregate_traversal_url(self.base_url, tca_id, node_key, merkle_tree_node_id, levels);
 
 		let (response, signed_by) =
 			fetch_and_parse_proto!(self, url, proto::activity::ActivityTreeTraversalResponse)?;
@@ -567,12 +552,11 @@ impl<'a> DdcClient<'a> {
 		merkle_tree_node_id: u64,
 		levels: u16,
 	) -> Result<ApiResponse<proto::activity::ActivityTreeTraversalResponse>, http::Error> {
-		let mut url = format!(
-			"{}/activity/v1/buckets/{}/traverse/{}?nodeId={}&merkleTreeNodeId={}&levels={}",
+		let url = bucket_sub_aggregate_traversal_url(
 			self.base_url,
-			bucket_id,
 			tca_id,
-			<NodePubKey as Into<String>>::into(node_key),
+			bucket_id,
+			node_key,
 			merkle_tree_node_id,
 			levels,
 		);
@@ -1060,6 +1044,82 @@ impl<'a> DdcClient<'a> {
 enum Accept {
 	Any,
 	Protobuf,
+}
+
+/// The URL `DdcClient::fetch_records_range` requests.
+#[allow(clippy::too_many_arguments)]
+pub fn records_range_url(
+	base_url: &str,
+	tca_id: TcaEra,
+	node_pubkey: &[u8],
+	bucket_id: Option<BucketId>,
+	record_id_gte: &[u8],
+	record_id_lte: &[u8],
+	cursor: Option<&[u8]>,
+	limit: Option<u32>,
+	indexes: Option<&[u64]>,
+) -> String {
+	let mut url = format!(
+		"{}/activity/v1/records?tcaId={}&nodePubKey={}&recordIdGte={}&recordIdLte={}",
+		base_url,
+		tca_id,
+		hex::encode(node_pubkey),
+		hex::encode(record_id_gte),
+		hex::encode(record_id_lte),
+	);
+	if let Some(b) = bucket_id {
+		url = format!("{}&bucketId={}", url, b);
+	}
+	if let Some(idx) = indexes {
+		let joined = idx.iter().map(|i| format!("{}", i)).collect::<Vec<_>>().join(",");
+		url = format!("{}&indexes={}", url, joined);
+	} else {
+		if let Some(c) = cursor {
+			url = format!("{}&cursor={}", url, hex::encode(c));
+		}
+		if let Some(l) = limit {
+			url = format!("{}&limit={}", url, l);
+		}
+	}
+	url
+}
+
+/// The URL `DdcClient::traverse_node_aggregate` requests.
+pub fn node_aggregate_traversal_url(
+	base_url: &str,
+	tca_id: TcaEra,
+	node_key: NodePubKey,
+	merkle_tree_node_id: u64,
+	levels: u16,
+) -> String {
+	format!(
+		"{}/activity/v1/nodes/{}/traverse/{}?merkleTreeNodeId={}&levels={}",
+		base_url,
+		<NodePubKey as Into<String>>::into(node_key),
+		tca_id,
+		merkle_tree_node_id,
+		levels,
+	)
+}
+
+/// The URL `DdcClient::traverse_bucket_sub_aggregate` requests.
+pub fn bucket_sub_aggregate_traversal_url(
+	base_url: &str,
+	tca_id: TcaEra,
+	bucket_id: BucketId,
+	node_key: NodePubKey,
+	merkle_tree_node_id: u64,
+	levels: u16,
+) -> String {
+	format!(
+		"{}/activity/v1/buckets/{}/traverse/{}?nodeId={}&merkleTreeNodeId={}&levels={}",
+		base_url,
+		bucket_id,
+		tca_id,
+		<NodePubKey as Into<String>>::into(node_key),
+		merkle_tree_node_id,
+		levels,
+	)
 }
 
 const ERAS_PATH: &str = "/activity/v1/eras";
