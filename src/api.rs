@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
 	client::{DdcClient, ReadBackError},
+	prefetch::{PrefetchCache, PrefetchRequest},
 	proto::{self},
 	read_auth::ReadSigner,
 	shared_memory::SharedMemoryNode,
@@ -659,7 +660,7 @@ pub fn fetch_traversed_node_aggregate<
 		}
 	})?;
 
-	let base_url = format!("http://{}:{}", host, collector_params.http_port);
+	let base_url = http_base_url(host, collector_params.http_port);
 	let client = DdcClient::new(
 		collector_key.clone(),
 		&base_url,
@@ -735,7 +736,7 @@ pub fn fetch_records_range<
 		}
 	})?;
 
-	let base_url = format!("http://{}:{}", host, node_params.http_port);
+	let base_url = http_base_url(host, node_params.http_port);
 	let client = DdcClient::new(
 		node_key.clone(),
 		&base_url,
@@ -792,7 +793,7 @@ pub fn fetch_traversed_bucket_sub_aggregate<
 		}
 	})?;
 
-	let base_url = format!("http://{}:{}", host, collector_params.http_port);
+	let base_url = http_base_url(host, collector_params.http_port);
 	let client = DdcClient::new(
 		collector_key.clone(),
 		&base_url,
@@ -825,6 +826,139 @@ pub fn fetch_traversed_bucket_sub_aggregate<
     })?;
 
 	Ok(traversed_bucket_sub_aggregate)
+}
+
+/// The base URL of a node serving HTTP on host and port.
+fn http_base_url(host: &str, http_port: u16) -> String {
+	format!("http://{}:{}", host, http_port)
+}
+
+/// The node's registered key and the base URL its fetches go to.
+fn resolve_base_url<
+	AccountId,
+	BlockNumber,
+	CM: ClusterManager<AccountId, BlockNumber>,
+	NM: NodeManager<AccountId>,
+>(
+	cluster_id: &ClusterId,
+	node_key: NodePubKey,
+) -> Result<(NodePubKey, String), ApiError> {
+	let (node_key, node_params) =
+		get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, node_key)?;
+	let host = str::from_utf8(&node_params.host).map_err(|e| {
+		log!(error, "❌ Failed to parse host for node {:?} in cluster {:?}: {:?}", node_key, cluster_id, e);
+		ApiError::NodeHostParseError {
+			cluster_id: *cluster_id,
+			node_key: node_key.clone(),
+			host: node_params.host.clone(),
+		}
+	})?;
+	let base_url = http_base_url(host, node_params.http_port);
+	Ok((node_key, base_url))
+}
+
+/// The request `fetch_records_range` makes for the same arguments.
+#[allow(clippy::too_many_arguments)]
+pub fn records_range_request<
+	AccountId,
+	BlockNumber,
+	CM: ClusterManager<AccountId, BlockNumber>,
+	NM: NodeManager<AccountId>,
+>(
+	cluster_id: &ClusterId,
+	tca_id: TcaEra,
+	node_key: NodePubKey,
+	bucket_id: Option<BucketId>,
+	record_id_gte: &[u8],
+	record_id_lte: &[u8],
+	cursor: Option<&[u8]>,
+	limit: Option<u32>,
+	indexes: Option<&[u64]>,
+) -> Result<PrefetchRequest, ApiError> {
+	let (node_key, base_url) = resolve_base_url::<AccountId, BlockNumber, CM, NM>(cluster_id, node_key)?;
+	let url = crate::client::records_range_url(
+		&base_url,
+		tca_id,
+		node_key.as_ref(),
+		bucket_id,
+		record_id_gte,
+		record_id_lte,
+		cursor,
+		limit,
+		indexes,
+	);
+	Ok(PrefetchRequest { url, node_key })
+}
+
+/// The request `fetch_traversed_node_aggregate` makes for the same arguments.
+pub fn traversed_node_aggregate_request<
+	AccountId,
+	BlockNumber,
+	CM: ClusterManager<AccountId, BlockNumber>,
+	NM: NodeManager<AccountId>,
+>(
+	cluster_id: &ClusterId,
+	tca_id: TcaEra,
+	collector_key: NodePubKey,
+	node_key: NodePubKey,
+	tree_node_id: u64,
+	tree_levels_count: u16,
+) -> Result<PrefetchRequest, ApiError> {
+	let (collector_key, base_url) =
+		resolve_base_url::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
+	let url = crate::client::node_aggregate_traversal_url(
+		&base_url,
+		tca_id,
+		node_key,
+		tree_node_id,
+		tree_levels_count,
+	);
+	Ok(PrefetchRequest { url, node_key: collector_key })
+}
+
+/// The request `fetch_traversed_bucket_sub_aggregate` makes for the same
+/// arguments.
+#[allow(clippy::too_many_arguments)]
+pub fn traversed_bucket_sub_aggregate_request<
+	AccountId,
+	BlockNumber,
+	CM: ClusterManager<AccountId, BlockNumber>,
+	NM: NodeManager<AccountId>,
+>(
+	cluster_id: &ClusterId,
+	tca_id: TcaEra,
+	collector_key: NodePubKey,
+	bucket_id: BucketId,
+	node_key: NodePubKey,
+	tree_node_id: u64,
+	tree_levels_count: u16,
+) -> Result<PrefetchRequest, ApiError> {
+	let (collector_key, base_url) =
+		resolve_base_url::<AccountId, BlockNumber, CM, NM>(cluster_id, collector_key)?;
+	let url = crate::client::bucket_sub_aggregate_traversal_url(
+		&base_url,
+		tca_id,
+		bucket_id,
+		node_key,
+		tree_node_id,
+		tree_levels_count,
+	);
+	Ok(PrefetchRequest { url, node_key: collector_key })
+}
+
+/// The cursor of the records page after the one prefetched for url, when that
+/// page has records and a next page exists. Read without verifying the
+/// signature: it only plans the next prefetch, and the page itself is verified
+/// when it is served.
+pub fn prefetched_records_next_cursor(cache: &PrefetchCache, url: &str) -> Option<Vec<u8>> {
+	let body = cache.body(url)?;
+	let signed = <proto::signature::SignedResponse as prost::Message>::decode(body).ok()?;
+	let page =
+		<proto::activity::GetRecordsResponse as prost::Message>::decode(signed.payload.as_slice()).ok()?;
+	match page.next_cursor {
+		Some(cursor) if !cursor.is_empty() && !page.records.is_empty() => Some(cursor),
+		_ => None,
+	}
 }
 
 /// Traverse EHD record.
@@ -2842,5 +2976,429 @@ mod tests {
 				(url(HOST_B, &next_query(6)), RESPONSE_TIMEOUT),
 			]
 		);
+	}
+
+	mod prefetch {
+		use super::*;
+		use crate::prefetch::{
+			prefetch_round, serve_prefetched, PrefetchFailure, PrefetchStats, MAX_IN_FLIGHT,
+		};
+		use proto::activity::{ActivityRecord, GetRecordsResponse};
+
+		const TCA: TcaEra = 11;
+		const BUCKET: BucketId = 5;
+		const RANGE_START: [u8; 2] = [0x00, 0x01];
+		const RANGE_END: [u8; 2] = [0x00, 0x09];
+
+		#[derive(Clone, Copy)]
+		enum Fault {
+			Io,
+			Deadline,
+			Status(u16),
+			BodyRead,
+		}
+
+		struct FaultyHttp {
+			inner: TestOffchainExt,
+			uris: std::collections::BTreeMap<u16, String>,
+			faults: std::collections::BTreeMap<String, Fault>,
+			waits: Arc<std::sync::Mutex<Vec<usize>>>,
+		}
+
+		impl FaultyHttp {
+			fn fault_of(&self, id: &HttpRequestId) -> Option<Fault> {
+				self.uris.get(&id.0).and_then(|uri| self.faults.get(uri)).copied()
+			}
+		}
+
+		impl Externalities for FaultyHttp {
+			fn is_validator(&self) -> bool {
+				self.inner.is_validator()
+			}
+			fn network_state(
+				&self,
+			) -> Result<polkadot_sdk::sp_core::offchain::OpaqueNetworkState, ()> {
+				self.inner.network_state()
+			}
+			fn timestamp(&mut self) -> Timestamp {
+				self.inner.timestamp()
+			}
+			fn sleep_until(&mut self, deadline: Timestamp) {
+				self.inner.sleep_until(deadline)
+			}
+			fn random_seed(&mut self) -> [u8; 32] {
+				self.inner.random_seed()
+			}
+			fn http_request_start(
+				&mut self,
+				method: &str,
+				uri: &str,
+				meta: &[u8],
+			) -> Result<HttpRequestId, ()> {
+				let id = self.inner.http_request_start(method, uri, meta)?;
+				self.uris.insert(id.0, uri.to_string());
+				Ok(id)
+			}
+			fn http_request_add_header(
+				&mut self,
+				request_id: HttpRequestId,
+				name: &str,
+				value: &str,
+			) -> Result<(), ()> {
+				self.inner.http_request_add_header(request_id, name, value)
+			}
+			fn http_request_write_body(
+				&mut self,
+				request_id: HttpRequestId,
+				chunk: &[u8],
+				deadline: Option<Timestamp>,
+			) -> Result<(), HttpError> {
+				self.inner.http_request_write_body(request_id, chunk, deadline)
+			}
+			fn http_response_wait(
+				&mut self,
+				ids: &[HttpRequestId],
+				deadline: Option<Timestamp>,
+			) -> Vec<HttpRequestStatus> {
+				self.waits.lock().unwrap().push(ids.len());
+				let answered = self.inner.http_response_wait(ids, deadline);
+				ids.iter()
+					.zip(answered)
+					.map(|(id, status)| match self.fault_of(id) {
+						Some(Fault::Io) => HttpRequestStatus::IoError,
+						Some(Fault::Deadline) => HttpRequestStatus::DeadlineReached,
+						Some(Fault::Status(code)) => HttpRequestStatus::Finished(code),
+						Some(Fault::BodyRead) | None => status,
+					})
+					.collect()
+			}
+			fn http_response_headers(
+				&mut self,
+				request_id: HttpRequestId,
+			) -> Vec<(Vec<u8>, Vec<u8>)> {
+				self.inner.http_response_headers(request_id)
+			}
+			fn http_response_read_body(
+				&mut self,
+				request_id: HttpRequestId,
+				buffer: &mut [u8],
+				deadline: Option<Timestamp>,
+			) -> Result<usize, HttpError> {
+				if let Some(Fault::BodyRead) = self.fault_of(&request_id) {
+					return Err(HttpError::IoError);
+				}
+				self.inner.http_response_read_body(request_id, buffer, deadline)
+			}
+			fn set_authorized_nodes(
+				&mut self,
+				nodes: Vec<polkadot_sdk::sp_core::OpaquePeerId>,
+				authorized_only: bool,
+			) {
+				self.inner.set_authorized_nodes(nodes, authorized_only)
+			}
+		}
+
+		/// Runs test against the expected requests, with each faulted URL
+		/// answering as its fault says; returns the size of every wait.
+		fn run_faulty(
+			requests: Vec<PendingRequest>,
+			faults: Vec<(String, Fault)>,
+			test: impl FnOnce(),
+		) -> Vec<usize> {
+			let (offchain, state) = TestOffchainExt::new();
+			for request in requests {
+				state.write().expect_request(request);
+			}
+			let waits = Arc::new(std::sync::Mutex::new(Vec::new()));
+			let faulty = FaultyHttp {
+				inner: offchain.clone(),
+				uris: Default::default(),
+				faults: faults.into_iter().collect(),
+				waits: waits.clone(),
+			};
+			let mut ext = TestExternalities::default();
+			ext.register_extension(OffchainDbExt::new(offchain));
+			ext.register_extension(OffchainWorkerExt::new(faulty));
+			ext.register_extension(KeystoreExt(Arc::new(MemoryKeystore::new())));
+			ext.execute_with(test);
+			let waits = waits.lock().unwrap().clone();
+			waits
+		}
+
+		fn host_url(host: &str) -> String {
+			format!("http://{}:{}", host, TEST_HTTP_PORT)
+		}
+
+		fn records_url(host: &str, key: [u8; 32], cursor: Option<&[u8]>) -> String {
+			crate::client::records_range_url(
+				&host_url(host),
+				TCA,
+				&key,
+				Some(BUCKET),
+				&RANGE_START,
+				&RANGE_END,
+				cursor,
+				None,
+				None,
+			)
+		}
+
+		fn records_page(ids: &[u8], next_cursor: Option<Vec<u8>>) -> GetRecordsResponse {
+			GetRecordsResponse {
+				records: ids
+					.iter()
+					.map(|id| ActivityRecord { id: vec![*id], ..Default::default() })
+					.collect(),
+				next_cursor,
+			}
+		}
+
+		fn expected_get(uri: &str, response: Vec<u8>) -> PendingRequest {
+			PendingRequest {
+				method: "GET".into(),
+				uri: uri.into(),
+				headers: vec![("Accept".into(), "application/protobuf".into())],
+				response: Some(response),
+				sent: true,
+				..Default::default()
+			}
+		}
+
+		fn planned(url: &str, key: [u8; 32]) -> PrefetchRequest {
+			PrefetchRequest { url: url.into(), node_key: node_key(key) }
+		}
+
+		fn fetch_records(key: [u8; 32], cursor: Option<&[u8]>) -> Result<GetRecordsResponse, ApiError> {
+			fetch_records_range::<AccountId, BlockNumber, MockCluster, MockNodes>(
+				&ClusterId::zero(),
+				TCA,
+				node_key(key),
+				Some(BUCKET),
+				&RANGE_START,
+				&RANGE_END,
+				cursor,
+				None,
+				None,
+			)
+			.map(|response| response.response)
+		}
+
+		fn timeout() -> Duration {
+			Duration::from_millis(RESPONSE_TIMEOUT)
+		}
+
+		#[test]
+		fn each_failure_in_a_round_is_reported_against_its_own_request() {
+			let urls: Vec<String> = (1u8..=6)
+				.map(|i| records_url(if i % 2 == 0 { HOST_B } else { HOST_A }, key_a(), Some(&[i])))
+				.collect();
+			let requests: Vec<PendingRequest> = urls
+				.iter()
+				.enumerate()
+				.map(|(i, url)| {
+					expected_get(url, signed_by(SEED_A, &records_page(&[i as u8], None)))
+				})
+				.collect();
+			let faults = vec![
+				(urls[1].clone(), Fault::Status(503)),
+				(urls[2].clone(), Fault::Io),
+				(urls[3].clone(), Fault::Deadline),
+				(urls[4].clone(), Fault::BodyRead),
+			];
+
+			run_faulty(requests, faults, || {
+				let mut cache = PrefetchCache::new();
+				let outcomes = prefetch_round(
+					&mut cache,
+					urls.iter().map(|url| planned(url, key_a())).collect(),
+					timeout(),
+				);
+
+				let by_url: Vec<(String, Result<(), PrefetchFailure>)> =
+					outcomes.into_iter().map(|(request, outcome)| (request.url, outcome)).collect();
+				assert_eq!(
+					by_url,
+					vec![
+						(urls[0].clone(), Ok(())),
+						(urls[1].clone(), Err(PrefetchFailure::Status(503))),
+						(urls[2].clone(), Err(PrefetchFailure::Io)),
+						(urls[3].clone(), Err(PrefetchFailure::DeadlineReached)),
+						(urls[4].clone(), Err(PrefetchFailure::BodyRead)),
+						(urls[5].clone(), Ok(())),
+					]
+				);
+				for (index, url) in [(0usize, &urls[0]), (5, &urls[5])] {
+					let body = cache.body(url).expect("a successful prefetch is kept");
+					let signed = SignedResponse::decode(body).unwrap();
+					let page = GetRecordsResponse::decode(signed.payload.as_slice()).unwrap();
+					assert_eq!(page.records[0].id, vec![index as u8], "{url} holds its own body");
+				}
+				for url in &urls[1..5] {
+					assert!(!cache.contains(url), "{url} failed and must not be kept");
+				}
+				assert_eq!(
+					cache.stats(),
+					PrefetchStats { requested: 6, fetched: 2, failed: 4, served: 0, missed: 0 }
+				);
+			});
+		}
+
+		#[test]
+		fn a_prefetched_page_is_served_once_through_the_usual_checks() {
+			let url = records_url(HOST_A, key_a(), None);
+			let page = records_page(&[1, 2], None);
+			run_with(vec![expected_get(&url, signed_by(SEED_A, &page))], || {
+				let mut cache = PrefetchCache::new();
+				prefetch_round(&mut cache, vec![planned(&url, key_a())], timeout());
+				let served = serve_prefetched(&mut cache, || fetch_records(key_a(), None));
+				assert_eq!(served, Ok(page.clone()));
+				assert_eq!(cache.stats().served, 1);
+				assert!(!cache.contains(&url));
+			});
+		}
+
+		#[test]
+		fn a_prefetched_page_signed_by_another_node_is_refused() {
+			let url = records_url(HOST_A, key_a(), None);
+			let page = records_page(&[1], None);
+			run_with(vec![expected_get(&url, signed_by(SEED_B, &page))], || {
+				let mut cache = PrefetchCache::new();
+				prefetch_round(&mut cache, vec![planned(&url, key_a())], timeout());
+				let served = serve_prefetched(&mut cache, || fetch_records(key_a(), None));
+				assert!(served.is_err(), "a cached body must pass the signer check");
+				assert_eq!(cache.stats().served, 1);
+			});
+		}
+
+		#[test]
+		fn a_request_that_was_not_prefetched_is_fetched_on_demand() {
+			let prefetched = records_url(HOST_A, key_a(), None);
+			let other = records_url(HOST_A, key_a(), Some(&[7]));
+			let page = records_page(&[3], None);
+			let requests = vec![
+				expected_get(&prefetched, signed_by(SEED_A, &records_page(&[1], None))),
+				expected_get(&other, signed_by(SEED_A, &page)),
+			];
+			run_with(requests, || {
+				let mut cache = PrefetchCache::new();
+				prefetch_round(&mut cache, vec![planned(&prefetched, key_a())], timeout());
+				let fetched = serve_prefetched(&mut cache, || fetch_records(key_a(), Some(&[7])));
+				assert_eq!(fetched, Ok(page.clone()));
+				assert_eq!(cache.stats().served, 0);
+				assert_eq!(cache.stats().missed, 1);
+				assert!(cache.contains(&prefetched));
+			});
+		}
+
+		#[test]
+		fn planned_requests_are_the_requests_the_fetches_make() {
+			let records = records_range_request::<AccountId, BlockNumber, MockCluster, MockNodes>(
+				&ClusterId::zero(),
+				TCA,
+				node_key(key_a()),
+				Some(BUCKET),
+				&RANGE_START,
+				&RANGE_END,
+				None,
+				None,
+				None,
+			)
+			.unwrap();
+			let node_traversal =
+				traversed_node_aggregate_request::<AccountId, BlockNumber, MockCluster, MockNodes>(
+					&ClusterId::zero(),
+					TCA,
+					node_key(key_b()),
+					node_key(key_a()),
+					1,
+					2,
+				)
+				.unwrap();
+			let bucket_traversal = traversed_bucket_sub_aggregate_request::<
+				AccountId,
+				BlockNumber,
+				MockCluster,
+				MockNodes,
+			>(&ClusterId::zero(), TCA, node_key(key_b()), BUCKET, node_key(key_a()), 1, 2)
+			.unwrap();
+			let traversal = proto::activity::ActivityTreeTraversalResponse::default();
+			let requests = vec![
+				expected_get(&records.url, signed_by(SEED_A, &records_page(&[1], None))),
+				expected_get(&node_traversal.url, signed_by(SEED_B, &traversal)),
+				expected_get(&bucket_traversal.url, signed_by(SEED_B, &traversal)),
+			];
+			run_with(requests, || {
+				let mut cache = PrefetchCache::new();
+				prefetch_round(
+					&mut cache,
+					vec![records.clone(), node_traversal.clone(), bucket_traversal.clone()],
+					timeout(),
+				);
+				serve_prefetched(&mut cache, || {
+					assert!(fetch_records(key_a(), None).is_ok());
+					assert!(fetch_traversed_node_aggregate::<
+						AccountId,
+						BlockNumber,
+						MockCluster,
+						MockNodes,
+					>(&ClusterId::zero(), TCA, node_key(key_b()), node_key(key_a()), 1, 2)
+					.is_ok());
+					assert!(fetch_traversed_bucket_sub_aggregate::<
+						AccountId,
+						BlockNumber,
+						MockCluster,
+						MockNodes,
+					>(
+						&ClusterId::zero(), TCA, node_key(key_b()), BUCKET, node_key(key_a()), 1, 2
+					)
+					.is_ok());
+				});
+				assert_eq!(cache.stats().served, 3);
+				assert_eq!(cache.stats().missed, 0);
+			});
+		}
+
+		#[test]
+		fn the_next_cursor_is_read_from_a_prefetched_page_with_records() {
+			let with_next = records_url(HOST_A, key_a(), None);
+			let last = records_url(HOST_A, key_a(), Some(&[9]));
+			let empty = records_url(HOST_A, key_a(), Some(&[8]));
+			let requests = vec![
+				expected_get(&with_next, signed_by(SEED_A, &records_page(&[1], Some(vec![9])))),
+				expected_get(&last, signed_by(SEED_A, &records_page(&[2], None))),
+				expected_get(&empty, signed_by(SEED_A, &records_page(&[], Some(vec![4])))),
+			];
+			run_with(requests, || {
+				let mut cache = PrefetchCache::new();
+				prefetch_round(
+					&mut cache,
+					vec![planned(&with_next, key_a()), planned(&last, key_a()), planned(&empty, key_a())],
+					timeout(),
+				);
+				assert_eq!(prefetched_records_next_cursor(&cache, &with_next), Some(vec![9]));
+				assert_eq!(prefetched_records_next_cursor(&cache, &last), None);
+				assert_eq!(prefetched_records_next_cursor(&cache, &empty), None);
+			});
+		}
+
+		#[test]
+		fn a_round_keeps_at_most_max_in_flight_requests_waiting_together() {
+			let count = MAX_IN_FLIGHT + 1;
+			let urls: Vec<String> =
+				(0..count).map(|i| records_url(HOST_A, key_a(), Some(&(i as u32).to_be_bytes()))).collect();
+			let requests = urls
+				.iter()
+				.map(|url| expected_get(url, signed_by(SEED_A, &records_page(&[1], None))))
+				.collect();
+			let waits = run_faulty(requests, Vec::new(), || {
+				let mut cache = PrefetchCache::new();
+				let mut planned_requests: Vec<PrefetchRequest> =
+					urls.iter().map(|url| planned(url, key_a())).collect();
+				planned_requests.push(planned(&urls[0], key_a()));
+				prefetch_round(&mut cache, planned_requests, timeout());
+				assert_eq!(cache.stats().requested, count as u32, "a duplicate is sent once");
+			});
+			assert_eq!(waits, vec![MAX_IN_FLIGHT, 1]);
+		}
 	}
 }
