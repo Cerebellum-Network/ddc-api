@@ -32,7 +32,7 @@ use crate::{
 /// A usable answer names at least this many registry-confirmed members.
 pub const MEMBER_FLOOR: usize = 2;
 /// Candidates whose answer counts against a discovery; the next tick asks again.
-/// A candidate that answers it holds no sync client does not count.
+/// A candidate that cannot answer by construction (`passes_over`) does not count.
 pub const MAX_DISCOVERY_ATTEMPTS: usize = 3;
 /// Candidates asked per discovery at most, counted or not.
 pub const MAX_DISCOVERY_PROBES: usize = 8;
@@ -119,9 +119,9 @@ fn discover_and_cache<
 
 /// Asks candidates in key order and returns the first usable answer: one that
 /// names at least `MEMBER_FLOOR` validated members and is signed by one of
-/// them. A candidate holding no sync client is passed over without using up
-/// one of the `MAX_DISCOVERY_ATTEMPTS`; at most `MAX_DISCOVERY_PROBES`
-/// candidates are asked in all. `probe` asks one node.
+/// them. A candidate whose refusal means it cannot answer (`passes_over`) is
+/// passed over without using up one of the `MAX_DISCOVERY_ATTEMPTS`; at most
+/// `MAX_DISCOVERY_PROBES` candidates are asked in all. `probe` asks one node.
 pub fn discover<P: FnMut(&NodePubKey, &StorageNodeParams) -> SharedMemoryProbe>(
 	cluster_id: &ClusterId,
 	registry: &[(NodePubKey, StorageNodeParams)],
@@ -177,7 +177,7 @@ pub fn discover<P: FnMut(&NodePubKey, &StorageNodeParams) -> SharedMemoryProbe>(
 					cluster_id,
 					kind
 				);
-				if kind != SharedMemoryAnswerKind::NoClient {
+				if !passes_over(kind) {
 					attempts += 1;
 				}
 				seen.push(kind);
@@ -192,6 +192,14 @@ pub fn discover<P: FnMut(&NodePubKey, &StorageNodeParams) -> SharedMemoryProbe>(
 		seen
 	);
 	Err(ApiError::FailedToFetchSharedMemoryNodes { cluster_id: *cluster_id })
+}
+
+/// Refusals that say the node itself cannot answer, whenever it is asked: it
+/// holds no sync client, or its binary has no such route. `Predates` is not
+/// among them: it also covers any status other than 404 or 503, so a transient
+/// server fault would be passed over as if permanent.
+fn passes_over(kind: SharedMemoryAnswerKind) -> bool {
+	matches!(kind, SharedMemoryAnswerKind::NoClient | SharedMemoryAnswerKind::NoRoute)
 }
 
 /// Keeps the members whose decoded key is a validated storage node of the
@@ -570,6 +578,39 @@ mod tests {
 		});
 		assert!(result.is_err());
 		assert_eq!(asked, MAX_DISCOVERY_PROBES);
+	}
+
+	#[test]
+	fn candidates_without_the_route_do_not_use_up_attempts() {
+		let registry = wide_registry(MAX_DISCOVERY_ATTEMPTS as u8 + 2);
+		let answering = key([MAX_DISCOVERY_ATTEMPTS as u8 + 1; 32]);
+		let mut asked = 0;
+		let result = discover(&ClusterId::zero(), &registry, |candidate, _| {
+			asked += 1;
+			if *candidate == answering {
+				SharedMemoryProbe::Answer {
+					info: info(vec![member([1; 32], "x"), member([2; 32], "x")]),
+					declared_deadline_ms: None,
+					signer: vec![1; 32],
+				}
+			} else {
+				SharedMemoryProbe::Refused(SharedMemoryAnswerKind::NoRoute)
+			}
+		});
+		assert_eq!(asked, MAX_DISCOVERY_ATTEMPTS + 1);
+		assert_eq!(result.map(|nodes| nodes.len()), Ok(2));
+	}
+
+	#[test]
+	fn a_refusal_without_a_known_reason_still_uses_up_an_attempt() {
+		let registry = wide_registry(MAX_DISCOVERY_PROBES as u8);
+		let mut asked = 0;
+		let result = discover(&ClusterId::zero(), &registry, |_, _| {
+			asked += 1;
+			SharedMemoryProbe::Refused(SharedMemoryAnswerKind::Predates)
+		});
+		assert!(result.is_err());
+		assert_eq!(asked, MAX_DISCOVERY_ATTEMPTS);
 	}
 
 	#[test]
