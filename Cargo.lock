@@ -4016,6 +4016,7 @@ dependencies = [
  "blake2 0.10.6",
  "blake3",
  "ddc-primitives",
+ "environmental",
  "hex",
  "log",
  "parity-scale-codec",
