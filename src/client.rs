@@ -29,6 +29,8 @@ const REFUSAL_NOT_A_MEMBER: &str = "not-a-member";
 /// The non-member refusal of a binary older than its `not-a-member` reason.
 const NOT_A_MEMBER_MESSAGE: &str = "Inspection sync is disabled on this node.";
 const HTTP_OK: u16 = 200;
+/// `SignedResponse.payload`.
+const SIGNED_RESPONSE_PAYLOAD_FIELD: u32 = 2;
 const HTTP_NOT_FOUND: u16 = 404;
 /// Most bytes of a partial-aggregate traversal body read: 30 MiB, under the
 /// 32 MiB single allocation with room for the payload copy.
@@ -226,6 +228,63 @@ macro_rules! parse_proto {
 
 		Ok((proto_response, Some(signed_by)))
 	}};
+}
+
+/// A partial-aggregate payload whose envelope checked out, borrowed from the
+/// body it came in. Only `verify_phd_payload` makes one.
+pub struct VerifiedPayload<'a>(&'a [u8]);
+
+impl<'a> VerifiedPayload<'a> {
+	pub fn bytes(&self) -> &'a [u8] {
+		self.0
+	}
+}
+
+/// The payload of a partial-aggregate body, located in place: `body` must be
+/// a `SignedResponse` whose payload `node` signed. It is read as decoding the
+/// whole envelope reads it: the last `payload` occurrence wins, and every
+/// other field is merged or skipped as prost does.
+pub fn verify_phd_payload<'a>(
+	node: &NodePubKey,
+	source: &str,
+	body: &'a [u8],
+) -> Result<VerifiedPayload<'a>, http::Error> {
+	use prost::encoding::{decode_key, decode_varint, DecodeContext, WireType};
+
+	let rejected = |e: &dyn core::fmt::Debug| {
+		log!(error, "❌ Failed to decode SignedResponse protobuf: {:?}", e);
+		http::Error::Unknown
+	};
+	let mut header = proto::signature::SignedResponse::default();
+	let mut payload: &'a [u8] = &[];
+	let mut buf: &'a [u8] = body;
+	while !buf.is_empty() {
+		let (tag, wire_type) = decode_key(&mut buf).map_err(|e| rejected(&e))?;
+		if tag == SIGNED_RESPONSE_PAYLOAD_FIELD {
+			if wire_type != WireType::LengthDelimited {
+				return Err(rejected(&wire_type));
+			}
+			let len = decode_varint(&mut buf).map_err(|e| rejected(&e))?;
+			if len > buf.len() as u64 {
+				return Err(rejected(&"buffer underflow"));
+			}
+			let (field, rest) = buf.split_at(len as usize);
+			payload = field;
+			buf = rest;
+		} else {
+			header
+				.merge_field(tag, wire_type, &mut buf, DecodeContext::default())
+				.map_err(|e| rejected(&e))?;
+		}
+	}
+
+	let signature = header.signature.as_ref();
+	if !signature.is_some_and(|s| crate::verification::verify_signed_payload(s, payload)) {
+		log!(error, "❌ Bad .proto signature, req: {:?}, signature: {:?}", source, signature);
+		return Err(http::Error::Unknown);
+	}
+	signed_by_expected(source, node, signature).map_err(|_| http::Error::Unknown)?;
+	Ok(VerifiedPayload(payload))
 }
 
 /// The traversal a partial-aggregate body carries, accepted only as a valid
@@ -1284,6 +1343,70 @@ fn build_list_url(base: &str, path: &str, cursor: Option<&[u8]>, limit: Option<u
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use polkadot_sdk::sp_core::{ed25519, Pair};
+	use prost::encoding::{encode_key, encode_varint, WireType};
+
+	fn pair() -> ed25519::Pair {
+		ed25519::Pair::from_seed(&[0xc1; 32])
+	}
+
+	fn node() -> NodePubKey {
+		NodePubKey::StoragePubKey(polkadot_sdk::sp_runtime::AccountId32::from(pair().public().0))
+	}
+
+	fn signature(payload: &[u8]) -> proto::signature::Signature {
+		proto::signature::Signature {
+			algorithm: 0,
+			signer: pair().public().0.to_vec(),
+			value: pair().sign(payload).0.to_vec(),
+		}
+	}
+
+	fn field(tag: u32, value: &[u8], out: &mut Vec<u8>) {
+		encode_key(tag, WireType::LengthDelimited, out);
+		encode_varint(value.len() as u64, out);
+		out.extend_from_slice(value);
+	}
+
+	fn envelope(signed: &[u8], payloads: &[&[u8]]) -> Vec<u8> {
+		let mut body = Vec::new();
+		field(1, &signature(signed).encode_to_vec(), &mut body);
+		for payload in payloads {
+			field(2, payload, &mut body);
+		}
+		body
+	}
+
+	#[test]
+	fn a_signed_payload_is_found_in_place() {
+		let body = envelope(b"payload", &[b"payload"]);
+		let verified = verify_phd_payload(&node(), "test", &body).unwrap();
+		assert_eq!(verified.bytes(), b"payload");
+		let start = verified.bytes().as_ptr() as usize - body.as_ptr() as usize;
+		assert!(start < body.len());
+	}
+
+	#[test]
+	fn the_last_payload_is_the_one_verified() {
+		assert!(verify_phd_payload(&node(), "test", &envelope(b"first", &[b"first", b"second"])).is_err());
+		let body = envelope(b"second", &[b"first", b"second"]);
+		assert_eq!(verify_phd_payload(&node(), "test", &body).unwrap().bytes(), b"second");
+	}
+
+	#[test]
+	fn a_payload_with_the_wrong_wire_type_is_refused() {
+		let mut body = Vec::new();
+		field(1, &signature(b"").encode_to_vec(), &mut body);
+		encode_key(2, WireType::Varint, &mut body);
+		encode_varint(5, &mut body);
+		assert!(verify_phd_payload(&node(), "test", &body).is_err());
+	}
+
+	#[test]
+	fn a_payload_signed_by_another_node_is_refused() {
+		let other = NodePubKey::StoragePubKey(polkadot_sdk::sp_runtime::AccountId32::from([9; 32]));
+		assert!(verify_phd_payload(&other, "test", &envelope(b"p", &[b"p"])).is_err());
+	}
 
 	const ALLOCATION_CAP: usize = 33_554_432;
 
