@@ -30,6 +30,47 @@ const REFUSAL_NOT_A_MEMBER: &str = "not-a-member";
 const NOT_A_MEMBER_MESSAGE: &str = "Inspection sync is disabled on this node.";
 const HTTP_OK: u16 = 200;
 const HTTP_NOT_FOUND: u16 = 404;
+/// Most bytes of a partial-aggregate traversal body read: 30 MiB, under the
+/// 32 MiB single allocation with room for the payload copy.
+pub const PHD_BODY_LIMIT: usize = 31_457_280;
+/// Partial-aggregate traversal body size past which the read warns: 28 MiB.
+pub const PHD_BODY_WARN: usize = 29_360_128;
+
+/// Why a partial-aggregate traversal was not returned.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PhdFetchError {
+	Http(http::Error),
+	/// The body ran past `PHD_BODY_LIMIT`; reading stopped there.
+	TooLarge { bytes_read: usize },
+}
+
+impl From<http::Error> for PhdFetchError {
+	fn from(error: http::Error) -> Self {
+		PhdFetchError::Http(error)
+	}
+}
+
+/// Reads a body up to `limit` bytes, calling `on_warn` once when it passes
+/// `warn`. A body longer than `limit` is refused with the bytes read, and the
+/// buffer never grows past `limit`.
+pub(crate) fn read_body_capped(
+	body: impl Iterator<Item = u8>,
+	limit: usize,
+	warn: usize,
+	mut on_warn: impl FnMut(usize),
+) -> Result<Vec<u8>, usize> {
+	let mut bytes = Vec::new();
+	for byte in body {
+		if bytes.len() == limit {
+			return Err(limit + 1);
+		}
+		bytes.push(byte);
+		if bytes.len() == warn + 1 {
+			on_warn(bytes.len());
+		}
+	}
+	Ok(bytes)
+}
 const HTTP_SERVICE_UNAVAILABLE: u16 = 503;
 
 /// What a node said, or failed to say, when asked who the sync members are.
@@ -127,6 +168,15 @@ macro_rules! fetch_and_parse_proto {
 			Some(body) => body,
 			None => $self.get(&$url, Accept::Protobuf, &[])?.body().collect::<Vec<u8>>(),
 		};
+		parse_proto!($self, $url, body, $response_ty)
+	}};
+}
+
+/// parse_proto verifies a fetched proto-envelope body and decodes its payload,
+/// as fetch_and_parse_proto does.
+macro_rules! parse_proto {
+	($self:expr, $url:expr, $body:expr, $response_ty:ty) => {{
+		let body: Vec<u8> = $body;
 
 		let proto_signed_response = proto::signature::SignedResponse::decode(body.as_slice())
 			.map_err(|e| {
@@ -141,7 +191,7 @@ macro_rules! fetch_and_parse_proto {
 				$url,
 				proto_signed_response
 			);
-			return Err(http::Error::Unknown);
+			return Err(http::Error::Unknown.into());
 		}
 		signed_by_expected(&$url, &$self.node, proto_signed_response.signature.as_ref())
 			.map_err(|_| http::Error::Unknown)?;
@@ -512,14 +562,40 @@ impl<'a> DdcClient<'a> {
 		era: EhdEra,
 		tree_node_id: u32,
 		tree_levels_count: u32,
-	) -> Result<ApiResponse<proto::activity_tree::PhdTreeTraversalResponse>, http::Error> {
+	) -> Result<ApiResponse<proto::activity_tree::PhdTreeTraversalResponse>, PhdFetchError> {
 		let mut url = format!(
 			"{}/activity/v1/phds/traverse/{}?merkleTreeNodeId={}&levels={}",
 			self.base_url, era, tree_node_id, tree_levels_count
 		);
 
-		let (response, signed_by) =
-			fetch_and_parse_proto!(self, url, proto::activity_tree::PhdTreeTraversalResponse)?;
+		let body = match crate::prefetch::take_prefetched(&url) {
+			Some(body) => body,
+			None => {
+				let response = self.get(&url, Accept::Protobuf, &[])?;
+				let body = read_body_capped(response.body(), PHD_BODY_LIMIT, PHD_BODY_WARN, |bytes| {
+					log!(
+						warn,
+						"⚠️  Partial aggregate of collector {:?} era {:?} is over {} bytes ({} read so far)",
+						self.node,
+						era,
+						PHD_BODY_WARN,
+						bytes
+					)
+				})
+				.map_err(|bytes_read| PhdFetchError::TooLarge { bytes_read })?;
+				log!(
+					info,
+					"Partial aggregate of collector {:?} era {:?}: {} bytes",
+					self.node,
+					era,
+					body.len()
+				);
+				body
+			},
+		};
+		let parsed: Result<_, http::Error> =
+			parse_proto!(self, url, body, proto::activity_tree::PhdTreeTraversalResponse);
+		let (response, signed_by) = parsed?;
 
 		let api_response = ApiResponse { response, signed_by };
 
@@ -1158,4 +1234,61 @@ fn build_list_url(base: &str, path: &str, cursor: Option<&[u8]>, limit: Option<u
 		url = format!("{}{}limit={}", url, if first { "?" } else { "&" }, l);
 	}
 	url
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	const ALLOCATION_CAP: usize = 33_554_432;
+
+	#[test]
+	fn a_body_one_byte_over_the_limit_is_refused() {
+		let mut warnings = 0;
+		let read = read_body_capped(
+			core::iter::repeat(7u8).take(PHD_BODY_LIMIT + 1),
+			PHD_BODY_LIMIT,
+			PHD_BODY_WARN,
+			|_| warnings += 1,
+		);
+		assert_eq!(read, Err(PHD_BODY_LIMIT + 1));
+		assert_eq!(warnings, 1);
+	}
+
+	#[test]
+	fn a_body_at_the_limit_is_read_without_allocating_past_the_cap() {
+		let body = read_body_capped(
+			core::iter::repeat(7u8).take(PHD_BODY_LIMIT),
+			PHD_BODY_LIMIT,
+			PHD_BODY_WARN,
+			|_| {},
+		)
+		.unwrap();
+		assert_eq!(body.len(), PHD_BODY_LIMIT);
+		assert!(body.capacity() <= ALLOCATION_CAP);
+	}
+
+	#[test]
+	fn a_body_between_the_warning_and_the_limit_is_read_with_one_warning() {
+		let mut warned_at = Vec::new();
+		let body = read_body_capped(
+			core::iter::repeat(7u8).take(PHD_BODY_WARN + 1_000),
+			PHD_BODY_LIMIT,
+			PHD_BODY_WARN,
+			|bytes| warned_at.push(bytes),
+		)
+		.unwrap();
+		assert_eq!(body.len(), PHD_BODY_WARN + 1_000);
+		assert_eq!(warned_at, vec![PHD_BODY_WARN + 1]);
+	}
+
+	#[test]
+	fn a_body_at_the_warning_size_reads_without_a_warning() {
+		let mut warnings = 0;
+		read_body_capped(core::iter::repeat(7u8).take(PHD_BODY_WARN), PHD_BODY_LIMIT, PHD_BODY_WARN, |_| {
+			warnings += 1
+		})
+		.unwrap();
+		assert_eq!(warnings, 0);
+	}
 }

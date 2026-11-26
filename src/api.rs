@@ -15,7 +15,7 @@ use scale_info::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-	client::{DdcClient, ReadBackError},
+	client::{DdcClient, PhdFetchError, ReadBackError},
 	prefetch::{PrefetchCache, PrefetchRequest},
 	proto::{self},
 	read_auth::ReadSigner,
@@ -80,6 +80,13 @@ pub enum ApiError {
 		era: EhdEra,
 		tree_node_id: u32,
 		tree_levels_count: u32,
+	},
+	/// The collector's partial aggregate is over `PHD_BODY_LIMIT`.
+	PhdTooLarge {
+		cluster_id: ClusterId,
+		era: EhdEra,
+		collector: NodePubKey,
+		bytes_read: u64,
 	},
 	FailedToFetchTraversedNodeAggregate {
 		cluster_id: ClusterId,
@@ -620,20 +627,28 @@ pub fn fetch_traversed_partial_historical_document<
         era,
         tree_node_id,
         tree_levels_count,
-    ).map_err(|e| {
-        log!(error,
-            "❌ Collector from cluster {:?} is unavailable while fetching PHD record (proto) or responded with unexpected body. Key: {:?} Host: {:?}, Error: {:?}",
-            cluster_id,
-            collector_key,
-            String::from_utf8_lossy(&collector_params.host),
-            e
-        );
-        ApiError::FailedToFetchTraversedPHD {
+    ).map_err(|e| match e {
+        PhdFetchError::TooLarge { bytes_read } => ApiError::PhdTooLarge {
             cluster_id: *cluster_id,
             era,
-            tree_node_id,
-            tree_levels_count,
-        }
+            collector: collector_key.clone(),
+            bytes_read: bytes_read as u64,
+        },
+        PhdFetchError::Http(e) => {
+            log!(error,
+                "❌ Collector from cluster {:?} is unavailable while fetching PHD record (proto) or responded with unexpected body. Key: {:?} Host: {:?}, Error: {:?}",
+                cluster_id,
+                collector_key,
+                String::from_utf8_lossy(&collector_params.host),
+                e
+            );
+            ApiError::FailedToFetchTraversedPHD {
+                cluster_id: *cluster_id,
+                era,
+                tree_node_id,
+                tree_levels_count,
+            }
+        },
     })?;
 
 	Ok(traversed_phd)
