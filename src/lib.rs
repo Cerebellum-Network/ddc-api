@@ -4,6 +4,7 @@ pub const LOG_TARGET: &str = "ddc-api";
 
 pub mod api;
 pub mod client;
+pub mod cluster_nodes;
 pub mod prefetch;
 pub mod read_auth;
 pub mod shared_memory;

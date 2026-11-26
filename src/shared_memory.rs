@@ -272,6 +272,9 @@ pub fn validated_storage_nodes<
 >(
     cluster_id: &ClusterId,
 ) -> Result<Vec<(NodePubKey, StorageNodeParams)>, ApiError> {
+    if let Some(nodes) = crate::cluster_nodes::from_pass(cluster_id, |nodes| nodes.validated()) {
+        return Ok(nodes);
+    }
     let keys = CM::get_nodes(cluster_id).map_err(|e| {
         log!(
             error,
