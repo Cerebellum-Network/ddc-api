@@ -305,6 +305,9 @@ pub fn get_collectors_nodes<
 >(
 	cluster_id: &ClusterId,
 ) -> Result<Vec<(NodePubKey, StorageNodeParams)>, ApiError> {
+	if let Some(collectors) = crate::cluster_nodes::from_pass(cluster_id, |nodes| nodes.collectors()) {
+		return Ok(collectors);
+	}
 	let mut collectors = Vec::new();
 	let nodes = CM::get_nodes(cluster_id).map_err(|e| {
 		log!(error, "❌ Failed to fetch collectors for cluster {:?}: {:?}", cluster_id, e);
@@ -335,6 +338,12 @@ pub fn get_collector_node<
 	cluster_id: &ClusterId,
 	collector_key: NodePubKey,
 ) -> Result<(NodePubKey, StorageNodeParams), ApiError> {
+	if let Some(node) = crate::cluster_nodes::from_pass(cluster_id, |nodes| nodes.node(&collector_key)) {
+		return node.ok_or(ApiError::FailedToFetchCollector {
+			cluster_id: *cluster_id,
+			node_key: collector_key,
+		});
+	}
 	let mut collectors = Vec::new();
 	let nodes = CM::get_nodes(cluster_id).map_err(|e| {
 		log!(
