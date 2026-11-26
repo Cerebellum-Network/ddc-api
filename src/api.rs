@@ -15,7 +15,7 @@ use scale_info::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-	client::{DdcClient, PhdFetchError, ReadBackError},
+	client::{parse_phd_traversal, DdcClient, PhdFetchError, ReadBackError},
 	prefetch::{PrefetchCache, PrefetchRequest},
 	proto::{self},
 	read_auth::ReadSigner,
@@ -34,6 +34,9 @@ macro_rules! log {
 
 pub const RESPONSE_TIMEOUT: u64 = 20000;
 pub const MAX_RETRIES_COUNT: u32 = 3;
+/// The partial-aggregate traversal that returns a collector's whole root.
+const PHD_ROOT_NODE_ID: u32 = 1;
+const PHD_ROOT_LEVELS: u32 = 1;
 pub const BUCKETS_AGGREGATES_FETCH_BATCH_SIZE: usize = 100;
 
 #[allow(dead_code)]
@@ -1218,7 +1221,7 @@ pub fn get_phd_root<
 	collector: NodePubKey,
 ) -> Result<ApiResponse<proto::activity_tree::PhdTreeTraversedNode>, ApiError> {
 	let api_response = fetch_traversed_partial_historical_document::<AccountId, BlockNumber, CM, NM>(
-		cluster_id, era, collector, 1, 1,
+		cluster_id, era, collector, PHD_ROOT_NODE_ID, PHD_ROOT_LEVELS,
 	)?;
 
 	let first_node = api_response.response.nodes.into_iter().next().ok_or(
@@ -1231,6 +1234,103 @@ pub fn get_phd_root<
 	)?;
 
 	Ok(ApiResponse { response: first_node, signed_by: api_response.signed_by })
+}
+
+/// Reads a collector's partial-aggregate root body into `body`, with the
+/// `PHD_BODY_LIMIT` read limit. `decode_phd_root` turns it into the root.
+pub fn fetch_phd_root_body<
+	AccountId,
+	BlockNumber,
+	CM: ClusterManager<AccountId, BlockNumber>,
+	NM: NodeManager<AccountId>,
+>(
+	cluster_id: &ClusterId,
+	era: EhdEra,
+	collector: NodePubKey,
+	body: &mut Vec<u8>,
+) -> Result<(), ApiError> {
+	let (collector_key, collector_params) =
+		get_collector_node::<AccountId, BlockNumber, CM, NM>(cluster_id, collector)?;
+	let host = str::from_utf8(&collector_params.host).map_err(|e| {
+		log!(
+			error,
+			"❌ Failed to parse collector host for node {:?} in cluster {:?}: {:?}",
+			collector_key,
+			cluster_id,
+			e
+		);
+		ApiError::NodeHostParseError {
+			cluster_id: *cluster_id,
+			node_key: collector_key.clone(),
+			host: collector_params.host.clone(),
+		}
+	})?;
+	let base_url = format!("http://{}:{}", host, collector_params.http_port);
+	let client = DdcClient::new(
+		collector_key.clone(),
+		&base_url,
+		Duration::from_millis(RESPONSE_TIMEOUT),
+		MAX_RETRIES_COUNT,
+	);
+	client
+		.fetch_partial_historical_document_body(era, PHD_ROOT_NODE_ID, PHD_ROOT_LEVELS, body)
+		.map(|_| ())
+		.map_err(|e| match e {
+			PhdFetchError::TooLarge { bytes_read } => ApiError::PhdTooLarge {
+				cluster_id: *cluster_id,
+				era,
+				collector: collector_key.clone(),
+				bytes_read: bytes_read as u64,
+			},
+			PhdFetchError::Http(e) => {
+				log!(
+					error,
+					"❌ Collector from cluster {:?} is unavailable while fetching PHD record (proto) or responded with unexpected body. Key: {:?} Host: {:?}, Error: {:?}",
+					cluster_id,
+					collector_key,
+					String::from_utf8_lossy(&collector_params.host),
+					e
+				);
+				phd_root_unavailable(cluster_id, era)
+			},
+		})
+}
+
+/// The root a collector's partial-aggregate body carries: a valid envelope
+/// signed by that collector, holding at least one node.
+pub fn decode_phd_root(
+	cluster_id: &ClusterId,
+	era: EhdEra,
+	collector: &NodePubKey,
+	body: &[u8],
+) -> Result<ApiResponse<proto::activity_tree::PhdTreeTraversedNode>, ApiError> {
+	let source = format!("PHD root of collector {:?} era {:?}", collector, era);
+	let traversal = parse_phd_traversal(collector, &source, body).map_err(|e| {
+		log!(
+			error,
+			"❌ Collector from cluster {:?} responded with unexpected body for its PHD record (proto). Key: {:?}, Error: {:?}",
+			cluster_id,
+			collector,
+			e
+		);
+		phd_root_unavailable(cluster_id, era)
+	})?;
+	let first_node = traversal
+		.response
+		.nodes
+		.into_iter()
+		.next()
+		.ok_or(phd_root_unavailable(cluster_id, era))?;
+	Ok(ApiResponse { response: first_node, signed_by: traversal.signed_by })
+}
+
+fn phd_root_unavailable(cluster_id: &ClusterId, era: EhdEra) -> ApiError {
+	ApiError::FailedToFetchTraversedPHD {
+		cluster_id: *cluster_id,
+		era,
+		tree_node_id: PHD_ROOT_NODE_ID,
+		tree_levels_count: PHD_ROOT_LEVELS,
+	}
 }
 
 /// Fetch node TCA merkle root node.

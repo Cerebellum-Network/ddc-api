@@ -57,9 +57,23 @@ pub(crate) fn read_body_capped(
 	body: impl Iterator<Item = u8>,
 	limit: usize,
 	warn: usize,
-	mut on_warn: impl FnMut(usize),
+	on_warn: impl FnMut(usize),
 ) -> Result<Vec<u8>, usize> {
 	let mut bytes = Vec::new();
+	read_body_capped_into(body, limit, warn, on_warn, &mut bytes)?;
+	Ok(bytes)
+}
+
+/// `read_body_capped` into `bytes`, which is cleared first and keeps its
+/// capacity, so one buffer serves every read.
+pub(crate) fn read_body_capped_into(
+	body: impl Iterator<Item = u8>,
+	limit: usize,
+	warn: usize,
+	mut on_warn: impl FnMut(usize),
+	bytes: &mut Vec<u8>,
+) -> Result<(), usize> {
+	bytes.clear();
 	for byte in body {
 		if bytes.len() == limit {
 			return Err(limit + 1);
@@ -69,8 +83,9 @@ pub(crate) fn read_body_capped(
 			on_warn(bytes.len());
 		}
 	}
-	Ok(bytes)
+	Ok(())
 }
+
 const HTTP_SERVICE_UNAVAILABLE: u16 = 503;
 
 /// What a node said, or failed to say, when asked who the sync members are.
@@ -168,14 +183,14 @@ macro_rules! fetch_and_parse_proto {
 			Some(body) => body,
 			None => $self.get(&$url, Accept::Protobuf, &[])?.body().collect::<Vec<u8>>(),
 		};
-		parse_proto!($self, $url, body, $response_ty)
+		parse_proto!(&$self.node, $url, body, $response_ty)
 	}};
 }
 
 /// parse_proto verifies a fetched proto-envelope body and decodes its payload,
 /// as fetch_and_parse_proto does.
 macro_rules! parse_proto {
-	($self:expr, $url:expr, $body:expr, $response_ty:ty) => {{
+	($node:expr, $url:expr, $body:expr, $response_ty:ty) => {{
 		let body: Vec<u8> = $body;
 
 		let proto_signed_response = proto::signature::SignedResponse::decode(body.as_slice())
@@ -193,7 +208,7 @@ macro_rules! parse_proto {
 			);
 			return Err(http::Error::Unknown.into());
 		}
-		signed_by_expected(&$url, &$self.node, proto_signed_response.signature.as_ref())
+		signed_by_expected(&$url, $node, proto_signed_response.signature.as_ref())
 			.map_err(|_| http::Error::Unknown)?;
 
 		let proto_response: $response_ty =
@@ -211,6 +226,19 @@ macro_rules! parse_proto {
 
 		Ok((proto_response, Some(signed_by)))
 	}};
+}
+
+/// The traversal a partial-aggregate body carries, accepted only as a valid
+/// envelope signed by `node`.
+pub fn parse_phd_traversal(
+	node: &NodePubKey,
+	url: &str,
+	body: &[u8],
+) -> Result<ApiResponse<proto::activity_tree::PhdTreeTraversalResponse>, http::Error> {
+	let parsed: Result<_, http::Error> =
+		parse_proto!(node, url, body.to_vec(), proto::activity_tree::PhdTreeTraversalResponse);
+	let (response, signed_by) = parsed?;
+	Ok(ApiResponse { response, signed_by })
 }
 
 /// Why a signed response was not accepted.
@@ -563,25 +591,49 @@ impl<'a> DdcClient<'a> {
 		tree_node_id: u32,
 		tree_levels_count: u32,
 	) -> Result<ApiResponse<proto::activity_tree::PhdTreeTraversalResponse>, PhdFetchError> {
-		let mut url = format!(
+		let mut body = Vec::new();
+		let url =
+			self.fetch_partial_historical_document_body(era, tree_node_id, tree_levels_count, &mut body)?;
+		Ok(parse_phd_traversal(&self.node, &url, &body)?)
+	}
+
+	/// The signed body of a partial-aggregate traversal, read with the
+	/// `PHD_BODY_LIMIT` cap into `body`. Returns the URL it was read from.
+	pub fn fetch_partial_historical_document_body(
+		&self,
+		era: EhdEra,
+		tree_node_id: u32,
+		tree_levels_count: u32,
+		body: &mut Vec<u8>,
+	) -> Result<String, PhdFetchError> {
+		let url = format!(
 			"{}/activity/v1/phds/traverse/{}?merkleTreeNodeId={}&levels={}",
 			self.base_url, era, tree_node_id, tree_levels_count
 		);
 
-		let body = match crate::prefetch::take_prefetched(&url) {
-			Some(body) => body,
+		match crate::prefetch::take_prefetched(&url) {
+			Some(prefetched) => {
+				body.clear();
+				body.extend_from_slice(&prefetched);
+			},
 			None => {
 				let response = self.get(&url, Accept::Protobuf, &[])?;
-				let body = read_body_capped(response.body(), PHD_BODY_LIMIT, PHD_BODY_WARN, |bytes| {
-					log!(
-						warn,
-						"⚠️  Partial aggregate of collector {:?} era {:?} is over {} bytes ({} read so far)",
-						self.node,
-						era,
-						PHD_BODY_WARN,
-						bytes
-					)
-				})
+				read_body_capped_into(
+					response.body(),
+					PHD_BODY_LIMIT,
+					PHD_BODY_WARN,
+					|bytes| {
+						log!(
+							warn,
+							"⚠️  Partial aggregate of collector {:?} era {:?} is over {} bytes ({} read so far)",
+							self.node,
+							era,
+							PHD_BODY_WARN,
+							bytes
+						)
+					},
+					body,
+				)
 				.map_err(|bytes_read| PhdFetchError::TooLarge { bytes_read })?;
 				log!(
 					info,
@@ -590,16 +642,9 @@ impl<'a> DdcClient<'a> {
 					era,
 					body.len()
 				);
-				body
 			},
-		};
-		let parsed: Result<_, http::Error> =
-			parse_proto!(self, url, body, proto::activity_tree::PhdTreeTraversalResponse);
-		let (response, signed_by) = parsed?;
-
-		let api_response = ApiResponse { response, signed_by };
-
-		Ok(api_response)
+		}
+		Ok(url)
 	}
 
 	pub fn traverse_node_aggregate(
