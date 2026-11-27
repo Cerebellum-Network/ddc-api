@@ -37,6 +37,9 @@ const HTTP_NOT_FOUND: u16 = 404;
 pub const PHD_BODY_LIMIT: usize = 31_457_280;
 /// Partial-aggregate traversal body size past which the read warns: 28 MiB.
 pub const PHD_BODY_WARN: usize = 29_360_128;
+/// Most bytes of any other response body read: 30 MiB, under the 32 MiB
+/// single allocation.
+pub const PATH_BODY_LIMIT: usize = 31_457_280;
 
 /// Why a partial-aggregate traversal was not returned.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,7 +84,7 @@ pub(crate) fn read_body_capped_into(
 			return Err(limit + 1);
 		}
 		bytes.push(byte);
-		if bytes.len() == warn + 1 {
+		if bytes.len() == warn.saturating_add(1) {
 			on_warn(bytes.len());
 		}
 	}
@@ -183,7 +186,7 @@ macro_rules! fetch_and_parse_proto {
 	($self:expr, $url:expr, $response_ty:ty) => {{
 		let body = match $crate::prefetch::take_prefetched(&$url) {
 			Some(body) => body,
-			None => $self.get(&$url, Accept::Protobuf, &[])?.body().collect::<Vec<u8>>(),
+			None => $crate::client::read_path_body($self.get(&$url, Accept::Protobuf, &[])?.body())?,
 		};
 		parse_proto!(&$self.node, $url, body, $response_ty)
 	}};
@@ -285,6 +288,15 @@ pub fn verify_phd_payload<'a>(
 	}
 	signed_by_expected(source, node, signature).map_err(|_| http::Error::Unknown)?;
 	Ok(VerifiedPayload(payload))
+}
+
+/// A response body read up to `PATH_BODY_LIMIT`. A longer one fails as a body
+/// that could not be read does, and the buffer never grows past the limit.
+pub(crate) fn read_path_body(body: impl Iterator<Item = u8>) -> Result<Vec<u8>, http::Error> {
+	read_body_capped(body, PATH_BODY_LIMIT, usize::MAX, |_| {}).map_err(|bytes_read| {
+		log!(warn, "⚠️  Response body is over the {} byte read limit ({} bytes read)", PATH_BODY_LIMIT, bytes_read);
+		http::Error::Unknown
+	})
 }
 
 /// The traversal a partial-aggregate body carries, accepted only as a valid
@@ -623,7 +635,7 @@ impl<'a> DdcClient<'a> {
 	/// GETs a signed response and returns its payload undecoded, with its signer.
 	fn get_signed_payload(&self, url: &str) -> Result<ApiResponse<Vec<u8>>, http::Error> {
 		let response = self.get(url, Accept::Protobuf, &[])?;
-		let body = response.body().collect::<Vec<u8>>();
+		let body = read_path_body(response.body())?;
 		let signed = proto::signature::SignedResponse::decode(body.as_slice()).map_err(|e| {
 			log!(error, "❌ Failed to decode SignedResponse from {:?}: {:?}", url, e);
 			http::Error::Unknown
@@ -764,7 +776,7 @@ impl<'a> DdcClient<'a> {
 		let body = request.encode_to_vec();
 
 		let response = self.post_proto(&url, body)?;
-		let body = response.body().collect::<Vec<u8>>();
+		let body = read_path_body(response.body())?;
 
 		decode_signed_proto::<proto::inspection::LeaseResult>(&url, &body, &self.node)
 	}
@@ -785,7 +797,7 @@ impl<'a> DdcClient<'a> {
 		);
 
 		let response = self.post_proto(&url, body)?;
-		let body = response.body().collect::<Vec<u8>>();
+		let body = read_path_body(response.body())?;
 
 		decode_signed_proto::<proto::inspection::PostAssignmentTableResponse>(
 			&url, &body, &self.node,
@@ -801,7 +813,7 @@ impl<'a> DdcClient<'a> {
 		let url = self.insp_mem_url(&format!("/itm/v1/table/{}", era));
 
 		let response = self.get(&url, Accept::Protobuf, &signer.headers(ReadRoute::Table, era))?;
-		let body = response.body().collect::<Vec<u8>>();
+		let body = read_path_body(response.body())?;
 
 		decode_signed_proto::<proto::inspection::GetAssignmentTableResponse>(
 			&url, &body, &self.node,
@@ -817,7 +829,7 @@ impl<'a> DdcClient<'a> {
 		let body = request.encode_to_vec();
 
 		let response = self.post_proto(&url, body)?;
-		let body = response.body().collect::<Vec<u8>>();
+		let body = read_path_body(response.body())?;
 
 		decode_signed_proto::<proto::inspection::PostEraNudgeResponse>(&url, &body, &self.node)
 	}
@@ -830,7 +842,7 @@ impl<'a> DdcClient<'a> {
 		let body = request.encode_to_vec();
 
 		let response = self.post_proto(&url, body)?;
-		let body = response.body().collect::<Vec<u8>>();
+		let body = read_path_body(response.body())?;
 
 		decode_signed_proto::<proto::inspection::PostSeedContributionResponse>(
 			&url, &body, &self.node,
@@ -845,7 +857,7 @@ impl<'a> DdcClient<'a> {
 		let body = request.encode_to_vec();
 
 		let response = self.post_proto(&url, body)?;
-		let body = response.body().collect::<Vec<u8>>();
+		let body = read_path_body(response.body())?;
 
 		decode_signed_proto::<proto::inspection::PostInspectionResultResponse>(
 			&url, &body, &self.node,
@@ -861,7 +873,7 @@ impl<'a> DdcClient<'a> {
 		let url = self.insp_mem_url(&format!("/itm/v1/state/{}", era));
 
 		let response = self.get(&url, Accept::Protobuf, &signer.headers(ReadRoute::State, era))?;
-		let body = response.body().collect::<Vec<u8>>();
+		let body = read_path_body(response.body())?;
 
 		decode_signed_proto::<proto::inspection::InspectionState>(&url, &body, &self.node)
 	}
@@ -887,7 +899,7 @@ impl<'a> DdcClient<'a> {
 		};
 
 		let code = response.code;
-		let body = response.body().collect::<Vec<u8>>();
+		let body = read_path_body(response.body()).map_err(|_| ReadBackError::Unavailable)?;
 		if code != HTTP_OK {
 			return Err(if is_not_shared_memory_refusal(code, &body) {
 				ReadBackError::NotSharedMemory
@@ -915,7 +927,7 @@ impl<'a> DdcClient<'a> {
 		let url = self.insp_mem_url(&format!("/itm/v1/receipt/{}", era));
 
 		let response = self.get(&url, Accept::Protobuf, &signer.headers(ReadRoute::Receipt, era))?;
-		let body = response.body().collect::<Vec<u8>>();
+		let body = read_path_body(response.body())?;
 
 		decode_signed_proto_with_payload::<proto::inspection::InspectionReceipt>(
 			&url, &body, &self.node,
@@ -931,7 +943,7 @@ impl<'a> DdcClient<'a> {
 		let url = format!("{}/itm/v1/quorum/{}", self.base_url, era);
 
 		let response = self.get(&url, Accept::Protobuf, &signer.headers(ReadRoute::Quorum, era))?;
-		let body = response.body().collect::<Vec<u8>>();
+		let body = read_path_body(response.body())?;
 
 		let (info, signer) =
 			decode_signed_proto_unbound::<proto::inspection::InspSyncQuorumInfo>(&url, &body)?;
@@ -972,7 +984,9 @@ impl<'a> DdcClient<'a> {
 		let code = response.code;
 		let declared_deadline_ms =
 			response.headers().find(SHARED_MEMORY_DEADLINE_HEADER).and_then(|v| v.parse::<u64>().ok());
-		let body = response.body().collect::<Vec<u8>>();
+		let Ok(body) = read_path_body(response.body()) else {
+			return SharedMemoryProbe::Refused(SharedMemoryAnswerKind::Transport);
+		};
 		if code != HTTP_OK {
 			return SharedMemoryProbe::Refused(classify_shared_memory_refusal(code, &body));
 		}

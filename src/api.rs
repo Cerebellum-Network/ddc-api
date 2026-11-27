@@ -3362,7 +3362,7 @@ mod tests {
 				}
 				assert_eq!(
 					cache.stats(),
-					PrefetchStats { requested: 6, fetched: 2, failed: 4, served: 0, missed: 0 }
+					PrefetchStats { requested: 6, fetched: 2, failed: 4, served: 0, missed: 0, over_budget: 0 }
 				);
 			});
 		}
