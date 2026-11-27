@@ -14,6 +14,7 @@ use scale_info::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::cluster_nodes::PassLookup;
 use crate::{
     client::{DdcClient, ReadBackError},
     prefetch::{PrefetchCache, PrefetchRequest},
@@ -324,10 +325,16 @@ pub fn get_collectors_nodes<
 >(
     cluster_id: &ClusterId,
 ) -> Result<Vec<(NodePubKey, StorageNodeParams)>, ApiError> {
-    if let Some(collectors) =
-        crate::cluster_nodes::from_pass(cluster_id, |nodes| nodes.collectors())
-    {
-        return Ok(collectors);
+    match crate::cluster_nodes::from_pass(cluster_id, "get_collectors_nodes", |nodes| {
+        nodes.collectors()
+    }) {
+        PassLookup::Answered(collectors) => return Ok(collectors),
+        PassLookup::OtherCluster => {
+            return Err(ApiError::FailedToFetchCollectors {
+                cluster_id: *cluster_id,
+            })
+        }
+        PassLookup::NoPass => {}
     }
     let mut collectors = Vec::new();
     let nodes = CM::get_nodes(cluster_id).map_err(|e| {
@@ -366,13 +373,22 @@ pub fn get_collector_node<
     cluster_id: &ClusterId,
     collector_key: NodePubKey,
 ) -> Result<(NodePubKey, StorageNodeParams), ApiError> {
-    if let Some(node) =
-        crate::cluster_nodes::from_pass(cluster_id, |nodes| nodes.node(&collector_key))
-    {
-        return node.ok_or(ApiError::FailedToFetchCollector {
-            cluster_id: *cluster_id,
-            node_key: collector_key,
-        });
+    match crate::cluster_nodes::from_pass(cluster_id, "get_collector_node", |nodes| {
+        nodes.node(&collector_key)
+    }) {
+        PassLookup::Answered(node) => {
+            return node.ok_or(ApiError::FailedToFetchCollector {
+                cluster_id: *cluster_id,
+                node_key: collector_key,
+            })
+        }
+        PassLookup::OtherCluster => {
+            return Err(ApiError::FailedToFetchCollector {
+                cluster_id: *cluster_id,
+                node_key: collector_key,
+            })
+        }
+        PassLookup::NoPass => {}
     }
     let mut collectors = Vec::new();
     let nodes = CM::get_nodes(cluster_id).map_err(|e| {

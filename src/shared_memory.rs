@@ -22,6 +22,7 @@ use polkadot_sdk::sp_runtime::offchain::{
 use polkadot_sdk::sp_std::prelude::*;
 use scale_info::prelude::{format, string::String};
 
+use crate::cluster_nodes::PassLookup;
 use crate::{
     api::ApiError,
     client::{DdcClient, SharedMemoryAnswerKind, SharedMemoryProbe},
@@ -272,8 +273,16 @@ pub fn validated_storage_nodes<
 >(
     cluster_id: &ClusterId,
 ) -> Result<Vec<(NodePubKey, StorageNodeParams)>, ApiError> {
-    if let Some(nodes) = crate::cluster_nodes::from_pass(cluster_id, |nodes| nodes.validated()) {
-        return Ok(nodes);
+    match crate::cluster_nodes::from_pass(cluster_id, "validated_storage_nodes", |nodes| {
+        nodes.validated()
+    }) {
+        PassLookup::Answered(nodes) => return Ok(nodes),
+        PassLookup::OtherCluster => {
+            return Err(ApiError::FailedToFetchSharedMemoryNodes {
+                cluster_id: *cluster_id,
+            })
+        }
+        PassLookup::NoPass => {}
     }
     let keys = CM::get_nodes(cluster_id).map_err(|e| {
         log!(

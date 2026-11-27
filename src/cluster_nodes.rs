@@ -118,13 +118,45 @@ pub fn with_cluster_nodes<R>(nodes: &mut ClusterNodes, f: impl FnOnce() -> R) ->
     pass_nodes::using(nodes, f)
 }
 
+/// How a registry lookup is answered inside or outside a pass.
+pub(crate) enum PassLookup<R> {
+    /// From the enclosing pass's read of this cluster's nodes.
+    Answered(R),
+    /// No pass encloses the lookup; the chain answers it.
+    NoPass,
+    /// A pass over another cluster encloses the lookup. Nothing in a pass asks
+    /// about another cluster, and the chain may no longer answer it.
+    OtherCluster,
+}
+
 /// `lookup` applied to the nodes of `cluster_id` the enclosing
-/// `with_cluster_nodes` holds, if it holds that cluster's.
+/// `with_cluster_nodes` holds. `site` names the caller in the error logged
+/// when the enclosing pass is over another cluster.
 pub(crate) fn from_pass<R>(
     cluster_id: &ClusterId,
+    site: &str,
     lookup: impl FnOnce(&ClusterNodes) -> R,
-) -> Option<R> {
-    pass_nodes::with(|nodes| (nodes.cluster_id == *cluster_id).then(|| lookup(nodes))).flatten()
+) -> PassLookup<R> {
+    match pass_nodes::with(|nodes| {
+        if nodes.cluster_id == *cluster_id {
+            Ok(lookup(nodes))
+        } else {
+            Err(nodes.cluster_id)
+        }
+    }) {
+        Some(Ok(answer)) => PassLookup::Answered(answer),
+        None => PassLookup::NoPass,
+        Some(Err(pass_cluster_id)) => {
+            log!(
+                error,
+                "❌ {} asked about cluster {:?} inside the pass over cluster {:?}",
+                site,
+                cluster_id,
+                pass_cluster_id
+            );
+            PassLookup::OtherCluster
+        }
+    }
 }
 
 #[cfg(test)]
@@ -352,12 +384,37 @@ mod tests {
     }
 
     #[test]
-    fn a_pass_over_another_cluster_leaves_this_cluster_s_lookups_to_the_chain() {
+    fn a_pass_over_another_cluster_fails_this_cluster_s_lookups_without_reading_the_chain() {
+        let cluster_id = cluster(1);
         let mut other = snapshot(&cluster(2));
         let before = chain_reads();
 
-        with_cluster_nodes(&mut other, || lookups(&cluster(1)));
+        let (collectors, node, validated) = with_cluster_nodes(&mut other, || {
+            (
+                get_collectors_nodes::<AccountId, BlockNumber, Chain, Chain>(&cluster_id),
+                get_collector_node::<AccountId, BlockNumber, Chain, Chain>(
+                    &cluster_id,
+                    key(VALIDATED),
+                ),
+                validated_storage_nodes::<AccountId, BlockNumber, Chain, Chain>(&cluster_id),
+            )
+        });
 
-        assert!(chain_reads() > before);
+        assert_eq!(
+            collectors,
+            Err(ApiError::FailedToFetchCollectors { cluster_id })
+        );
+        assert_eq!(
+            node,
+            Err(ApiError::FailedToFetchCollector {
+                cluster_id,
+                node_key: key(VALIDATED)
+            })
+        );
+        assert_eq!(
+            validated,
+            Err(ApiError::FailedToFetchSharedMemoryNodes { cluster_id })
+        );
+        assert_eq!(chain_reads(), before, "no lookup read the chain");
     }
 }
