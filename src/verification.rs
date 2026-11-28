@@ -109,30 +109,34 @@ impl Verify for proto::signature::SignedResponse {
 	type VerificationResult = bool;
 
 	fn verify(&self) -> bool {
-		let signature = match &self.signature {
-			Some(s) => s,
-			None => return false,
-		};
-
-		let sig = match SignatureEd25519::try_from(signature.value.as_slice()) {
-			Ok(s) => s,
-			Err(e) => {
-				log::error!("Failed to parse Ed25519 Signature type {:?}", e);
-				return false;
-			},
-		};
-
-		let pub_key = match PublicEd25519::try_from(signature.signer.as_slice()) {
-			Ok(p) => p,
-			Err(e) => {
-				log::error!("Failed to parse Ed25519 Public key type {:?}", e);
-				return false;
-			},
-		};
-
-		let is_verified = ed25519_verify(&sig, self.payload.as_slice(), &pub_key);
-		is_verified
+		match &self.signature {
+			Some(signature) => verify_signed_payload(signature, self.payload.as_slice()),
+			None => false,
+		}
 	}
+}
+
+/// Whether `signature` is its signer's ed25519 signature of `payload`, as a
+/// `SignedResponse` is checked.
+pub(crate) fn verify_signed_payload(signature: &proto::signature::Signature, payload: &[u8]) -> bool {
+	let sig = match SignatureEd25519::try_from(signature.value.as_slice()) {
+		Ok(s) => s,
+		Err(e) => {
+			log::error!("Failed to parse Ed25519 Signature type {:?}", e);
+			return false;
+		},
+	};
+
+	let pub_key = match PublicEd25519::try_from(signature.signer.as_slice()) {
+		Ok(p) => p,
+		Err(e) => {
+			log::error!("Failed to parse Ed25519 Public key type {:?}", e);
+			return false;
+		},
+	};
+
+	let is_verified = ed25519_verify(&sig, payload, &pub_key);
+	is_verified
 }
 
 trait Signed {

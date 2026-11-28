@@ -20,6 +20,9 @@ use crate::log;
 /// Most requests one round keeps in flight at once; a round with more is sent
 /// in consecutive batches of this size.
 pub const MAX_IN_FLIGHT: usize = 32;
+/// Most bytes of prefetched bodies a cache holds at once: 64 MiB. A body that
+/// would pass it is not kept, and its path fetches it when it runs.
+pub const PREFETCH_CACHE_BUDGET: usize = 64 << 20;
 
 /// A GET to prefetch: the exact URL the fetch code will request, and the node
 /// that serves it, for attribution.
@@ -38,6 +41,8 @@ pub enum PrefetchFailure {
 	Invalid,
 	Status(u16),
 	BodyRead,
+	/// Keeping the body would pass the cache's budget.
+	OverBudget,
 }
 
 /// Counts for one cache's life.
@@ -53,18 +58,47 @@ pub struct PrefetchStats {
 	pub served: u32,
 	/// GETs inside `serve_prefetched` sent on demand.
 	pub missed: u32,
+	/// Bodies that arrived but were not kept, for the cache's budget.
+	pub over_budget: u32,
 }
 
-/// Prefetched response bodies, keyed by the exact URL requested.
-#[derive(Default)]
+/// Prefetched response bodies, keyed by the exact URL requested, holding at
+/// most `budget` bytes at once.
 pub struct PrefetchCache {
 	bodies: BTreeMap<String, Vec<u8>>,
 	stats: PrefetchStats,
+	held: usize,
+	budget: usize,
+}
+
+impl Default for PrefetchCache {
+	fn default() -> Self {
+		Self::with_budget(PREFETCH_CACHE_BUDGET)
+	}
 }
 
 impl PrefetchCache {
 	pub fn new() -> Self {
 		Self::default()
+	}
+
+	pub fn with_budget(budget: usize) -> Self {
+		PrefetchCache { bodies: BTreeMap::new(), stats: PrefetchStats::default(), held: 0, budget }
+	}
+
+	/// Keeps `body` for `url` if it fits the budget; a body that does not is
+	/// refused, and what is already kept stays.
+	fn keep(&mut self, url: String, body: Vec<u8>) -> bool {
+		let held = self.held.saturating_add(body.len());
+		if held > self.budget {
+			self.stats.over_budget += 1;
+			return false;
+		}
+		self.held = held;
+		if let Some(replaced) = self.bodies.insert(url, body) {
+			self.held = self.held.saturating_sub(replaced.len());
+		}
+		true
 	}
 
 	pub fn stats(&self) -> PrefetchStats {
@@ -94,6 +128,9 @@ pub fn serve_prefetched<R>(cache: &mut PrefetchCache, f: impl FnOnce() -> R) -> 
 pub(crate) fn take_prefetched(url: &str) -> Option<Vec<u8>> {
 	active_cache::with(|cache| {
 		let body = cache.bodies.remove(url);
+		if let Some(body) = &body {
+			cache.held = cache.held.saturating_sub(body.len());
+		}
 		if body.is_some() {
 			cache.stats.served += 1;
 		} else {
@@ -149,19 +186,32 @@ pub fn prefetch_round(
 				Ok(Ok(response)) => {
 					let mut body = response.body();
 					body.deadline(deadline);
-					let bytes: Vec<u8> = body.by_ref().collect();
-					if body.error().is_some() {
-						Err(PrefetchFailure::BodyRead)
-					} else {
-						Ok(bytes)
+					let bytes = crate::client::read_body_capped(
+						body.by_ref(),
+						crate::client::PATH_BODY_LIMIT,
+						usize::MAX,
+						|_| {},
+					);
+					match bytes {
+						Ok(bytes) if body.error().is_none() => Ok(bytes),
+						_ => Err(PrefetchFailure::BodyRead),
 					}
 				},
 			};
+			let outcome = outcome.map(|bytes| cache.keep(request.url.clone(), bytes));
 			match outcome {
-				Ok(bytes) => {
+				Ok(true) => {
 					cache.stats.fetched += 1;
-					cache.bodies.insert(request.url.clone(), bytes);
 					outcomes.push((request, Ok(())));
+				},
+				Ok(false) => {
+					log!(
+						warn,
+						"Prefetch of {:?} from node {:?} is over the cache budget; it will be fetched on demand",
+						request.url,
+						request.node_key
+					);
+					outcomes.push((request, Err(PrefetchFailure::OverBudget)));
 				},
 				Err(failure) => outcomes.push(record_failure(cache, request, failure)),
 			}
@@ -184,4 +234,105 @@ fn record_failure(
 		failure
 	);
 	(request, Err(failure))
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::client::{read_path_body, PATH_BODY_LIMIT};
+	use polkadot_sdk::sp_core::offchain::{
+		testing::{PendingRequest, TestOffchainExt},
+		OffchainDbExt, OffchainWorkerExt,
+	};
+	use polkadot_sdk::sp_io::TestExternalities;
+	use polkadot_sdk::sp_runtime::AccountId32;
+
+	const ROUND: usize = 32;
+	const ALLOCATION_CAP: usize = 33_554_432;
+
+	fn url(i: usize) -> String {
+		format!("http://node-{}:8080/activity/v1/records/{}", i % 4, i)
+	}
+
+	/// An honest round: 32 bodies between 1 KB and 85 KB, the largest path
+	/// fetch the testnet sample saw.
+	fn round() -> Vec<(String, Vec<u8>)> {
+		(0..ROUND).map(|i| (url(i), vec![i as u8; 1_000 + (i * 2_711) % 84_000])).collect()
+	}
+
+	fn expected(url: &str, body: &[u8]) -> PendingRequest {
+		PendingRequest {
+			method: "GET".into(),
+			uri: url.into(),
+			headers: vec![("Accept".into(), "application/protobuf".into())],
+			response: Some(body.to_vec()),
+			sent: true,
+			..Default::default()
+		}
+	}
+
+	fn with_responses<R>(responses: &[(String, Vec<u8>)], f: impl FnOnce() -> R) -> R {
+		let (offchain, state) = TestOffchainExt::new();
+		let mut ext = TestExternalities::default();
+		ext.register_extension(OffchainWorkerExt::new(offchain.clone()));
+		ext.register_extension(OffchainDbExt::new(offchain));
+		{
+			let mut state = state.write();
+			for (url, body) in responses {
+				state.expect_request(expected(url, body));
+			}
+		}
+		ext.execute_with(f)
+	}
+
+	fn planned(url: &str) -> PrefetchRequest {
+		PrefetchRequest { url: url.into(), node_key: NodePubKey::StoragePubKey(AccountId32::from([1; 32])) }
+	}
+
+	/// What a cache of `budget` keeps from the round, and what each of the
+	/// round's paths then takes from it.
+	fn run_round(budget: usize) -> (Vec<String>, PrefetchStats, Vec<Option<Vec<u8>>>) {
+		let round = round();
+		with_responses(&round, || {
+			let mut cache = PrefetchCache::with_budget(budget);
+			prefetch_round(&mut cache, round.iter().map(|(u, _)| planned(u)).collect(), Duration::from_millis(5_000));
+			let cached: Vec<String> = round.iter().map(|(u, _)| u.clone()).filter(|u| cache.contains(u)).collect();
+			let taken = serve_prefetched(&mut cache, || round.iter().map(|(u, _)| take_prefetched(u)).collect());
+			(cached, cache.stats(), taken)
+		})
+	}
+
+	#[test]
+	fn the_budget_changes_nothing_in_an_honest_round() {
+		let unbounded = run_round(usize::MAX);
+		let budgeted = run_round(PREFETCH_CACHE_BUDGET);
+		assert_eq!(unbounded.0.len(), ROUND);
+		assert_eq!(budgeted, unbounded);
+	}
+
+	#[test]
+	fn a_round_one_byte_over_the_budget_leaves_only_its_last_body_to_be_fetched_directly() {
+		let round = round();
+		let total: usize = round.iter().map(|(_, body)| body.len()).sum();
+		let (cached, stats, taken) = run_round(total - 1);
+		let (last, last_body) = round.last().unwrap();
+		let expected: Vec<String> = round[..ROUND - 1].iter().map(|(u, _)| u.clone()).collect();
+		assert_eq!(cached, expected);
+		assert_eq!(stats.over_budget, 1);
+		assert_eq!(taken.last(), Some(&None));
+		let direct = with_responses(&[(last.clone(), last_body.clone())], || {
+			let response = http::Request::get(last).add_header("Accept", "application/protobuf").send().unwrap().wait().unwrap();
+			read_path_body(response.body()).unwrap()
+		});
+		assert_eq!(&direct, last_body);
+	}
+
+	#[test]
+	fn a_body_one_byte_over_the_path_limit_fails_as_a_failed_read() {
+		let read = read_path_body(core::iter::repeat(7u8).take(PATH_BODY_LIMIT + 1));
+		assert_eq!(read, Err(http::Error::Unknown));
+		let body = read_path_body(core::iter::repeat(7u8).take(PATH_BODY_LIMIT)).unwrap();
+		assert_eq!(body.len(), PATH_BODY_LIMIT);
+		assert!(body.capacity() <= ALLOCATION_CAP);
+	}
 }

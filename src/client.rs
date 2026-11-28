@@ -29,7 +29,68 @@ const REFUSAL_NOT_A_MEMBER: &str = "not-a-member";
 /// The non-member refusal of a binary older than its `not-a-member` reason.
 const NOT_A_MEMBER_MESSAGE: &str = "Inspection sync is disabled on this node.";
 const HTTP_OK: u16 = 200;
+/// `SignedResponse.payload`.
+const SIGNED_RESPONSE_PAYLOAD_FIELD: u32 = 2;
 const HTTP_NOT_FOUND: u16 = 404;
+/// Most bytes of a partial-aggregate traversal body read: 30 MiB, under the
+/// 32 MiB single allocation with room for the payload copy.
+pub const PHD_BODY_LIMIT: usize = 31_457_280;
+/// Partial-aggregate traversal body size past which the read warns: 28 MiB.
+pub const PHD_BODY_WARN: usize = 29_360_128;
+/// Most bytes of any other response body read: 30 MiB, under the 32 MiB
+/// single allocation.
+pub const PATH_BODY_LIMIT: usize = 31_457_280;
+
+/// Why a partial-aggregate traversal was not returned.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PhdFetchError {
+	Http(http::Error),
+	/// The body ran past `PHD_BODY_LIMIT`; reading stopped there.
+	TooLarge { bytes_read: usize },
+}
+
+impl From<http::Error> for PhdFetchError {
+	fn from(error: http::Error) -> Self {
+		PhdFetchError::Http(error)
+	}
+}
+
+/// Reads a body up to `limit` bytes, calling `on_warn` once when it passes
+/// `warn`. A body longer than `limit` is refused with the bytes read, and the
+/// buffer never grows past `limit`.
+pub(crate) fn read_body_capped(
+	body: impl Iterator<Item = u8>,
+	limit: usize,
+	warn: usize,
+	on_warn: impl FnMut(usize),
+) -> Result<Vec<u8>, usize> {
+	let mut bytes = Vec::new();
+	read_body_capped_into(body, limit, warn, on_warn, &mut bytes)?;
+	Ok(bytes)
+}
+
+/// `read_body_capped` into `bytes`, which is cleared first and keeps its
+/// capacity, so one buffer serves every read.
+pub(crate) fn read_body_capped_into(
+	body: impl Iterator<Item = u8>,
+	limit: usize,
+	warn: usize,
+	mut on_warn: impl FnMut(usize),
+	bytes: &mut Vec<u8>,
+) -> Result<(), usize> {
+	bytes.clear();
+	for byte in body {
+		if bytes.len() == limit {
+			return Err(limit + 1);
+		}
+		bytes.push(byte);
+		if bytes.len() == warn.saturating_add(1) {
+			on_warn(bytes.len());
+		}
+	}
+	Ok(())
+}
+
 const HTTP_SERVICE_UNAVAILABLE: u16 = 503;
 
 /// What a node said, or failed to say, when asked who the sync members are.
@@ -127,6 +188,27 @@ macro_rules! fetch_and_parse_proto {
 			Some(body) => body,
 			None => $self.get(&$url, Accept::Protobuf, &[])?.body().collect::<Vec<u8>>(),
 		};
+		parse_proto!(&$self.node, $url, body, $response_ty)
+	}};
+}
+
+/// fetch_and_parse_proto for a path-execution read: the body is read up to
+/// `PATH_BODY_LIMIT`.
+macro_rules! fetch_and_parse_path_proto {
+	($self:expr, $url:expr, $response_ty:ty) => {{
+		let body = match $crate::prefetch::take_prefetched(&$url) {
+			Some(body) => body,
+			None => $crate::client::read_path_body($self.get(&$url, Accept::Protobuf, &[])?.body())?,
+		};
+		parse_proto!(&$self.node, $url, body, $response_ty)
+	}};
+}
+
+/// parse_proto verifies a fetched proto-envelope body and decodes its payload,
+/// as fetch_and_parse_proto does.
+macro_rules! parse_proto {
+	($node:expr, $url:expr, $body:expr, $response_ty:ty) => {{
+		let body: Vec<u8> = $body;
 
 		let proto_signed_response = proto::signature::SignedResponse::decode(body.as_slice())
 			.map_err(|e| {
@@ -141,9 +223,9 @@ macro_rules! fetch_and_parse_proto {
 				$url,
 				proto_signed_response
 			);
-			return Err(http::Error::Unknown);
+			return Err(http::Error::Unknown.into());
 		}
-		signed_by_expected(&$url, &$self.node, proto_signed_response.signature.as_ref())
+		signed_by_expected(&$url, $node, proto_signed_response.signature.as_ref())
 			.map_err(|_| http::Error::Unknown)?;
 
 		let proto_response: $response_ty =
@@ -161,6 +243,85 @@ macro_rules! fetch_and_parse_proto {
 
 		Ok((proto_response, Some(signed_by)))
 	}};
+}
+
+/// A partial-aggregate payload whose envelope checked out, borrowed from the
+/// body it came in. Only `verify_phd_payload` makes one.
+pub struct VerifiedPayload<'a>(&'a [u8]);
+
+impl<'a> VerifiedPayload<'a> {
+	pub fn bytes(&self) -> &'a [u8] {
+		self.0
+	}
+}
+
+/// The payload of a partial-aggregate body, located in place: `body` must be
+/// a `SignedResponse` whose payload `node` signed. It is read as decoding the
+/// whole envelope reads it: the last `payload` occurrence wins, and every
+/// other field is merged or skipped as prost does.
+pub fn verify_phd_payload<'a>(
+	node: &NodePubKey,
+	source: &str,
+	body: &'a [u8],
+) -> Result<VerifiedPayload<'a>, http::Error> {
+	use prost::encoding::{decode_key, decode_varint, DecodeContext, WireType};
+
+	let rejected = |e: &dyn core::fmt::Debug| {
+		log!(error, "❌ Failed to decode SignedResponse protobuf: {:?}", e);
+		http::Error::Unknown
+	};
+	let mut header = proto::signature::SignedResponse::default();
+	let mut payload: &'a [u8] = &[];
+	let mut buf: &'a [u8] = body;
+	while !buf.is_empty() {
+		let (tag, wire_type) = decode_key(&mut buf).map_err(|e| rejected(&e))?;
+		if tag == SIGNED_RESPONSE_PAYLOAD_FIELD {
+			if wire_type != WireType::LengthDelimited {
+				return Err(rejected(&wire_type));
+			}
+			let len = decode_varint(&mut buf).map_err(|e| rejected(&e))?;
+			if len > buf.len() as u64 {
+				return Err(rejected(&"buffer underflow"));
+			}
+			let (field, rest) = buf.split_at(len as usize);
+			payload = field;
+			buf = rest;
+		} else {
+			header
+				.merge_field(tag, wire_type, &mut buf, DecodeContext::default())
+				.map_err(|e| rejected(&e))?;
+		}
+	}
+
+	let signature = header.signature.as_ref();
+	if !signature.is_some_and(|s| crate::verification::verify_signed_payload(s, payload)) {
+		log!(error, "❌ Bad .proto signature, req: {:?}, signature: {:?}", source, signature);
+		return Err(http::Error::Unknown);
+	}
+	signed_by_expected(source, node, signature).map_err(|_| http::Error::Unknown)?;
+	Ok(VerifiedPayload(payload))
+}
+
+/// A response body read up to `PATH_BODY_LIMIT`. A longer one fails as a body
+/// that could not be read does, and the buffer never grows past the limit.
+pub(crate) fn read_path_body(body: impl Iterator<Item = u8>) -> Result<Vec<u8>, http::Error> {
+	read_body_capped(body, PATH_BODY_LIMIT, usize::MAX, |_| {}).map_err(|bytes_read| {
+		log!(warn, "⚠️  Response body is over the {} byte read limit ({} bytes read)", PATH_BODY_LIMIT, bytes_read);
+		http::Error::Unknown
+	})
+}
+
+/// The traversal a partial-aggregate body carries, accepted only as a valid
+/// envelope signed by `node`.
+pub fn parse_phd_traversal(
+	node: &NodePubKey,
+	url: &str,
+	body: &[u8],
+) -> Result<ApiResponse<proto::activity_tree::PhdTreeTraversalResponse>, http::Error> {
+	let parsed: Result<_, http::Error> =
+		parse_proto!(node, url, body.to_vec(), proto::activity_tree::PhdTreeTraversalResponse);
+	let (response, signed_by) = parsed?;
+	Ok(ApiResponse { response, signed_by })
 }
 
 /// Why a signed response was not accepted.
@@ -443,7 +604,7 @@ impl<'a> DdcClient<'a> {
 		);
 
 		let (response, signed_by) =
-			fetch_and_parse_proto!(self, url, proto::activity::GetRecordsResponse)?;
+			fetch_and_parse_path_proto!(self, url, proto::activity::GetRecordsResponse)?;
 
 		Ok(ApiResponse { response, signed_by })
 	}
@@ -512,18 +673,61 @@ impl<'a> DdcClient<'a> {
 		era: EhdEra,
 		tree_node_id: u32,
 		tree_levels_count: u32,
-	) -> Result<ApiResponse<proto::activity_tree::PhdTreeTraversalResponse>, http::Error> {
-		let mut url = format!(
+	) -> Result<ApiResponse<proto::activity_tree::PhdTreeTraversalResponse>, PhdFetchError> {
+		let mut body = Vec::new();
+		let url =
+			self.fetch_partial_historical_document_body(era, tree_node_id, tree_levels_count, &mut body)?;
+		Ok(parse_phd_traversal(&self.node, &url, &body)?)
+	}
+
+	/// The signed body of a partial-aggregate traversal, read with the
+	/// `PHD_BODY_LIMIT` cap into `body`. Returns the URL it was read from.
+	pub fn fetch_partial_historical_document_body(
+		&self,
+		era: EhdEra,
+		tree_node_id: u32,
+		tree_levels_count: u32,
+		body: &mut Vec<u8>,
+	) -> Result<String, PhdFetchError> {
+		let url = format!(
 			"{}/activity/v1/phds/traverse/{}?merkleTreeNodeId={}&levels={}",
 			self.base_url, era, tree_node_id, tree_levels_count
 		);
 
-		let (response, signed_by) =
-			fetch_and_parse_proto!(self, url, proto::activity_tree::PhdTreeTraversalResponse)?;
-
-		let api_response = ApiResponse { response, signed_by };
-
-		Ok(api_response)
+		match crate::prefetch::take_prefetched(&url) {
+			Some(prefetched) => {
+				body.clear();
+				body.extend_from_slice(&prefetched);
+			},
+			None => {
+				let response = self.get(&url, Accept::Protobuf, &[])?;
+				read_body_capped_into(
+					response.body(),
+					PHD_BODY_LIMIT,
+					PHD_BODY_WARN,
+					|bytes| {
+						log!(
+							warn,
+							"⚠️  Partial aggregate of collector {:?} era {:?} is over {} bytes ({} read so far)",
+							self.node,
+							era,
+							PHD_BODY_WARN,
+							bytes
+						)
+					},
+					body,
+				)
+				.map_err(|bytes_read| PhdFetchError::TooLarge { bytes_read })?;
+				log!(
+					info,
+					"Partial aggregate of collector {:?} era {:?}: {} bytes",
+					self.node,
+					era,
+					body.len()
+				);
+			},
+		}
+		Ok(url)
 	}
 
 	pub fn traverse_node_aggregate(
@@ -537,7 +741,7 @@ impl<'a> DdcClient<'a> {
 			node_aggregate_traversal_url(self.base_url, tca_id, node_key, merkle_tree_node_id, levels);
 
 		let (response, signed_by) =
-			fetch_and_parse_proto!(self, url, proto::activity::ActivityTreeTraversalResponse)?;
+			fetch_and_parse_path_proto!(self, url, proto::activity::ActivityTreeTraversalResponse)?;
 
 		let api_response = ApiResponse { response, signed_by };
 
@@ -562,7 +766,7 @@ impl<'a> DdcClient<'a> {
 		);
 
 		let (response, signed_by) =
-			fetch_and_parse_proto!(self, url, proto::activity::ActivityTreeTraversalResponse)?;
+			fetch_and_parse_path_proto!(self, url, proto::activity::ActivityTreeTraversalResponse)?;
 
 		let api_response = ApiResponse { response, signed_by };
 
@@ -1158,4 +1362,125 @@ fn build_list_url(base: &str, path: &str, cursor: Option<&[u8]>, limit: Option<u
 		url = format!("{}{}limit={}", url, if first { "?" } else { "&" }, l);
 	}
 	url
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use polkadot_sdk::sp_core::{ed25519, Pair};
+	use prost::encoding::{encode_key, encode_varint, WireType};
+
+	fn pair() -> ed25519::Pair {
+		ed25519::Pair::from_seed(&[0xc1; 32])
+	}
+
+	fn node() -> NodePubKey {
+		NodePubKey::StoragePubKey(polkadot_sdk::sp_runtime::AccountId32::from(pair().public().0))
+	}
+
+	fn signature(payload: &[u8]) -> proto::signature::Signature {
+		proto::signature::Signature {
+			algorithm: 0,
+			signer: pair().public().0.to_vec(),
+			value: pair().sign(payload).0.to_vec(),
+		}
+	}
+
+	fn field(tag: u32, value: &[u8], out: &mut Vec<u8>) {
+		encode_key(tag, WireType::LengthDelimited, out);
+		encode_varint(value.len() as u64, out);
+		out.extend_from_slice(value);
+	}
+
+	fn envelope(signed: &[u8], payloads: &[&[u8]]) -> Vec<u8> {
+		let mut body = Vec::new();
+		field(1, &signature(signed).encode_to_vec(), &mut body);
+		for payload in payloads {
+			field(2, payload, &mut body);
+		}
+		body
+	}
+
+	#[test]
+	fn a_signed_payload_is_found_in_place() {
+		let body = envelope(b"payload", &[b"payload"]);
+		let verified = verify_phd_payload(&node(), "test", &body).unwrap();
+		assert_eq!(verified.bytes(), b"payload");
+		let start = verified.bytes().as_ptr() as usize - body.as_ptr() as usize;
+		assert!(start < body.len());
+	}
+
+	#[test]
+	fn the_last_payload_is_the_one_verified() {
+		assert!(verify_phd_payload(&node(), "test", &envelope(b"first", &[b"first", b"second"])).is_err());
+		let body = envelope(b"second", &[b"first", b"second"]);
+		assert_eq!(verify_phd_payload(&node(), "test", &body).unwrap().bytes(), b"second");
+	}
+
+	#[test]
+	fn a_payload_with_the_wrong_wire_type_is_refused() {
+		let mut body = Vec::new();
+		field(1, &signature(b"").encode_to_vec(), &mut body);
+		encode_key(2, WireType::Varint, &mut body);
+		encode_varint(5, &mut body);
+		assert!(verify_phd_payload(&node(), "test", &body).is_err());
+	}
+
+	#[test]
+	fn a_payload_signed_by_another_node_is_refused() {
+		let other = NodePubKey::StoragePubKey(polkadot_sdk::sp_runtime::AccountId32::from([9; 32]));
+		assert!(verify_phd_payload(&other, "test", &envelope(b"p", &[b"p"])).is_err());
+	}
+
+	const ALLOCATION_CAP: usize = 33_554_432;
+
+	#[test]
+	fn a_body_one_byte_over_the_limit_is_refused() {
+		let mut warnings = 0;
+		let read = read_body_capped(
+			core::iter::repeat(7u8).take(PHD_BODY_LIMIT + 1),
+			PHD_BODY_LIMIT,
+			PHD_BODY_WARN,
+			|_| warnings += 1,
+		);
+		assert_eq!(read, Err(PHD_BODY_LIMIT + 1));
+		assert_eq!(warnings, 1);
+	}
+
+	#[test]
+	fn a_body_at_the_limit_is_read_without_allocating_past_the_cap() {
+		let body = read_body_capped(
+			core::iter::repeat(7u8).take(PHD_BODY_LIMIT),
+			PHD_BODY_LIMIT,
+			PHD_BODY_WARN,
+			|_| {},
+		)
+		.unwrap();
+		assert_eq!(body.len(), PHD_BODY_LIMIT);
+		assert!(body.capacity() <= ALLOCATION_CAP);
+	}
+
+	#[test]
+	fn a_body_between_the_warning_and_the_limit_is_read_with_one_warning() {
+		let mut warned_at = Vec::new();
+		let body = read_body_capped(
+			core::iter::repeat(7u8).take(PHD_BODY_WARN + 1_000),
+			PHD_BODY_LIMIT,
+			PHD_BODY_WARN,
+			|bytes| warned_at.push(bytes),
+		)
+		.unwrap();
+		assert_eq!(body.len(), PHD_BODY_WARN + 1_000);
+		assert_eq!(warned_at, vec![PHD_BODY_WARN + 1]);
+	}
+
+	#[test]
+	fn a_body_at_the_warning_size_reads_without_a_warning() {
+		let mut warnings = 0;
+		read_body_capped(core::iter::repeat(7u8).take(PHD_BODY_WARN), PHD_BODY_LIMIT, PHD_BODY_WARN, |_| {
+			warnings += 1
+		})
+		.unwrap();
+		assert_eq!(warnings, 0);
+	}
 }
